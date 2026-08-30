@@ -8,6 +8,7 @@ use App\Models\RiskResult;
 use App\Models\Student;
 use App\Services\DashboardAnalyticsService;
 use App\Services\InterventionRecommender;
+use App\Services\ProgressMonitoringService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -26,7 +27,8 @@ class InterventionController extends Controller
 {
     public function __construct(
         private DashboardAnalyticsService $analytics = new DashboardAnalyticsService(),
-        private InterventionRecommender $recommender = new InterventionRecommender()
+        private InterventionRecommender $recommender = new InterventionRecommender(),
+        private ProgressMonitoringService $progress = new ProgressMonitoringService()
     ) {
     }
 
@@ -44,6 +46,9 @@ class InterventionController extends Controller
         $rows = collect($atRiskStudents)->map(function ($row) use ($existingByStudentId) {
             $row['recommendation'] = $this->recommender->recommend($row);
             $row['existing_intervention'] = $existingByStudentId->get($row['student_id']);
+            $row['progress'] = $row['existing_intervention']
+                ? $this->progress->compare($row['existing_intervention'])
+                : null;
             return $row;
         });
 

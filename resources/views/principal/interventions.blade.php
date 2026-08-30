@@ -28,6 +28,7 @@
         'approved' => 'bg-blue-100 text-blue-700', 'in_progress' => 'bg-purple-100 text-purple-700',
         'completed' => 'bg-green-100 text-green-700', 'monitoring' => 'bg-orange-100 text-orange-700',
     ];
+    $componentLabels = ['written_work' => 'Written Work', 'performance_task' => 'Performance Task', 'examination' => 'Examination'];
 @endphp
 
 <div class="bg-white rounded-xl shadow-sm overflow-x-auto">
@@ -71,6 +72,22 @@
                             {{ $statusLabels[$iv->status] ?? $iv->status }}
                         </span>
                         <span class="block text-xs text-gray-500 mt-1">{{ $typeLabels[$iv->recommended_type] ?? $iv->recommended_type }}</span>
+
+                        @if($row['progress'])
+                            @php $p = $row['progress']; @endphp
+                            <div class="text-xs text-gray-500 mt-2 bg-gray-50 rounded-md px-2 py-1.5">
+                                <span class="font-medium text-gray-600">{{ $componentLabels[$p['component']] ?? $p['component'] }}:</span>
+                                Term {{ $p['before_period'] }} was {{ number_format($p['before_percentage'], 1) }}%
+                                @if($p['after_percentage'] !== null)
+                                    , Term {{ $p['after_period'] }} is {{ number_format($p['after_percentage'], 1) }}%.
+                                    <span class="{{ $p['change'] > 0 ? 'text-green-600' : ($p['change'] < 0 ? 'text-red-500' : 'text-gray-500') }} font-medium">
+                                        Change: {{ $p['change'] >= 0 ? '+' : '' }}{{ number_format($p['change'], 1) }} points.
+                                    </span>
+                                @else
+                                    — no Term {{ $p['before_period'] + 1 }} evidence yet to compare against.
+                                @endif
+                            </div>
+                        @endif
 
                         <form method="POST" action="{{ route('principal.interventions.update', $iv->id) }}" class="flex items-end gap-2 mt-2">
                             @csrf

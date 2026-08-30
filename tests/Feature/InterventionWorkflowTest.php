@@ -2,10 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Models\Assessment;
+use App\Models\AssessmentScore;
 use App\Models\Intervention;
 use App\Models\RiskResult;
 use App\Models\Section;
 use App\Models\Student;
+use App\Models\Subject;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -102,6 +105,54 @@ class InterventionWorkflowTest extends TestCase
     public function test_guest_is_redirected_from_intervention_routes(): void
     {
         $this->get('/principal/interventions')->assertRedirect(route('login'));
+    }
+
+    public function test_interventions_page_shows_the_before_after_change_for_an_existing_intervention(): void
+    {
+        $principal = User::factory()->principal()->create();
+        $section   = Section::factory()->create(['school_year' => '2026-2027']);
+        $student   = Student::factory()->create(['section_id' => $section->id]);
+        $subject   = Subject::factory()->create();
+
+        foreach ([1 => 60, 2 => 78] as $term => $earned) {
+            $assessment = Assessment::factory()->create([
+                'subject_id' => $subject->id, 'section_id' => $section->id,
+                'grading_period' => $term, 'school_year' => '2026-2027',
+                'name' => 'PT-' . $term, 'component' => 'performance_task', 'max_score' => 100,
+            ]);
+            AssessmentScore::factory()->create(['assessment_id' => $assessment->id, 'student_id' => $student->id, 'score' => $earned]);
+
+            // Fill the other two components so this component is the
+            // clearly identifiable weakest one at term 1 (baseline).
+            foreach (['written_work', 'examination'] as $other) {
+                $a = Assessment::factory()->create([
+                    'subject_id' => $subject->id, 'section_id' => $section->id,
+                    'grading_period' => $term, 'school_year' => '2026-2027',
+                    'name' => $other . '-' . $term, 'component' => $other, 'max_score' => 100,
+                ]);
+                AssessmentScore::factory()->create(['assessment_id' => $a->id, 'student_id' => $student->id, 'score' => 90]);
+            }
+        }
+
+        $riskResult = RiskResult::create([
+            'student_id' => $student->id, 'grading_period' => 1, 'average_grade' => 70,
+            'risk_level' => 'moderate', 'school_year' => '2026-2027',
+            'weakest_subject' => $subject->name, 'weakest_subject_id' => $subject->id,
+            'weakest_subject_grade' => 70, 'generated_at' => now(),
+        ]);
+
+        Intervention::factory()->create([
+            'student_id' => $student->id, 'subject_id' => $subject->id, 'risk_result_id' => $riskResult->id,
+            'status' => 'in_progress',
+        ]);
+
+        $response = $this->actingAs($principal)->get('/principal/interventions');
+
+        $response->assertOk();
+        $response->assertSee('Change: +18.0 points.');
+        // Neutral language only — never a causal claim.
+        $response->assertDontSee('caused');
+        $response->assertDontSee('improved because');
     }
 
     public function test_an_invalid_intervention_type_is_rejected(): void
