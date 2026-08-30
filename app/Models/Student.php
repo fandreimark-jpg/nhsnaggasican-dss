@@ -71,6 +71,12 @@ class Student extends Model
         return $this->hasMany(Grade::class);
     }
 
+    /** A student has many individual assessment scores (evidence, not the official grade) */
+    public function assessmentScores()
+    {
+        return $this->hasMany(AssessmentScore::class);
+    }
+
     /** A student has many risk classification results */
     public function riskResults()
     {

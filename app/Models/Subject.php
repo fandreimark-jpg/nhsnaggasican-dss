@@ -59,6 +59,12 @@ class Subject extends Model
         return $this->hasMany(Grade::class);
     }
 
+    /** Subject has many individual assessment items (evidence, not the official grade) */
+    public function assessments()
+    {
+        return $this->hasMany(Assessment::class);
+    }
+
     /**
      * Get the subjects applicable to a given section — core subjects for
      * that grade level, plus elective subjects matching the section's

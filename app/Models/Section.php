@@ -62,6 +62,12 @@ class Section extends Model
         return $this->hasMany(ReportSubmission::class);
     }
 
+    /** Section has many assessment items (Quiz 1, Performance Task 1, etc.) */
+    public function assessments()
+    {
+        return $this->hasMany(Assessment::class);
+    }
+
     /**
      * The school year currently in use system-wide — the most recently
      * created section's school_year, or a fresh default if none exist yet.
