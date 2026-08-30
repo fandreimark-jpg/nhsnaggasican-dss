@@ -107,7 +107,7 @@ class ReportController extends Controller
      * Checks if all grades are complete, then runs Python risk classification.
      * Records the submission and logs the action.
      */
-    public function submit(Request $request)
+   public function submit(Request $request)
     {
         $section = Section::where('adviser_id', auth()->id())->firstOrFail();
 
@@ -120,7 +120,6 @@ class ReportController extends Controller
         $students      = Student::where('section_id', $section->id)->get();
         $totalExpected = $students->count() * $subjects->count();
 
-        // Check if all grades are encoded before allowing submission
         $encoded = Grade::where('section_id', $section->id)
             ->where('grading_period', $gradingPeriod)
             ->where('school_year', $section->school_year)
@@ -133,27 +132,52 @@ class ReportController extends Controller
             );
         }
 
-        // Load grades for this term — grouped by student for easy averaging
+        // Load grades WITH subject relationship — needed to identify the
+        // weakest subject per student (lowest grade), not just the average.
         $termGrades = Grade::where('section_id', $section->id)
             ->where('grading_period', $gradingPeriod)
             ->where('school_year', $section->school_year)
+            ->with('subject')
             ->get()
             ->groupBy('student_id');
 
-        // Build the data payload for the Python classifier
-        // Format: [{ student_id: X, average_grade: Y.YY }, ...]
         $gradesData = $students->map(function ($student) use ($termGrades) {
             $studentGrades = $termGrades->get($student->id, collect());
             $avg = $studentGrades->count() > 0
                 ? round($studentGrades->avg('grade'), 2)
                 : 0;
-            return ['student_id' => $student->id, 'average_grade' => $avg];
+
+            // Find the subject with the LOWEST grade for this student —
+            // this becomes the specific "focus area" for intervention.
+            $weakest = $studentGrades->sortBy('grade')->first();
+
+            // Count how many subjects this student failed (below 75) —
+            // used later as a rule-based override so a high overall average
+            // can't mask a real failing subject (e.g. grades 100,100,100,60
+            // average to 90, which would otherwise read as "Low Risk").
+            $failingGrades = $studentGrades->where('grade', '<', 75)->sortBy('grade');
+            $failingCount  = $failingGrades->count();
+
+            // Full list of ALL failing subjects (not just the weakest one) —
+            // a student can fail 2+ subjects and the adviser needs to see
+            // every one of them, not only the single lowest grade.
+            $failingSubjects = $failingGrades->map(fn($g) => [
+                'name'  => $g->subject?->name,
+                'grade' => $g->grade,
+            ])->values()->toArray();
+
+            return [
+                'student_id'            => $student->id,
+                'average_grade'         => $avg,
+                'weakest_subject'       => $weakest?->subject?->name,
+                'weakest_subject_grade' => $weakest?->grade,
+                'failing_count'         => $failingCount,
+                'failing_subjects'      => $failingSubjects,
+            ];
         })->toArray();
 
-        // Run the Python Random Forest classifier
         $this->runAnalytics($gradesData, $section, $gradingPeriod);
 
-        // Record the submission — updateOrCreate for re-submissions
         ReportSubmission::updateOrCreate(
             [
                 'section_id'     => $section->id,
@@ -167,7 +191,6 @@ class ReportController extends Controller
             ]
         );
 
-        // Different log label for first submission vs re-submission
         $action = $request->resubmit ? 'resubmit_report' : 'submit_report';
         $label  = $request->resubmit ? 'Re-submitted' : 'Submitted';
 
@@ -196,16 +219,20 @@ class ReportController extends Controller
      * because Process facade causes WinError 10106 on Windows
      * when scikit-learn (joblib/asyncio) is involved.
      */
-    private function runAnalytics(array $gradesData, Section $section, int $gradingPeriod): void
+   private function runAnalytics(array $gradesData, Section $section, int $gradingPeriod): void
     {
-        // Use section ID in filename to prevent conflicts if multiple advisers submit simultaneously
         $tempFile   = storage_path('app/temp_grades_' . $section->id . '.json');
         $outputFile = storage_path('app/temp_results_' . $section->id . '.json');
 
-        // Write input data for Python
-        file_put_contents($tempFile, json_encode($gradesData));
+        // Python only needs student_id + average_grade for classification —
+        // strip out the extra fields before sending.
+        $pythonPayload = array_map(fn($s) => [
+            'student_id'    => $s['student_id'],
+            'average_grade' => $s['average_grade'],
+        ], $gradesData);
 
-        // Python path from .env — not hardcoded to support different environments
+        file_put_contents($tempFile, json_encode($pythonPayload));
+
         $pythonPath = env('PYTHON_PATH', 'python');
         $scriptPath = base_path('analytics' . DIRECTORY_SEPARATOR . 'classify.py');
 
@@ -215,7 +242,6 @@ class ReportController extends Controller
 
         exec($command, $execOutput, $exitCode);
 
-        // If Python failed or output file missing — log and return
         if ($exitCode !== 0 || !file_exists($outputFile)) {
             \Log::error('Analytics failed (exit: ' . $exitCode . '). Output: ' . implode("\n", $execOutput));
             @unlink($tempFile);
@@ -223,8 +249,6 @@ class ReportController extends Controller
         }
 
         $raw = file_get_contents($outputFile);
-
-        // Clean up temp files after reading
         @unlink($tempFile);
         @unlink($outputFile);
 
@@ -235,9 +259,19 @@ class ReportController extends Controller
             return;
         }
 
-        // Save each student's risk result to the database
-        // updateOrCreate — handles re-submissions by updating existing records
+        // Keyed lookup so we can merge back the weakest-subject data
+        // (which never left PHP) with the ML classification results.
+        $extraDataByStudent = collect($gradesData)->keyBy('student_id');
+
         foreach ($results as $studentResult) {
+            $extra = $extraDataByStudent->get($studentResult['student_id']);
+
+            $mlRiskLevel = $studentResult['risk_level'];
+            $finalRiskLevel = $this->applyFailingSubjectOverride(
+                $mlRiskLevel,
+                $extra['failing_count'] ?? 0
+            );
+
             RiskResult::updateOrCreate(
                 [
                     'student_id'     => $studentResult['student_id'],
@@ -245,13 +279,51 @@ class ReportController extends Controller
                     'school_year'    => $section->school_year,
                 ],
                 [
-                    'average_grade' => $studentResult['average_grade'],
-                    'risk_level'    => $studentResult['risk_level'],   // 'low', 'moderate', or 'high'
-                    'confidence'    => $studentResult['confidence'] ?? null, // 0-100%
-                    'generated_at'  => now(),
+                    'average_grade'         => $studentResult['average_grade'],
+                    'risk_level'            => $finalRiskLevel,
+                    'ml_risk_level'         => $mlRiskLevel,
+                    'was_overridden'        => $finalRiskLevel !== $mlRiskLevel,
+                    'weakest_subject'       => $extra['weakest_subject'] ?? null,
+                    'weakest_subject_grade' => $extra['weakest_subject_grade'] ?? null,
+                    'failing_subjects'      => $extra['failing_subjects'] ?? [],
+                    'confidence'            => $studentResult['confidence'] ?? null,
+                    'generated_at'          => now(),
                 ]
             );
         }
+    }
+
+    /**
+     * Rule-based safety net on top of the ML classification.
+     *
+     * Problem: the Random Forest model only looks at the OVERALL AVERAGE.
+     * A student with grades 100, 100, 100, 60 averages to 90 — which the
+     * model reads as "Low Risk" even though they clearly failed a subject.
+     * Averaging masks the failure.
+     *
+     * Fix: after the ML model gives its baseline classification, enforce
+     * a floor based on how many subjects the student actually failed
+     * (grade below 75), regardless of what the average says.
+     *
+     * - 0 failing subjects → keep the ML result as-is.
+     * - 1 failing subject  → floor of "moderate" (can't be "low").
+     * - 2+ failing subjects → floor of "high".
+     *
+     * Public (not private) so it's directly unit-testable without needing
+     * a full HTTP request or a database.
+     */
+    public function applyFailingSubjectOverride(string $mlRiskLevel, int $failingCount): string
+    {
+        $rank = ['low' => 0, 'moderate' => 1, 'high' => 2];
+
+        $floor = match (true) {
+            $failingCount >= 2 => 'high',
+            $failingCount === 1 => 'moderate',
+            default => 'low',
+        };
+
+        // Take whichever is more severe — the ML result or the rule floor.
+        return $rank[$floor] > $rank[$mlRiskLevel] ? $floor : $mlRiskLevel;
     }
 
     /**

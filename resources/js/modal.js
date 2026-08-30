@@ -114,6 +114,15 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     // =============================================
+    // ADVISER — IMPORT STUDENTS MODAL
+    // =============================================
+    if (document.getElementById("importModal")) {
+        window.openImportModal = () => window.showModal("importModal");
+        window.closeImportModal = () => window.hideModal("importModal");
+        window.bindModalOverlayClose("importModal");
+    }
+
+    // =============================================
     // PROFILE MODAL (used on every page, adviser or admin)
     // =============================================
     if (document.getElementById("profileModal")) {

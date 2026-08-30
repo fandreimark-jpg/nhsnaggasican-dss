@@ -17,6 +17,7 @@ use App\Http\Controllers\Admin\SubjectController;
 use App\Http\Controllers\Admin\SectionController;
 use App\Http\Controllers\Admin\StudentController;
 use App\Http\Controllers\Admin\ReportController;
+use App\Http\Controllers\Admin\AcademicTermController;
 use App\Http\Controllers\Admin\ActivityLogController;
 
 // Root redirect
@@ -67,8 +68,11 @@ Route::middleware(['auth', 'role:adviser'])
         Route::put('/students/{id}',      [AdviserStudentController::class, 'update'])->name('students.update');
         Route::get('/grades',             [AdviserGradeController::class, 'index'])->name('grades');
         Route::post('/grades',            [AdviserGradeController::class, 'store'])->name('grades.store');
+        Route::post('/grades/import',  [AdviserGradeController::class, 'importGrades'])->name('grades.import');
+        Route::get('/grades/template', [AdviserGradeController::class, 'downloadGradeTemplate'])->name('grades.template');
         Route::get('/submit-report',      [AdviserReportController::class, 'show'])->name('submit.report');
         Route::post('/submit-report',     [AdviserReportController::class, 'submit'])->name('submit.report.post');
+        Route::post('/students/import',   [AdviserStudentController::class, 'import'])->name('students.import');
     });
 
 // =============================================
@@ -115,6 +119,10 @@ Route::middleware(['auth', 'role:admin'])
         Route::put('/sections/{id}',    [SectionController::class, 'update'])->name('sections.update');
         Route::delete('/sections/{id}', [SectionController::class, 'destroy'])->name('sections.destroy');
 
+        //Academic Term
+        Route::get('/academic-terms',               [AcademicTermController::class, 'index'])->name('academic-terms');
+        Route::post('/academic-terms/{term}/open',  [AcademicTermController::class, 'open'])->name('academic-terms.open'); 
+        Route::post('/academic-terms/{term}/close',[AcademicTermController::class, 'close'])->name('academic-terms.close');
         // Students Management
         // NOTE: no POST /students (add) route here anymore — adding students
         // is now exclusively an Adviser action (see adviser.students.store above),

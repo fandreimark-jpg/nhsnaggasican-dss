@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Adviser;
 use App\Http\Controllers\Controller;
 use App\Models\Student;
 use App\Models\Section;
+use App\Imports\StudentsImport;
+use Maatwebsite\Excel\Facades\Excel;
 use App\Helpers\LogActivity;
 use Illuminate\Http\Request;
 
@@ -134,4 +136,61 @@ class StudentController extends Controller
         return redirect()->route('adviser.students')
             ->with('success', 'Student updated successfully!');
     }
+
+    /**
+ * IMPORT STUDENTS (bulk upload)
+ * ------------------------------
+ * Tumatanggap ng Excel/CSV file na base sa SF1-style column layout.
+ * Parehong section_id restriction gaya ng manual add — kahit ilang
+ * estudyante ang nasa file, palaging sa sarili lang na section
+ * ng adviser sila mapupunta.
+ */
+public function import(Request $request)
+{
+    $section = Section::where('adviser_id', auth()->id())->first();
+
+    if (!$section) {
+        return redirect()->route('adviser.students')
+            ->with('error', 'No section assigned to you yet. Contact the admin.');
+    }
+
+    $request->validateWithBag('import', [
+        'file' => 'required|mimes:xlsx,xls,csv,txt|max:2048',
+    ]);
+
+    $import = new StudentsImport($section->id);
+    Excel::import($import, $request->file('file'));
+
+    // I-check kung may mga row na na-skip dahil sa validation errors
+    $failures = $import->failures();
+
+    if ($failures->count() > 0) {
+        $errorMessages = $failures->map(function ($failure) {
+            return 'Row ' . $failure->row() . ': ' . implode(', ', $failure->errors());
+        })->toArray();
+
+        LogActivity::log(
+            action:      'import_students',
+            description: 'Imported students (with ' . $failures->count() . ' skipped rows)',
+            tableName:   'students',
+            recordId:    null
+        );
+
+       return redirect()->route('adviser.students')
+        ->with('warning', 'Valid rows were imported. ' . $failures->count() . ' row(s) were skipped:')
+        ->with('import_errors', $errorMessages);
+    }
+
+    LogActivity::log(
+        action:      'import_students',
+        description: 'Bulk imported students via file upload',
+        tableName:   'students',
+        recordId:    null
+    );
+
+    return redirect()->route('adviser.students')
+        ->with('success', 'Students imported successfully!');
+}
+
+
 }

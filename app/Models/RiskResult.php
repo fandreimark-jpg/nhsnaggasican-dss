@@ -23,9 +23,21 @@ class RiskResult extends Model
         'grading_period',   // 1, 2, or 3
         'average_grade',    // Computed average of all subject grades
         'risk_level',       // 'low', 'moderate', or 'high'
+        'weakest_subject',        
+        'weakest_subject_grade',
+        'failing_subjects', // lahat ng bumagsak na subjects, hindi lang yung pinakamababa
+        'was_overridden',   // BAGO — true kung binago ng rule ang sinabi ng ML
+        'ml_risk_level',    // BAGO — orihinal na klasipikasyon ng ML bago i-override
         'confidence',       // How confident the model is (0-100%)
         'school_year',      // e.g. '2026-2027'
         'generated_at',     // When the classification was generated
+    ];
+
+    // Automatically decode/encode the JSON list of failing subjects
+    // so it behaves like a normal PHP array wherever it's used.
+    protected $casts = [
+        'failing_subjects' => 'array',
+        'was_overridden'   => 'boolean',
     ];
 
     // =============================================

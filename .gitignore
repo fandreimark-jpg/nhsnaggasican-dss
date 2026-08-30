@@ -27,3 +27,8 @@ Thumbs.db
 /analytics/model_cache.pkl
 /analytics/model_accuracy.txt
 /analytics/temp_*.json
+
+# IDE helper files (barryvdh/laravel-ide-helper)
+/_ide_helper.php
+/_ide_helper_models.php
+/.phpstorm.meta.php

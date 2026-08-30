@@ -7,31 +7,28 @@ use App\Models\Student;
 use App\Models\Subject;
 use App\Models\Grade;
 use App\Models\Section;
+use App\Models\AcademicTerm;
+use App\Imports\GradesImport;
 use App\Helpers\LogActivity;
 use Illuminate\Http\Request;
+use Maatwebsite\Excel\Facades\Excel;
 
 /**
  * GradeController (Adviser)
  *
  * Handles grade encoding for the adviser's assigned section.
- * Advisers can only encode grades for students in their own section.
- * Grades are organized by term (grading period 1, 2, or 3).
+ * Advisers can only encode grades for students in their own section,
+ * AND only while the selected term is the currently open term
+ * (system-wide, controlled by the Admin via AcademicTermController).
  */
 class GradeController extends Controller
 {
-    /**
-     * Show the grade encoding page.
-     * Loads subjects filtered by the section's grade level, track, and specialization.
-     * Grades are pre-loaded as a keyed collection to avoid N+1 queries.
-     */
     public function index()
     {
-        // Get the section assigned to the currently logged-in adviser
         $section = Section::where('adviser_id', auth()->id())
             ->with(['track', 'specialization'])
             ->first();
 
-        // If no section assigned — show empty state
         if (!$section) {
             return view('adviser.grades', [
                 'section'        => null,
@@ -39,59 +36,37 @@ class GradeController extends Controller
                 'subjects'       => collect(),
                 'grades'         => collect(),
                 'selectedPeriod' => 1,
+                'openTerm'       => null,
             ]);
         }
 
-        // Get students in this section ordered alphabetically
         $students = Student::where('section_id', $section->id)
             ->orderBy('last_name')
             ->get();
 
-        // Get subjects for this section
-        // Core subjects: apply to all sections of the same grade level
-        // Elective subjects: filtered by track and specialization
-        $subjects = Subject::where('grade_level', $section->grade_level)
-            ->where(function ($query) use ($section) {
-                $query->where('type', 'core')
-                    ->orWhere(function ($q) use ($section) {
-                        $q->where('type', 'elective')
-                          ->where('track_id', $section->track_id)
-                          ->where(function ($q2) use ($section) {
-                              $q2->whereNull('specialization_id')
-                                 ->orWhere('specialization_id', $section->specialization_id);
-                          });
-                    });
-            })
-            ->orderBy('type') // core subjects first
+        $subjects = Subject::forSection($section)
+            ->orderBy('type')
             ->orderBy('name')
             ->get();
 
-        // Get the selected term from URL — defaults to Term 1
-        // URL parameter: ?period=1, ?period=2, or ?period=3
         $selectedPeriod = (int) request('period', 1);
 
-        // Load grades for selected term as a keyed collection
-        // Key format: "student_id_subject_id" for O(1) lookup in the blade
-        // This avoids N+1 queries — one query for all grades
         $grades = Grade::where('section_id', $section->id)
             ->where('grading_period', $selectedPeriod)
             ->where('school_year', $section->school_year)
             ->get()
             ->keyBy(fn($g) => $g->student_id . '_' . $g->subject_id);
 
+        // Which term is open right now, system-wide, for this school year?
+        $openTerm = AcademicTerm::currentOpenTerm($section->school_year);
+
         return view('adviser.grades', compact(
-            'section', 'students', 'subjects', 'grades', 'selectedPeriod'
+            'section', 'students', 'subjects', 'grades', 'selectedPeriod', 'openTerm'
         ));
     }
 
-    /**
-     * Save grades submitted from the encoding form.
-     * Uses updateOrCreate() to handle both new and existing grade records.
-     * Validates that all students belong to the adviser's section for security.
-     */
     public function store(Request $request)
     {
-        // Get the adviser's section
         $section = Section::where('adviser_id', auth()->id())->firstOrFail();
 
         $request->validate([
@@ -102,23 +77,24 @@ class GradeController extends Controller
             'grades.*.grade'          => 'nullable|numeric|min:60|max:100',
         ]);
 
-        // Pre-load valid student IDs — one query before the loop
-        // Prevents N+1 queries from checking each student individually
+        // Server-side enforcement — never trust the disabled inputs on the
+        // front end alone. Someone could re-enable them via devtools.
+        if (!AcademicTerm::isOpen($section->school_year, (int) $request->grading_period)) {
+            return redirect()->route('adviser.grades', ['period' => $request->grading_period])
+                ->with('error', 'Term ' . $request->grading_period . ' is currently closed for encoding. Contact the admin.');
+        }
+
         $validStudentIds = Student::where('section_id', $section->id)
             ->pluck('id')
             ->toArray();
 
         foreach ($request->grades as $gradeData) {
-            // Skip empty grade fields — adviser may not have filled all grades
             if (!isset($gradeData['grade']) || $gradeData['grade'] === null || $gradeData['grade'] === '') {
                 continue;
             }
 
-            // Security check — ensure student belongs to adviser's section
             if (!in_array($gradeData['student_id'], $validStudentIds)) continue;
 
-            // updateOrCreate — updates if exists, creates if new
-            // Unique key: student + subject + section + term + school year
             Grade::updateOrCreate(
                 [
                     'student_id'     => $gradeData['student_id'],
@@ -129,12 +105,11 @@ class GradeController extends Controller
                 ],
                 [
                     'grade'      => $gradeData['grade'],
-                    'encoded_by' => auth()->id(), // track who encoded the grade
+                    'encoded_by' => auth()->id(),
                 ]
             );
         }
 
-        // Log the grade encoding action for audit trail
         LogActivity::log(
             'encode_grades',
             'Encoded grades for Term ' . $request->grading_period . ' — Section ' . $section->name,
@@ -143,7 +118,79 @@ class GradeController extends Controller
         );
 
         return redirect()
-            ->route('adviser.grades')
+            ->route('adviser.grades', ['period' => $request->grading_period])
             ->with('success', 'Grades for Term ' . $request->grading_period . ' saved successfully!');
+    }
+
+    /**
+     * Bulk import grades from an uploaded Excel/CSV file.
+     * Blocked server-side if the term is not currently open — same
+     * rule as the manual encoding form above.
+     */
+    public function importGrades(Request $request)
+    {
+        $section = Section::where('adviser_id', auth()->id())->firstOrFail();
+        $gradingPeriod = (int) $request->input('grading_period', 1);
+
+        if (!AcademicTerm::isOpen($section->school_year, $gradingPeriod)) {
+            return redirect()->route('adviser.grades', ['period' => $gradingPeriod])
+                ->with('error', 'Term ' . $gradingPeriod . ' is currently closed for encoding. Contact the admin.');
+        }
+
+        $request->validateWithBag('gradeImport', [
+            'file' => 'required|mimes:xlsx,xls,csv,txt|max:2048',
+        ]);
+
+        $subjects = Subject::forSection($section)->orderBy('type')->orderBy('name')->get();
+        $students = Student::where('section_id', $section->id)->get();
+
+        $import = new GradesImport($section->id, $gradingPeriod, $section->school_year, $subjects, $students);
+        Excel::import($import, $request->file('file'));
+
+        LogActivity::log(
+            action:      'import_grades',
+            description: 'Bulk imported grades for Term ' . $gradingPeriod . ' — Section ' . $section->name,
+            tableName:   'grades',
+            recordId:    null
+        );
+
+        if (!empty($import->errors)) {
+            return redirect()->route('adviser.grades', ['period' => $gradingPeriod])
+                ->with('warning', 'Imported ' . $import->importedCount . ' grade(s). ' . count($import->errors) . ' entr' . (count($import->errors) === 1 ? 'y' : 'ies') . ' were skipped:')
+                ->with('import_errors', $import->errors);
+        }
+
+        return redirect()->route('adviser.grades', ['period' => $gradingPeriod])
+            ->with('success', 'Successfully imported ' . $import->importedCount . ' grade(s) for Term ' . $gradingPeriod . '!');
+    }
+
+    /**
+     * Downloadable template — pre-filled with this adviser's actual
+     * students so they only need to type in the grade columns.
+     */
+    public function downloadGradeTemplate(Request $request)
+    {
+        $section = Section::where('adviser_id', auth()->id())->firstOrFail();
+        $gradingPeriod = (int) $request->input('period', 1);
+
+        $subjects = Subject::forSection($section)->orderBy('type')->orderBy('name')->get();
+        $students = Student::where('section_id', $section->id)->orderBy('last_name')->get();
+
+        $headers = array_merge(['lrn', 'last_name', 'first_name'], $subjects->pluck('name')->toArray());
+
+        return response()->streamDownload(function () use ($headers, $students, $subjects) {
+            $handle = fopen('php://output', 'w');
+            fputcsv($handle, $headers);
+
+            foreach ($students as $student) {
+                $row = array_merge(
+                    [$student->lrn, $student->last_name, $student->first_name],
+                    array_fill(0, $subjects->count(), '') // blank grade cells to fill in
+                );
+                fputcsv($handle, $row);
+            }
+
+            fclose($handle);
+        }, 'grade_template_term_' . $gradingPeriod . '.csv');
     }
 }

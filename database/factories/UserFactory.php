@@ -24,22 +24,43 @@ class UserFactory extends Factory
      */
     public function definition(): array
     {
+        $lastName  = fake()->lastName();
+        $firstName = fake()->firstName();
+
         return [
-            'name' => fake()->name(),
+            'name' => $firstName . ' ' . $lastName,
+            'last_name' => $lastName,
+            'first_name' => $firstName,
             'email' => fake()->unique()->safeEmail(),
-            'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
             'remember_token' => Str::random(10),
         ];
     }
 
     /**
-     * Indicate that the model's email address should be unverified.
+     * 'role' is intentionally excluded from User::$fillable (see the model)
+     * so it can never be mass-assigned from request input. Setting it here
+     * via direct property assignment — same pattern UserController uses —
+     * bypasses that guard safely, since this only runs in tests/seeding.
      */
-    public function unverified(): static
+    public function configure(): static
     {
-        return $this->state(fn (array $attributes) => [
-            'email_verified_at' => null,
-        ]);
+        return $this->afterMaking(function (User $user) {
+            $user->role ??= 'adviser';
+        });
     }
+
+    /**
+     * Indicate that the user is an admin.
+     * Uses afterMaking (not state()) for the same reason as configure()
+     * above — 'role' isn't in $fillable, so state()'s attribute merge
+     * would get silently dropped; direct property assignment bypasses that.
+     */
+    public function admin(): static
+    {
+        return $this->afterMaking(function (User $user) {
+            $user->role = 'admin';
+        });
+    }
+
 }

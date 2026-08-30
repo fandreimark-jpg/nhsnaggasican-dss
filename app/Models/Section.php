@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -15,6 +16,8 @@ use Illuminate\Database\Eloquent\Model;
  */
 class Section extends Model
 {
+    use HasFactory;
+
     // Fields that can be mass-assigned
     protected $fillable = [
         'name',               // Section name e.g. 'Narraa', 'Alber'

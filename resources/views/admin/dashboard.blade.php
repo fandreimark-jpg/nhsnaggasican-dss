@@ -103,42 +103,64 @@
 </div>
 
 {{-- At-Risk Students Table --}}
-@if($atRiskStudents->count() > 0)
+@if($atRiskStudentsTotal > 0 || request('ar_grade_level') || request('ar_section_search'))
 <div class="bg-white rounded-lg shadow-sm mb-4">
     <div class="px-5 py-3 border-b">
         <h3 class="font-semibold text-gray-800 text-sm">Students Needing Attention</h3>
-        <p class="text-xs text-gray-500">Moderate and High risk students</p>
+        <div class="flex items-center gap-4 mt-2 text-xs text-gray-500">
+            <span class="flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-red-600 inline-block"></span>
+                Currently failing (below 75 this term)
+            </span>
+            <span class="flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-orange-500 inline-block"></span>
+                Declining 5+ points vs. last term (may still be passing)
+            </span>
+        </div>
+
+        {{-- Server-side filters — Grade Level and Section. Section is a
+             CASCADING dropdown: it only lists sections that belong to
+             the currently selected Grade Level (or all sections, if
+             "All grade levels" is chosen). Both auto-submit via AJAX
+             (initAutoSubmitFilter in search-filter.js) so changing
+             either one updates the results below instantly, without
+             reloading the whole dashboard. --}}
+        <div class="flex flex-wrap items-end gap-3 mt-3 pt-3 border-t">
+            <form method="GET" id="atRiskFilterForm" class="flex flex-wrap items-end gap-3">
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Grade Level</label>
+                    <select name="ar_grade_level" id="atRiskGradeLevelSelect"
+                            class="border rounded-md text-sm px-2 py-1.5 min-w-[130px]">
+                        <option value="">All grade levels</option>
+                        @foreach($atRiskGradeLevels as $gl)
+                            <option value="{{ $gl }}" {{ request('ar_grade_level') == $gl ? 'selected' : '' }}>
+                                Grade {{ $gl }}
+                            </option>
+                        @endforeach
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Section</label>
+                    <select name="ar_section_search" id="atRiskSectionSelect"
+                            class="border rounded-md text-sm px-2 py-1.5 min-w-[130px]">
+                        <option value="">All sections</option>
+                        @foreach($atRiskSections as $sec)
+                            <option value="{{ $sec->name }}" data-grade-level="{{ $sec->grade_level }}"
+                                    {{ request('ar_section_search') === $sec->name ? 'selected' : '' }}>
+                                {{ $sec->name }} (Grade {{ $sec->grade_level }})
+                            </option>
+                        @endforeach
+                    </select>
+                </div>
+                @if(request('ar_grade_level') || request('ar_section_search'))
+                    <a href="{{ route('admin.dashboard') }}" class="text-sm text-gray-500 hover:underline pb-1.5">Clear</a>
+                @endif
+            </form>
+        </div>
     </div>
-    <table class="w-full text-sm">
-        <thead class="bg-gray-50 text-gray-500">
-            <tr>
-                <th class="text-left px-5 py-2 text-xs">Student</th>
-                <th class="text-left px-3 py-2 text-xs">Section</th>
-                <th class="text-center px-3 py-2 text-xs">Average Grade</th>
-                <th class="text-center px-3 py-2 text-xs">Risk Level</th>
-            </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-50">
-            @foreach($atRiskStudents as $student)
-            <tr class="hover:bg-gray-50">
-                <td class="px-5 py-2 font-medium text-gray-800 text-sm">{{ $student['name'] }}</td>
-                <td class="px-3 py-2 text-gray-600 text-sm">{{ $student['section'] }}</td>
-                <td class="px-3 py-2 text-center text-gray-700 text-sm">
-                    {{ is_numeric($student['average']) ? number_format($student['average'], 2) : $student['average'] }}
-                </td>
-                <td class="px-3 py-2 text-center">
-                    @if($student['risk_level'] === 'high')
-                        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">High</span>
-                    @elseif($student['risk_level'] === 'moderate')
-                        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">Moderate</span>
-                    @else
-                        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">{{ ucfirst($student['risk_level']) }}</span>
-                    @endif
-                </td>
-            </tr>
-            @endforeach
-        </tbody>
-    </table>
+    <div id="atRiskResultsContainer">
+        @include('admin.partials.at-risk-results')
+    </div>
 </div>
 @endif
 
@@ -249,4 +271,14 @@
     const SECTION_RISK_DATA = @json($sectionRiskData);
 </script>
 <script src="{{ asset('js/admin/dashboard.js') }}"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        // Order matters: the cascading-select listener must be attached
+        // BEFORE the auto-submit listener, so that when Grade Level
+        // changes, the Section dropdown gets narrowed/reset FIRST, and
+        // only then does the (now-corrected) form get submitted.
+        initCascadingSelect('atRiskGradeLevelSelect', 'atRiskSectionSelect');
+        initAutoSubmitFilter('atRiskFilterForm', { ajaxTarget: 'atRiskResultsContainer' });
+    });
+</script>
 @endpush

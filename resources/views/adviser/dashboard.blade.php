@@ -107,6 +107,7 @@
                 <th class="text-left px-6 py-3">Student</th>
                 <th class="text-center px-4 py-3">Risk Level</th>
                 <th class="text-center px-4 py-3">Status</th>
+                <th class="text-center px-4 py-3">Trend</th>
             </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
@@ -144,10 +145,22 @@
                         <span class="text-xs text-gray-400">Submit report to generate</span>
                     @endif
                 </td>
+                <td class="px-4 py-3 text-center">
+                    @php $trend = $trends[$student->id] ?? null; @endphp
+                    @if($trend === 'improving')
+                        <span class="text-xs text-green-600 font-medium">&uarr; Improving</span>
+                    @elseif($trend === 'declining')
+                        <span class="text-xs text-red-600 font-medium">&darr; Declining</span>
+                    @elseif($trend === 'stable')
+                        <span class="text-xs text-gray-500 font-medium">&rarr; Stable</span>
+                    @else
+                        <span class="text-xs text-gray-300">—</span>
+                    @endif
+                </td>
             </tr>
             @empty
             <tr>
-                <td colspan="3" class="px-6 py-6 text-center text-gray-400">
+                <td colspan="4" class="px-6 py-6 text-center text-gray-400">
                     No students found in this section.
                 </td>
             </tr>

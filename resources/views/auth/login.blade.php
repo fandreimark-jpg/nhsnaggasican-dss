@@ -23,8 +23,9 @@
                     class="w-28 h-28 object-contain mx-auto mb-4" 
                     alt="Naggasican NHS Logo">
                 <h1 class="text-gray-800 text-xl font-bold leading-tight">Naggasican NHS</h1>
-                <p class="text-gray-500 text-sm mt-1">Decision Support System</p>
-                <p class="text-gray-400 text-xs mt-0.5">Academic Performance Monitoring</p>
+                <p class="text-gray-500 text-sm mt-1">A Decision Support System</p>
+                <p class="text-gray-400 text-xs mt-0.5">for Monitoring Learner's</p>
+                <p class="text-gray-400 text-xs mt-0.5">Academic Performance</p>
             </div>
 
             {{-- Form --}}

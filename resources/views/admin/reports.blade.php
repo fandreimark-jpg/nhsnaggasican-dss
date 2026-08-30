@@ -5,6 +5,34 @@
 
 @section('content')
 
+{{-- Filters — narrows down the list once there are many grade levels
+     and sections, instead of always rendering every single one.
+     Auto-submits via initAutoSubmitFilter() in search-filter.js — no
+     separate "Filter" button needed. --}}
+<form method="GET" id="reportFilterForm" class="bg-white rounded-xl shadow-sm mb-4 px-5 py-3 flex flex-wrap items-end gap-3">
+    <div>
+        <label class="block text-xs text-gray-500 mb-1">Grade Level</label>
+        <select name="grade_level"
+                class="border rounded-md text-sm px-2 py-1.5 min-w-[140px]">
+            <option value="">All grade levels</option>
+            @foreach($gradeLevels as $gl)
+                <option value="{{ $gl }}" {{ request('grade_level') == $gl ? 'selected' : '' }}>
+                    Grade {{ $gl }}
+                </option>
+            @endforeach
+        </select>
+    </div>
+    <div>
+        <label class="block text-xs text-gray-500 mb-1">Section name</label>
+        <input type="text" name="section_search" value="{{ request('section_search') }}"
+               placeholder="e.g. Narra" autocomplete="off"
+               class="border rounded-md text-sm px-2 py-1.5">
+    </div>
+    @if(request('grade_level') || request('section_search'))
+        <a href="{{ route('admin.reports') }}" class="text-sm text-gray-500 hover:underline pb-1.5">Clear</a>
+    @endif
+</form>
+
 @forelse($sections as $section)
 <div class="bg-white rounded-xl shadow-sm mb-4">
 
@@ -118,3 +146,11 @@
 @endforelse
 
 @endsection
+
+@push('scripts')
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        initAutoSubmitFilter('reportFilterForm');
+    });
+</script>
+@endpush

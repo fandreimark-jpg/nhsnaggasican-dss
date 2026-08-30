@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -19,6 +20,8 @@ use Illuminate\Database\Eloquent\Model;
  */
 class Subject extends Model
 {
+    use HasFactory;
+
     // Fields that can be mass-assigned
     protected $fillable = [
         'name',               // e.g. 'General Mathematics'
@@ -54,5 +57,27 @@ class Subject extends Model
     public function grades()
     {
         return $this->hasMany(Grade::class);
+    }
+
+    /**
+     * Get the subjects applicable to a given section — core subjects for
+     * that grade level, plus elective subjects matching the section's
+     * track/specialization. Shared logic used by both grade encoding
+     * AND the term-completion check, so both always count the same set.
+     */
+    public static function forSection(Section $section)
+    {
+        return static::where('grade_level', $section->grade_level)
+            ->where(function ($query) use ($section) {
+                $query->where('type', 'core')
+                    ->orWhere(function ($q) use ($section) {
+                        $q->where('type', 'elective')
+                          ->where('track_id', $section->track_id)
+                          ->where(function ($q2) use ($section) {
+                              $q2->whereNull('specialization_id')
+                                 ->orWhere('specialization_id', $section->specialization_id);
+                          });
+                    });
+            });
     }
 }

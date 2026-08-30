@@ -66,6 +66,10 @@
                     class="flex items-center gap-3 px-4 py-2 rounded-lg border-l-4 hover:bg-brand-700 {{ request()->routeIs('admin.students*') ? 'bg-brand-700 border-gold-500' : 'border-transparent' }}">
                         <i class="bi bi-mortarboard"></i> Students
                     </a>
+                    <a href="{{ route('admin.academic-terms') }}"
+                    class="flex items-center gap-3 px-4 py-2 rounded-lg border-l-4 hover:bg-brand-700 {{ request()->routeIs('admin.academic-terms*') ? 'bg-brand-700 border-gold-500' : 'border-transparent' }}">
+                        <i class="bi bi-calendar-check"></i> Academic Terms
+                    </a>
                     <a href="{{ route('admin.reports') }}"
                     class="flex items-center gap-3 px-4 py-2 rounded-lg border-l-4 hover:bg-brand-700 {{ request()->routeIs('admin.reports*') ? 'bg-brand-700 border-gold-500' : 'border-transparent' }}">
                         <i class="bi bi-file-earmark-text"></i> Reports

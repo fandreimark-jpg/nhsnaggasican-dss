@@ -88,12 +88,43 @@ class DashboardController extends Controller
                 ->get()
             : collect();
 
+        // Trend per student — compares the two most recent terms so the
+        // adviser can see whether a student is improving or declining,
+        // not just their current snapshot.
+        $trends = $students->mapWithKeys(function ($student) {
+            $history = $student->riskResults->sortBy('grading_period')->values();
+            return [$student->id => $this->computeTrend($history)];
+        });
+
         return view('adviser.dashboard', compact(
             'section', 'totalStudents', 'totalGradesEncoded',
-            'pendingCount', 'submissions', 'students',
+            'pendingCount', 'submissions', 'students', 'trends',
             'totalExpectedPerTerm',
             'term1Count', 'term2Count', 'term3Count'
         ));
+    }
+
+    /**
+     * Same trend logic as the Admin dashboard — 'improving', 'declining',
+     * 'stable', or null when there's fewer than 2 terms to compare.
+     */
+    private function computeTrend($history): ?string
+    {
+        if ($history->count() < 2) {
+            return null;
+        }
+
+        $previous = $history[$history->count() - 2]->average_grade;
+        $current  = $history[$history->count() - 1]->average_grade;
+        $diff     = $current - $previous;
+
+        if ($diff > 1) {
+            return 'improving';
+        }
+        if ($diff < -1) {
+            return 'declining';
+        }
+        return 'stable';
     }
 
     /**
