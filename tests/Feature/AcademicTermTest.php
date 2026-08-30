@@ -166,6 +166,47 @@ class AcademicTermTest extends TestCase
         $this->assertEquals($firstClosedAt, $secondClosedAt);
     }
 
+    public function test_term_2_cannot_be_submitted_before_term_1_is_submitted(): void
+    {
+        $adviser = User::factory()->create();
+        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027']);
+        $student = Student::factory()->create(['section_id' => $section->id]);
+        $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
+
+        // Term 1 fully encoded (so Term 2 is allowed to OPEN) but never
+        // actually submitted by the adviser.
+        $this->fullyEncodeTerm($section, $student, $subject, 1);
+        $admin = User::factory()->admin()->create();
+        $this->actingAs($admin)->post('/admin/academic-terms/2/open');
+        $this->fullyEncodeTerm($section, $student, $subject, 2);
+
+        $response = $this->actingAs($adviser)->post('/adviser/submit-report', ['grading_period' => 2]);
+
+        $response->assertSessionHas('error');
+        $this->assertDatabaseMissing('report_submissions', ['section_id' => $section->id, 'grading_period' => 2]);
+    }
+
+    public function test_term_2_can_be_submitted_once_term_1_has_been_submitted(): void
+    {
+        $adviser = User::factory()->create();
+        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027']);
+        $student = Student::factory()->create(['section_id' => $section->id]);
+        $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
+
+        AcademicTerm::ensureExistFor('2026-2027'); // Term 1 open by default
+        $this->fullyEncodeTerm($section, $student, $subject, 1);
+        $this->actingAs($adviser)->post('/adviser/submit-report', ['grading_period' => 1]);
+
+        $admin = User::factory()->admin()->create();
+        $this->actingAs($admin)->post('/admin/academic-terms/2/open');
+        $this->fullyEncodeTerm($section, $student, $subject, 2);
+
+        $response = $this->actingAs($adviser)->post('/adviser/submit-report', ['grading_period' => 2]);
+
+        $response->assertSessionHas('success');
+        $this->assertDatabaseHas('report_submissions', ['section_id' => $section->id, 'grading_period' => 2]);
+    }
+
     public function test_opening_a_later_term_does_not_overwrite_an_earlier_terms_closed_at_history(): void
     {
         $admin   = User::factory()->admin()->create();

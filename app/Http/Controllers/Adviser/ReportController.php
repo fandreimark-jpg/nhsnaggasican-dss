@@ -127,6 +127,25 @@ class ReportController extends Controller
             );
         }
 
+        // AcademicTermController::open() only requires the PREVIOUS term to
+        // be fully ENCODED before the next one can open — it's still
+        // possible to reach Term 3 without ever having clicked "Submit"
+        // for Term 1 or 2. Submission itself must stay sequential too, so
+        // the admin/DSS can rely on submission history actually being
+        // complete, not just term-opening history.
+        if ($gradingPeriod > 1) {
+            $previousSubmitted = ReportSubmission::where('section_id', $section->id)
+                ->where('school_year', $section->school_year)
+                ->where('grading_period', $gradingPeriod - 1)
+                ->exists();
+
+            if (!$previousSubmitted) {
+                return back()->with('error',
+                    'Term ' . ($gradingPeriod - 1) . ' must be submitted before Term ' . $gradingPeriod . ' can be submitted.'
+                );
+            }
+        }
+
         $subjects      = $this->getSectionSubjects($section);
         $students      = Student::where('section_id', $section->id)->get();
         $totalExpected = $students->count() * $subjects->count();
