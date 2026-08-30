@@ -170,6 +170,15 @@ class RoleAuthorizationTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_principal_cannot_verify_computed_grades(): void
+    {
+        $principal = User::factory()->principal()->create();
+
+        $this->actingAs($principal)
+            ->post('/adviser/grades/verify', ['student_id' => 1, 'subject_id' => 1, 'grading_period' => 1])
+            ->assertForbidden();
+    }
+
     public function test_principal_cannot_manage_admin_master_data(): void
     {
         $principal = User::factory()->principal()->create();

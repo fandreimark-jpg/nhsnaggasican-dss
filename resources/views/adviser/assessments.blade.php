@@ -154,6 +154,7 @@
                 <th class="text-center px-3 py-3">Examination</th>
                 <th class="text-center px-3 py-3">Computed Grade</th>
                 <th class="text-left px-4 py-3">Focus Area</th>
+                <th class="text-center px-4 py-3">Official Grade</th>
             </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
@@ -189,6 +190,29 @@
                         <span class="text-xs text-gray-400">On track</span>
                     @else
                         <span class="text-xs text-gray-300">No data yet</span>
+                    @endif
+                </td>
+                <td class="px-4 py-3 text-center">
+                    @if($row['official_grade'])
+                        <span class="font-medium text-gray-700">{{ number_format($row['official_grade']->grade, 2) }}</span>
+                        @if($row['official_grade']->is_verified)
+                            <span class="block text-[10px] text-green-600"><i class="bi bi-check-circle-fill"></i> Verified from evidence</span>
+                        @endif
+                    @else
+                        <span class="text-gray-300 text-xs">Not encoded</span>
+                    @endif
+
+                    @if($row['complete'] && $isTermOpen)
+                        <form method="POST" action="{{ route('adviser.grades.verify') }}" class="mt-1"
+                              data-resubmit="Set the official grade for {{ $row['student']->last_name }}, {{ $row['student']->first_name }} to {{ number_format($row['computed_grade'], 2) }} based on verified assessment evidence?{{ $row['official_grade'] ? ' This will REPLACE the current official grade of ' . number_format($row['official_grade']->grade, 2) . '.' : '' }}">
+                            @csrf
+                            <input type="hidden" name="student_id" value="{{ $row['student']->id }}">
+                            <input type="hidden" name="subject_id" value="{{ $selectedSubject->id }}">
+                            <input type="hidden" name="grading_period" value="{{ $selectedPeriod }}">
+                            <button type="submit" class="text-xs text-brand-700 underline hover:text-brand-900">
+                                Verify &amp; Use as Official
+                            </button>
+                        </form>
                     @endif
                 </td>
             </tr>

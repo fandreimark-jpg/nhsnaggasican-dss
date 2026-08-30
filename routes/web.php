@@ -69,6 +69,7 @@ Route::middleware(['auth', 'role:adviser'])
         Route::post('/grades',            [AdviserGradeController::class, 'store'])->name('grades.store');
         Route::post('/grades/import',  [AdviserGradeController::class, 'importGrades'])->name('grades.import');
         Route::get('/grades/template', [AdviserGradeController::class, 'downloadGradeTemplate'])->name('grades.template');
+        Route::post('/grades/verify', [AdviserGradeController::class, 'verifyComputedGrade'])->name('grades.verify');
         Route::get('/submit-report',      [AdviserReportController::class, 'show'])->name('submit.report');
         Route::post('/submit-report',     [AdviserReportController::class, 'submit'])->name('submit.report.post');
         Route::post('/students/import',   [AdviserStudentController::class, 'import'])->name('students.import');

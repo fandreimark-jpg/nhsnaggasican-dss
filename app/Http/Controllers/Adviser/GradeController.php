@@ -10,6 +10,7 @@ use App\Models\Section;
 use App\Models\AcademicTerm;
 use App\Imports\GradesImport;
 use App\Helpers\LogActivity;
+use App\Services\GradingEngine;
 use Illuminate\Http\Request;
 use Maatwebsite\Excel\Facades\Excel;
 
@@ -23,6 +24,10 @@ use Maatwebsite\Excel\Facades\Excel;
  */
 class GradeController extends Controller
 {
+    public function __construct(private GradingEngine $gradingEngine = new GradingEngine())
+    {
+    }
+
     public function index()
     {
         $section = Section::where('adviser_id', auth()->id())
@@ -200,5 +205,81 @@ class GradeController extends Controller
 
             fclose($handle);
         }, 'grade_template_term_' . $gradingPeriod . '.csv');
+    }
+
+    /**
+     * The missing half of CLAUDE.md's pipeline: "computed_grade ->
+     * Adviser verification -> official grade." GradingEngine and the
+     * Performance Analysis table (adviser.assessments) could already
+     * COMPUTE and DISPLAY a grade from assessment evidence, but nothing
+     * ever turned that into an action — this is that action. The
+     * adviser explicitly accepts a specific computed value; it is never
+     * applied automatically, and it OVERWRITES whatever official grade
+     * already exists for that student/subject/term (the confirm-before-
+     * submit dialog on the button that posts here says so).
+     *
+     * Recomputes server-side rather than trusting a client-submitted
+     * grade value — the adviser is confirming "yes, use what the system
+     * just showed me," not supplying their own number here.
+     */
+    public function verifyComputedGrade(Request $request)
+    {
+        $section = Section::where('adviser_id', auth()->id())->firstOrFail();
+        $gradingPeriod = (int) $request->input('grading_period', 1);
+
+        $request->validate([
+            'student_id' => 'required|exists:students,id',
+            'subject_id' => 'required|exists:subjects,id',
+        ]);
+
+        $subject = Subject::forSection($section)->where('id', $request->subject_id)->first();
+        if (!$subject) {
+            return back()->with('error', 'That subject is not offered to your section.');
+        }
+
+        $student = Student::where('id', $request->student_id)->where('section_id', $section->id)->first();
+        if (!$student) {
+            return back()->with('error', 'That student is not in your section.');
+        }
+
+        if (!AcademicTerm::isOpen($section->school_year, $gradingPeriod)) {
+            return back()->with('error', 'Term ' . $gradingPeriod . ' is currently closed for encoding. Contact the admin.');
+        }
+
+        $result = $this->gradingEngine->computeGrade($student, $subject, $section, $gradingPeriod, $section->school_year);
+
+        if (!$result['complete']) {
+            return back()->with('error',
+                'Cannot verify — assessment evidence for ' . $subject->name . ' is not complete yet (a component has no scores).'
+            );
+        }
+
+        Grade::updateOrCreate(
+            [
+                'student_id'     => $student->id,
+                'subject_id'     => $subject->id,
+                'section_id'     => $section->id,
+                'grading_period' => $gradingPeriod,
+                'school_year'    => $section->school_year,
+            ],
+            [
+                'grade'          => $result['computed_grade'],
+                'computed_grade' => $result['computed_grade'],
+                'is_verified'    => true,
+                'verified_at'    => now(),
+                'encoded_by'     => auth()->id(),
+            ]
+        );
+
+        LogActivity::log(
+            'verify_computed_grade',
+            'Verified computed grade (' . $result['computed_grade'] . ') as official for ' .
+                $student->last_name . ', ' . $student->first_name . ' — ' . $subject->name,
+            'grades',
+            null
+        );
+
+        return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
+            ->with('success', 'Official grade for ' . $student->last_name . ', ' . $student->first_name . ' set to ' . $result['computed_grade'] . '.');
     }
 }

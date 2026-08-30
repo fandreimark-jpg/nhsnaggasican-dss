@@ -8,6 +8,7 @@ use App\Models\Assessment;
 use App\Models\Section;
 use App\Models\Subject;
 use App\Models\AssessmentUpload;
+use App\Models\Grade;
 use App\Models\Student;
 use App\Helpers\LogActivity;
 use App\Services\AssessmentUploadService;
@@ -80,11 +81,18 @@ class AssessmentController extends Controller
         // otherwise every student would just show "incomplete" for nothing.
         $performance = collect();
         if ($selectedSubject && $items->isNotEmpty()) {
+            $officialGrades = Grade::where('section_id', $section->id)
+                ->where('subject_id', $selectedSubject->id)
+                ->where('grading_period', $selectedPeriod)
+                ->where('school_year', $section->school_year)
+                ->get()
+                ->keyBy('student_id');
+
             $performance = Student::where('section_id', $section->id)
                 ->orderBy('last_name')
                 ->get()
                 ->map(fn($student) => array_merge(
-                    ['student' => $student],
+                    ['student' => $student, 'official_grade' => $officialGrades->get($student->id)],
                     $this->analysis->analyzeStudent($student, $selectedSubject, $section, $selectedPeriod, $section->school_year)
                 ));
         }
