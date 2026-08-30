@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Intervention;
 use App\Models\RiskResult;
 use App\Models\Student;
+use App\Helpers\LogActivity;
 use App\Services\DashboardAnalyticsService;
 use App\Services\InterventionRecommender;
 use App\Services\ProgressMonitoringService;
@@ -72,7 +73,9 @@ class InterventionController extends Controller
             ->orderByDesc('grading_period')
             ->first();
 
-        Intervention::create([
+        $student = Student::findOrFail($request->student_id);
+
+        $intervention = Intervention::create([
             'student_id'             => $request->student_id,
             'subject_id'             => $latestRisk?->weakest_subject_id,
             'risk_result_id'         => $latestRisk?->id,
@@ -82,6 +85,13 @@ class InterventionController extends Controller
             'principal_notes'        => $request->principal_notes,
             'created_by'             => auth()->id(),
         ]);
+
+        LogActivity::log(
+            'create_intervention',
+            'Recorded intervention (' . $request->recommended_type . ') for ' . $student->last_name . ', ' . $student->first_name,
+            'interventions',
+            $intervention->id
+        );
 
         return redirect()->route('principal.interventions')
             ->with('success', 'Intervention recorded.');
@@ -100,6 +110,13 @@ class InterventionController extends Controller
             'decided_by'      => auth()->id(),
             'decided_at'      => now(),
         ]);
+
+        LogActivity::log(
+            'update_intervention',
+            'Updated intervention #' . $intervention->id . ' status to ' . $request->status,
+            'interventions',
+            $intervention->id
+        );
 
         return redirect()->route('principal.interventions')
             ->with('success', 'Intervention updated.');

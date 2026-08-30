@@ -155,6 +155,23 @@ class InterventionWorkflowTest extends TestCase
         $response->assertDontSee('improved because');
     }
 
+    public function test_recording_and_updating_an_intervention_is_logged(): void
+    {
+        $principal = User::factory()->principal()->create();
+        $student   = Student::factory()->create();
+
+        $this->actingAs($principal)->post('/principal/interventions', [
+            'student_id' => $student->id, 'recommended_type' => 'remediation',
+        ]);
+
+        $this->assertDatabaseHas('activity_logs', ['action' => 'create_intervention', 'user_id' => $principal->id]);
+
+        $intervention = Intervention::first();
+        $this->actingAs($principal)->put('/principal/interventions/' . $intervention->id, ['status' => 'approved']);
+
+        $this->assertDatabaseHas('activity_logs', ['action' => 'update_intervention', 'user_id' => $principal->id]);
+    }
+
     public function test_an_invalid_intervention_type_is_rejected(): void
     {
         $principal = User::factory()->principal()->create();
