@@ -24,8 +24,16 @@ class Grade extends Model
         'section_id',       // Which section (for faster querying)
         'encoded_by',       // User ID of the adviser who encoded this grade
         'grading_period',   // 1, 2, or 3
-        'grade',            // Numeric grade (60.00 - 100.00)
+        'grade',            // Numeric grade (60.00 - 100.00) — the OFFICIAL grade
+        'computed_grade',   // Derived from assessment evidence by GradingEngine — evidence, not official
+        'is_verified',      // Whether an adviser has reviewed computed_grade
+        'verified_at',      // When it was verified
         'school_year',      // e.g. '2026-2027'
+    ];
+
+    protected $casts = [
+        'is_verified' => 'boolean',
+        'verified_at' => 'datetime',
     ];
 
     // =============================================
