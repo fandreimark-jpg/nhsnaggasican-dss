@@ -2,11 +2,14 @@
 
 namespace App\Services;
 
+use App\Models\Assessment;
 use App\Models\Grade;
+use App\Models\Intervention;
 use App\Models\RiskResult;
 use App\Models\Section;
 use App\Models\Student;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 /**
  * The read-only Decision Support dashboard data (risk distribution, at-risk
@@ -114,6 +117,57 @@ class DashboardAnalyticsService
             'highestHonors'   => $allStudentsWithRisk->filter(fn($s) => $s['average'] >= 98)->values(),
             'highHonors'      => $allStudentsWithRisk->filter(fn($s) => $s['average'] >= 95 && $s['average'] < 98)->values(),
             'withHonors'      => $allStudentsWithRisk->filter(fn($s) => $s['average'] >= 90 && $s['average'] < 95)->values(),
+        ];
+    }
+
+    /**
+     * Principal-dashboard-only summary data: intervention status counts
+     * and assessment-evidence completion — the two elements CLAUDE.md's
+     * Principal dashboard spec calls for ("Under Intervention",
+     * "Assessment Completion") that never appeared on any dashboard
+     * before. Deliberately NOT added to the Admin dashboard — this is
+     * what actually differentiates the two now, rather than reusing
+     * getSummaryData() and getAtRiskStudentsData() alone.
+     *
+     * Computed with 2 aggregate join queries (not a per-student
+     * GradingEngine loop) so a whole-school dashboard load stays cheap
+     * regardless of how many students/subjects exist.
+     */
+    public function getPrincipalSummary(): array
+    {
+        $schoolYear = Section::activeSchoolYear();
+
+        $interventionCounts = Intervention::selectRaw('status, COUNT(*) as count')
+            ->groupBy('status')
+            ->pluck('count', 'status');
+
+        $underIntervention = $interventionCounts->only(['approved', 'in_progress', 'monitoring'])->sum();
+        $awaitingDecision   = $interventionCounts->only(['recommended', 'in_review'])->sum();
+        $completedCount     = $interventionCounts->get('completed', 0);
+
+        // Expected = one score per (assessment item, student in that item's
+        // section) pair; actual = how many of those have actually been
+        // scored — a single join-count each, not a loop.
+        $expectedScores = DB::table('assessments')
+            ->join('students', 'students.section_id', '=', 'assessments.section_id')
+            ->where('assessments.school_year', $schoolYear)
+            ->count();
+
+        $actualScores = DB::table('assessment_scores')
+            ->join('assessments', 'assessments.id', '=', 'assessment_scores.assessment_id')
+            ->where('assessments.school_year', $schoolYear)
+            ->count();
+
+        return [
+            'under_intervention'  => $underIntervention,
+            'awaiting_decision'   => $awaitingDecision,
+            'completed_interventions' => $completedCount,
+            'assessment_completion' => [
+                'has_data'   => $expectedScores > 0,
+                'expected'   => $expectedScores,
+                'actual'     => $actualScores,
+                'percentage' => $expectedScores > 0 ? round(($actualScores / $expectedScores) * 100, 1) : null,
+            ],
         ];
     }
 

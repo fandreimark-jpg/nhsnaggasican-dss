@@ -33,7 +33,8 @@ class DashboardController extends Controller
 
         return view('principal.dashboard', array_merge(
             $this->analytics->getSummaryData(),
-            $this->analytics->getAtRiskStudentsData()
+            $this->analytics->getAtRiskStudentsData(),
+            $this->analytics->getPrincipalSummary()
         ));
     }
 }

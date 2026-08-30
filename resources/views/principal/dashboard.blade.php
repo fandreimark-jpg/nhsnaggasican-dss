@@ -25,6 +25,32 @@
     </div>
 </div>
 
+{{-- Principal-only summary: intervention status + assessment completion.
+     Not shown on the Admin dashboard — this is what the Principal actually
+     owns that Admin doesn't (see InterventionController). --}}
+<div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+    <a href="{{ route('principal.interventions') }}" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-purple-500 hover:shadow-md transition-shadow block">
+        <p class="text-xs text-gray-500">Under Intervention</p>
+        <p class="text-2xl font-bold text-purple-700 mt-1">{{ $under_intervention }}</p>
+        <p class="text-xs text-gray-400 mt-1">Approved, in progress, or being monitored</p>
+    </a>
+    <a href="{{ route('principal.interventions') }}" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-orange-400 hover:shadow-md transition-shadow block">
+        <p class="text-xs text-gray-500">Awaiting Your Decision</p>
+        <p class="text-2xl font-bold text-orange-600 mt-1">{{ $awaiting_decision }}</p>
+        <p class="text-xs text-gray-400 mt-1">Recommended, not yet reviewed</p>
+    </a>
+    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-brand-500">
+        <p class="text-xs text-gray-500">Assessment Completion</p>
+        @if($assessment_completion['has_data'])
+            <p class="text-2xl font-bold text-brand-700 mt-1">{{ $assessment_completion['percentage'] }}%</p>
+            <p class="text-xs text-gray-400 mt-1">{{ $assessment_completion['actual'] }} of {{ $assessment_completion['expected'] }} expected scores entered</p>
+        @else
+            <p class="text-lg font-medium text-gray-300 mt-1">No data yet</p>
+            <p class="text-xs text-gray-400 mt-1">No assessment forms uploaded this school year</p>
+        @endif
+    </div>
+</div>
+
 {{-- Charts Row --}}
 <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
     <div class="bg-white rounded-lg shadow-sm p-4">
