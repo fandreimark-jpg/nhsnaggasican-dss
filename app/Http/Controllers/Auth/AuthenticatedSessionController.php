@@ -43,12 +43,9 @@ class AuthenticatedSessionController extends Controller
             recordId:    $user->id
         );
 
-        // Redirect to correct dashboard based on role
-        if ($user->isAdmin()) {
-            return redirect()->route('admin.dashboard');
-        }
-
-        return redirect()->route('adviser.dashboard');
+        // Redirect to the correct dashboard based on role — centralized on
+        // the User model so a new role only needs to be added in one place.
+        return redirect()->route($user->dashboardRouteName());
     }
 
     /**
