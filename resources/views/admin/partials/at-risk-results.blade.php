@@ -67,6 +67,20 @@
                 @else
                     <span class="text-gray-400 text-xs italic">No failing subjects</span>
                 @endif
+                @if(!empty($student['weakest_subject_component']))
+                    @php
+                        $wc = $student['weakest_subject_component'];
+                        $wcLabels = ['written_work' => 'Written Work', 'performance_task' => 'Performance Task', 'examination' => 'Examination'];
+                    @endphp
+                    <div class="text-xs text-gray-500 mt-1" title="From assessment evidence, not just the overall grade">
+                        <i class="bi bi-clipboard-data"></i>
+                        {{ $wcLabels[$wc['key']] ?? $wc['key'] }}:
+                        {{ number_format($wc['percentage'], 1) }}%
+                        <span class="{{ $wc['status'] === 'Needs Attention' ? 'text-red-500' : 'text-green-600' }}">
+                            ({{ $wc['gap'] >= 0 ? '+' : '' }}{{ number_format($wc['gap'], 1) }})
+                        </span>
+                    </div>
+                @endif
                 @if(!empty($student['subject_declines']))
                     <div class="text-xs text-orange-600 mt-1">
                         @foreach($student['subject_declines'] as $sd)

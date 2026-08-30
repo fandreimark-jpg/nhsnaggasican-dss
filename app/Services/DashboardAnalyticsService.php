@@ -21,6 +21,10 @@ use App\Models\User;
  */
 class DashboardAnalyticsService
 {
+    public function __construct(private PerformanceAnalysisService $performanceAnalysis = new PerformanceAnalysisService())
+    {
+    }
+
     /**
      * Everything needed to render the main dashboard body (summary cards,
      * risk distribution, section chart, academic honors) for the currently
@@ -124,7 +128,7 @@ class DashboardAnalyticsService
         $atRiskGradeLevel = request('ar_grade_level');
         $atRiskSection    = request('ar_section_search');
 
-        $atRiskStudents = Student::with(['section', 'riskResults'])
+        $atRiskStudents = Student::with(['section', 'riskResults.weakestSubject'])
         ->whereHas('riskResults')
         ->when($atRiskGradeLevel, fn($q) =>
             $q->whereHas('section', fn($s) => $s->where('grade_level', $atRiskGradeLevel))
@@ -138,20 +142,21 @@ class DashboardAnalyticsService
             $latestRisk = $history->last();
 
             return [
-                'name'                  => $student->last_name . ', ' . $student->first_name,
-                'section'               => $student->section->name ?? '—',
-                'grade_level'           => $student->section->grade_level ?? null,
-                'average'               => $latestRisk->average_grade ?? '—',
-                'risk_level'            => $latestRisk->risk_level ?? '—',
-                'weakest_subject'       => $latestRisk->weakest_subject ?? null,
-                'weakest_subject_grade' => $latestRisk->weakest_subject_grade ?? null,
-                'failing_subjects'      => $latestRisk->failing_subjects ?? [],
-                'confidence'            => $latestRisk->confidence ?? null,
-                'was_overridden'        => $latestRisk->was_overridden ?? false,
-                'ml_risk_level'         => $latestRisk->ml_risk_level ?? null,
-                'trend'                 => $this->computeTrend($history),
-                'consecutive_decline'   => $this->computeConsecutiveDecline($history),
-                'subject_declines'      => $this->computeSubjectDeclines($student->id, $history),
+                'name'                    => $student->last_name . ', ' . $student->first_name,
+                'section'                 => $student->section->name ?? '—',
+                'grade_level'             => $student->section->grade_level ?? null,
+                'average'                 => $latestRisk->average_grade ?? '—',
+                'risk_level'              => $latestRisk->risk_level ?? '—',
+                'weakest_subject'         => $latestRisk->weakest_subject ?? null,
+                'weakest_subject_grade'   => $latestRisk->weakest_subject_grade ?? null,
+                'weakest_subject_component' => $this->weakestSubjectComponent($student, $latestRisk),
+                'failing_subjects'        => $latestRisk->failing_subjects ?? [],
+                'confidence'              => $latestRisk->confidence ?? null,
+                'was_overridden'          => $latestRisk->was_overridden ?? false,
+                'ml_risk_level'           => $latestRisk->ml_risk_level ?? null,
+                'trend'                   => $this->computeTrend($history),
+                'consecutive_decline'     => $this->computeConsecutiveDecline($history),
+                'subject_declines'        => $this->computeSubjectDeclines($student->id, $history),
             ];
         })
         ->filter(fn($s) => in_array($s['risk_level'], ['moderate', 'high']))
@@ -175,6 +180,43 @@ class DashboardAnalyticsService
             ->get();
 
         return compact('atRiskStudents', 'atRiskStudentsTotal', 'atRiskGradeLevels', 'atRiskSections');
+    }
+
+    /**
+     * Component-level evidence (P-8: DSS integration) for WHY the
+     * weakest subject is the weakest — reuses PerformanceAnalysisService
+     * rather than building a second, parallel DSS. Returns null whenever
+     * there's no assessment evidence yet for that subject/term (an
+     * average-grade-only submission, or a subject with no uploads) —
+     * the existing subject/grade-based reasoning still shows on its own
+     * in that case; this only ADDS detail when it's actually available.
+     */
+    private function weakestSubjectComponent(Student $student, ?RiskResult $latestRisk): ?array
+    {
+        if (!$latestRisk?->weakest_subject_id || !$latestRisk->weakestSubject || !$student->section) {
+            return null;
+        }
+
+        $analysis = $this->performanceAnalysis->analyzeStudent(
+            $student,
+            $latestRisk->weakestSubject,
+            $student->section,
+            $latestRisk->grading_period,
+            $latestRisk->school_year
+        );
+
+        if (!$analysis['weakest_component']) {
+            return null;
+        }
+
+        $component = $analysis['components'][$analysis['weakest_component']];
+
+        return [
+            'key'        => $analysis['weakest_component'],
+            'percentage' => $component['percentage'],
+            'gap'        => $component['gap'],
+            'status'     => $component['status'],
+        ];
     }
 
     /**

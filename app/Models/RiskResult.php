@@ -23,7 +23,8 @@ class RiskResult extends Model
         'grading_period',   // 1, 2, or 3
         'average_grade',    // Computed average of all subject grades
         'risk_level',       // 'low', 'moderate', or 'high'
-        'weakest_subject',        
+        'weakest_subject',
+        'weakest_subject_id',
         'weakest_subject_grade',
         'failing_subjects', // lahat ng bumagsak na subjects, hindi lang yung pinakamababa
         'was_overridden',   // BAGO — true kung binago ng rule ang sinabi ng ML
@@ -48,5 +49,11 @@ class RiskResult extends Model
     public function student()
     {
         return $this->belongsTo(Student::class);
+    }
+
+    /** The subject with the lowest grade for this student this term, if known */
+    public function weakestSubject()
+    {
+        return $this->belongsTo(Subject::class, 'weakest_subject_id');
     }
 }
