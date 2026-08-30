@@ -8,8 +8,10 @@ use App\Models\Assessment;
 use App\Models\Section;
 use App\Models\Subject;
 use App\Models\AssessmentUpload;
+use App\Models\Student;
 use App\Helpers\LogActivity;
 use App\Services\AssessmentUploadService;
+use App\Services\PerformanceAnalysisService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -35,8 +37,10 @@ class AssessmentController extends Controller
 {
     private const TEMP_DIR = 'temp_assessment_uploads';
 
-    public function __construct(private AssessmentUploadService $uploads = new AssessmentUploadService())
-    {
+    public function __construct(
+        private AssessmentUploadService $uploads = new AssessmentUploadService(),
+        private PerformanceAnalysisService $analysis = new PerformanceAnalysisService()
+    ) {
     }
 
     public function index(Request $request)
@@ -46,7 +50,7 @@ class AssessmentController extends Controller
         if (!$section) {
             return view('adviser.assessments', [
                 'section' => null, 'subjects' => collect(), 'selectedSubject' => null,
-                'selectedPeriod' => 1, 'items' => collect(), 'openTerm' => null,
+                'selectedPeriod' => 1, 'items' => collect(), 'openTerm' => null, 'performance' => collect(),
             ]);
         }
 
@@ -69,8 +73,21 @@ class AssessmentController extends Controller
 
         $openTerm = AcademicTerm::currentOpenTerm($section->school_year);
 
+        // Only worth analyzing once at least one assessment item exists —
+        // otherwise every student would just show "incomplete" for nothing.
+        $performance = collect();
+        if ($selectedSubject && $items->isNotEmpty()) {
+            $performance = Student::where('section_id', $section->id)
+                ->orderBy('last_name')
+                ->get()
+                ->map(fn($student) => array_merge(
+                    ['student' => $student],
+                    $this->analysis->analyzeStudent($student, $selectedSubject, $section, $selectedPeriod, $section->school_year)
+                ));
+        }
+
         return view('adviser.assessments', compact(
-            'section', 'subjects', 'selectedSubject', 'selectedPeriod', 'items', 'openTerm'
+            'section', 'subjects', 'selectedSubject', 'selectedPeriod', 'items', 'openTerm', 'performance'
         ));
     }
 

@@ -16,6 +16,8 @@
 
 @php
     $isTermOpen = $openTerm === $selectedPeriod;
+    $componentLabels = ['written_work' => 'Written Work', 'performance_task' => 'Performance Task', 'examination' => 'Examination'];
+    $componentColors = ['written_work' => 'bg-blue-100 text-blue-700', 'performance_task' => 'bg-purple-100 text-purple-700', 'examination' => 'bg-orange-100 text-orange-700'];
 @endphp
 
 @if(session('error'))
@@ -114,10 +116,6 @@
             <tr class="hover:bg-gray-50">
                 <td class="px-6 py-3 font-medium text-gray-800">{{ $item->name }}</td>
                 <td class="px-4 py-3">
-                    @php
-                        $componentLabels = ['written_work' => 'Written Work', 'performance_task' => 'Performance Task', 'examination' => 'Examination'];
-                        $componentColors = ['written_work' => 'bg-blue-100 text-blue-700', 'performance_task' => 'bg-purple-100 text-purple-700', 'examination' => 'bg-orange-100 text-orange-700'];
-                    @endphp
                     <span class="px-2 py-0.5 rounded-full text-xs font-medium {{ $componentColors[$item->component] ?? 'bg-gray-100 text-gray-600' }}">
                         {{ $componentLabels[$item->component] ?? $item->component }}
                     </span>
@@ -137,6 +135,68 @@
     </table>
     @endif
 </div>
+
+@if($performance->isNotEmpty())
+<div class="bg-white rounded-xl shadow-sm mt-4 overflow-x-auto">
+    <div class="px-6 py-4 border-b">
+        <h3 class="font-semibold text-gray-800 text-sm">Student Performance — {{ $selectedSubject->name }}, Term {{ $selectedPeriod }}</h3>
+        <p class="text-xs text-gray-500 mt-1">
+            Component breakdown from assessment evidence — not just the final grade. A student can look fine
+            overall while one component quietly needs attention.
+        </p>
+    </div>
+    <table class="w-full text-sm">
+        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+            <tr>
+                <th class="text-left px-6 py-3">Student</th>
+                <th class="text-center px-3 py-3">Written Work</th>
+                <th class="text-center px-3 py-3">Performance Task</th>
+                <th class="text-center px-3 py-3">Examination</th>
+                <th class="text-center px-3 py-3">Computed Grade</th>
+                <th class="text-left px-4 py-3">Focus Area</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+            @foreach($performance as $row)
+            <tr class="hover:bg-gray-50">
+                <td class="px-6 py-3 font-medium text-gray-800 whitespace-nowrap">
+                    {{ $row['student']->last_name }}, {{ $row['student']->first_name }}
+                </td>
+                @foreach(['written_work', 'performance_task', 'examination'] as $key)
+                    @php $c = $row['components'][$key]; @endphp
+                    <td class="px-3 py-3 text-center">
+                        @if($c['percentage'] === null)
+                            <span class="text-gray-300 text-xs">No data</span>
+                        @else
+                            <span class="{{ $c['status'] === 'On Track' ? 'text-green-700' : 'text-red-600 font-medium' }}">
+                                {{ number_format($c['percentage'], 2) }}%
+                            </span>
+                            <span class="block text-xs text-gray-400">
+                                {{ $c['gap'] >= 0 ? '+' : '' }}{{ number_format($c['gap'], 1) }}
+                            </span>
+                        @endif
+                    </td>
+                @endforeach
+                <td class="px-3 py-3 text-center font-semibold {{ $row['complete'] ? 'text-gray-800' : 'text-gray-300' }}">
+                    {{ $row['complete'] ? number_format($row['computed_grade'], 2) : '—' }}
+                </td>
+                <td class="px-4 py-3">
+                    @if($row['weakest_component'] && ($row['components'][$row['weakest_component']]['status'] ?? null) === 'Needs Attention')
+                        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                            {{ $componentLabels[$row['weakest_component']] ?? $row['weakest_component'] }}
+                        </span>
+                    @elseif($row['weakest_component'])
+                        <span class="text-xs text-gray-400">On track</span>
+                    @else
+                        <span class="text-xs text-gray-300">No data yet</span>
+                    @endif
+                </td>
+            </tr>
+            @endforeach
+        </tbody>
+    </table>
+</div>
+@endif
 
 {{-- UPLOAD MODAL --}}
 @if($selectedSubject)
