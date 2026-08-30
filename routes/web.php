@@ -14,6 +14,7 @@ use App\Http\Controllers\Principal\DashboardController as PrincipalDashboardCont
 use App\Http\Controllers\Principal\InterventionController as PrincipalInterventionController;
 use App\Http\Controllers\Principal\ReportController as PrincipalReportController;
 use App\Http\Controllers\Principal\StudentController as PrincipalStudentController;
+use App\Http\Controllers\Principal\SubjectAnalysisController as PrincipalSubjectAnalysisController;
 
 // Admin controllers
 use App\Http\Controllers\Admin\DashboardController;
@@ -97,6 +98,7 @@ Route::middleware(['auth', 'role:principal'])
         Route::put('/interventions/{intervention}', [PrincipalInterventionController::class, 'update'])->name('interventions.update');
         Route::get('/reports', [PrincipalReportController::class, 'index'])->name('reports');
         Route::get('/students/{student}', [PrincipalStudentController::class, 'show'])->name('students.show');
+        Route::get('/subject-analysis', [PrincipalSubjectAnalysisController::class, 'index'])->name('subject-analysis');
     });
 
 // =============================================

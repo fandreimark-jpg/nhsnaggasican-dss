@@ -91,6 +91,10 @@
                     class="flex items-center gap-3 px-4 py-2 rounded-lg border-l-4 hover:bg-brand-700 {{ request()->routeIs('principal.reports*') ? 'bg-brand-700 border-gold-500' : 'border-transparent' }}">
                         <i class="bi bi-file-earmark-text"></i> Reports
                     </a>
+                    <a href="{{ route('principal.subject-analysis') }}"
+                    class="flex items-center gap-3 px-4 py-2 rounded-lg border-l-4 hover:bg-brand-700 {{ request()->routeIs('principal.subject-analysis*') ? 'bg-brand-700 border-gold-500' : 'border-transparent' }}">
+                        <i class="bi bi-bar-chart"></i> Subject Analysis
+                    </a>
                 @else
                     <a href="{{ route('adviser.dashboard') }}"
                     class="flex items-center gap-3 px-4 py-2 rounded-lg border-l-4 hover:bg-brand-700 {{ request()->routeIs('adviser.dashboard') ? 'bg-brand-700 border-gold-500' : 'border-transparent' }}">

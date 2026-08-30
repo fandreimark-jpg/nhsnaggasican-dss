@@ -193,6 +193,20 @@ class RoleAuthorizationTest extends TestCase
         $this->actingAs($admin)->get('/principal/reports')->assertForbidden();
     }
 
+    public function test_principal_subject_analysis_page_renders(): void
+    {
+        $principal = User::factory()->principal()->create();
+
+        $this->actingAs($principal)->get('/principal/subject-analysis')->assertOk();
+    }
+
+    public function test_adviser_cannot_access_principal_subject_analysis(): void
+    {
+        $adviser = User::factory()->create();
+
+        $this->actingAs($adviser)->get('/principal/subject-analysis')->assertForbidden();
+    }
+
     public function test_principal_cannot_manage_admin_master_data(): void
     {
         $principal = User::factory()->principal()->create();
