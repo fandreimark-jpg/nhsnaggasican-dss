@@ -197,4 +197,11 @@ class RoleAuthorizationTest extends TestCase
 
         $this->actingAs($adviser)->get('/adviser/submit-report')->assertOk();
     }
+
+    public function test_adviser_assessments_page_renders(): void
+    {
+        $adviser = User::factory()->create();
+
+        $this->actingAs($adviser)->get('/adviser/assessments')->assertOk();
+    }
 }

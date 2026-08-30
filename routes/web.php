@@ -7,6 +7,7 @@ use App\Http\Controllers\Adviser\DashboardController as AdviserDashboardControll
 use App\Http\Controllers\Adviser\StudentController as AdviserStudentController;
 use App\Http\Controllers\Adviser\GradeController as AdviserGradeController;
 use App\Http\Controllers\Adviser\ReportController as AdviserReportController;
+use App\Http\Controllers\Adviser\AssessmentController as AdviserAssessmentController;
 
 // Principal controllers
 use App\Http\Controllers\Principal\DashboardController as PrincipalDashboardController;
@@ -70,6 +71,9 @@ Route::middleware(['auth', 'role:adviser'])
         Route::get('/submit-report',      [AdviserReportController::class, 'show'])->name('submit.report');
         Route::post('/submit-report',     [AdviserReportController::class, 'submit'])->name('submit.report.post');
         Route::post('/students/import',   [AdviserStudentController::class, 'import'])->name('students.import');
+        Route::get('/assessments',          [AdviserAssessmentController::class, 'index'])->name('assessments');
+        Route::post('/assessments/detect',  [AdviserAssessmentController::class, 'detect'])->name('assessments.detect');
+        Route::post('/assessments/import',  [AdviserAssessmentController::class, 'import'])->name('assessments.import');
     });
 
 // =============================================

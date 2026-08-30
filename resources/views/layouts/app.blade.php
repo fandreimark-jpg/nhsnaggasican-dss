@@ -96,6 +96,10 @@
                     class="flex items-center gap-3 px-4 py-2 rounded-lg border-l-4 hover:bg-brand-700 {{ request()->routeIs('adviser.grades*') ? 'bg-brand-700 border-gold-500' : 'border-transparent' }}">
                         <i class="bi bi-pencil-square"></i> Encode Grades
                     </a>
+                    <a href="{{ route('adviser.assessments') }}"
+                    class="flex items-center gap-3 px-4 py-2 rounded-lg border-l-4 hover:bg-brand-700 {{ request()->routeIs('adviser.assessments*') ? 'bg-brand-700 border-gold-500' : 'border-transparent' }}">
+                        <i class="bi bi-clipboard-data"></i> Assessments
+                    </a>
                     <a href="{{ route('adviser.submit.report') }}"
                     class="flex items-center gap-3 px-4 py-2 rounded-lg border-l-4 hover:bg-brand-700 {{ request()->routeIs('adviser.submit*') ? 'bg-brand-700 border-gold-500' : 'border-transparent' }}">
                         <i class="bi bi-file-earmark-arrow-up"></i> Submit Report
