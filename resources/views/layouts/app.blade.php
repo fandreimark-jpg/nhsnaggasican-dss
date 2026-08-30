@@ -87,6 +87,10 @@
                     class="flex items-center gap-3 px-4 py-2 rounded-lg border-l-4 hover:bg-brand-700 {{ request()->routeIs('principal.interventions*') ? 'bg-brand-700 border-gold-500' : 'border-transparent' }}">
                         <i class="bi bi-clipboard2-pulse"></i> Interventions
                     </a>
+                    <a href="{{ route('principal.reports') }}"
+                    class="flex items-center gap-3 px-4 py-2 rounded-lg border-l-4 hover:bg-brand-700 {{ request()->routeIs('principal.reports*') ? 'bg-brand-700 border-gold-500' : 'border-transparent' }}">
+                        <i class="bi bi-file-earmark-text"></i> Reports
+                    </a>
                 @else
                     <a href="{{ route('adviser.dashboard') }}"
                     class="flex items-center gap-3 px-4 py-2 rounded-lg border-l-4 hover:bg-brand-700 {{ request()->routeIs('adviser.dashboard') ? 'bg-brand-700 border-gold-500' : 'border-transparent' }}">

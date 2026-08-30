@@ -12,6 +12,7 @@ use App\Http\Controllers\Adviser\AssessmentController as AdviserAssessmentContro
 // Principal controllers
 use App\Http\Controllers\Principal\DashboardController as PrincipalDashboardController;
 use App\Http\Controllers\Principal\InterventionController as PrincipalInterventionController;
+use App\Http\Controllers\Principal\ReportController as PrincipalReportController;
 
 // Admin controllers
 use App\Http\Controllers\Admin\DashboardController;
@@ -93,6 +94,7 @@ Route::middleware(['auth', 'role:principal'])
         Route::get('/interventions',            [PrincipalInterventionController::class, 'index'])->name('interventions');
         Route::post('/interventions',           [PrincipalInterventionController::class, 'store'])->name('interventions.store');
         Route::put('/interventions/{intervention}', [PrincipalInterventionController::class, 'update'])->name('interventions.update');
+        Route::get('/reports', [PrincipalReportController::class, 'index'])->name('reports');
     });
 
 // =============================================

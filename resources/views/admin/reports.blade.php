@@ -29,7 +29,7 @@
                class="border rounded-md text-sm px-2 py-1.5">
     </div>
     @if(request('grade_level') || request('section_search'))
-        <a href="{{ route('admin.reports') }}" class="text-sm text-gray-500 hover:underline pb-1.5">Clear</a>
+        <a href="{{ $clearRoute }}" class="text-sm text-gray-500 hover:underline pb-1.5">Clear</a>
     @endif
 </form>
 
