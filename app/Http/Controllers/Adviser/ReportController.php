@@ -11,6 +11,7 @@ use App\Models\RiskResult;
 use App\Models\ReportSubmission;
 use App\Models\AcademicTerm;
 use App\Helpers\LogActivity;
+use App\Services\RiskFeatureExtractor;
 use Illuminate\Http\Request;
 
 /**
@@ -22,6 +23,10 @@ use Illuminate\Http\Request;
  */
 class ReportController extends Controller
 {
+    public function __construct(private RiskFeatureExtractor $riskFeatures = new RiskFeatureExtractor())
+    {
+    }
+
     /**
      * Show the Submit Report page.
      * Displays term submission status and grade summary per student.
@@ -242,6 +247,31 @@ class ReportController extends Controller
     }
 
     /**
+     * Builds the JSON payload sent to classify.py — average_grade plus
+     * the expanded feature set from RiskFeatureExtractor (see its doc
+     * comment for why the trained model doesn't use them yet). Public
+     * so the exact payload shape is directly unit-testable without
+     * going through a real exec() call.
+     */
+    public function buildPythonPayload(array $gradesData, Section $section, int $gradingPeriod): array
+    {
+        $studentsById = Student::whereIn('id', collect($gradesData)->pluck('student_id'))->get()->keyBy('id');
+
+        return array_map(function ($s) use ($studentsById, $section, $gradingPeriod) {
+            $student = $studentsById->get($s['student_id']);
+            $features = $student
+                ? $this->riskFeatures->extract($student, $section, $gradingPeriod, $section->school_year, (float) $s['average_grade'])
+                : [];
+
+            return array_merge([
+                'student_id'            => $s['student_id'],
+                'average_grade'         => $s['average_grade'],
+                'failing_subject_count' => $s['failing_count'] ?? null,
+            ], $features);
+        }, $gradesData);
+    }
+
+    /**
      * Run the Python Random Forest classifier.
      *
      * Flow:
@@ -264,12 +294,7 @@ class ReportController extends Controller
         $tempFile   = storage_path('app/temp_grades_' . $section->id . '.json');
         $outputFile = storage_path('app/temp_results_' . $section->id . '.json');
 
-        // Python only needs student_id + average_grade for classification —
-        // strip out the extra fields before sending.
-        $pythonPayload = array_map(fn($s) => [
-            'student_id'    => $s['student_id'],
-            'average_grade' => $s['average_grade'],
-        ], $gradesData);
+        $pythonPayload = $this->buildPythonPayload($gradesData, $section, $gradingPeriod);
 
         file_put_contents($tempFile, json_encode($pythonPayload));
 

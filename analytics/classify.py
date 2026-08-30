@@ -5,6 +5,32 @@ import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import cross_val_score
 
+# ============================================================================
+# TRAINING DATA LIMITATION (documented per project policy — do not remove)
+#
+# This model is trained on ONE feature (average_grade) against 90 PURELY
+# SYNTHETIC samples that are just clean numeric boundaries matching the
+# DepEd thresholds below (90-100 / 75-89 / 60-74). The 100% cross-validation
+# accuracy reported in model_accuracy.txt is EXPECTED, not evidence of
+# real-world validity — a single-feature threshold problem with hand-picked,
+# perfectly-separable training points will always score perfectly. This
+# model has never been trained or validated against real student outcomes.
+#
+# Laravel (see App\Services\RiskFeatureExtractor and
+# Adviser\ReportController::runAnalytics) now sends a richer feature set —
+# ww_mean, pt_mean, exam_mean, failing_subject_count, weak_component_count,
+# prev_term_average, trend_delta — alongside average_grade. classify_students()
+# below intentionally does NOT read any of them yet: retraining to actually
+# use them now would trade this simple, well-understood model for a more
+# complex one with no real assessment data yet to validate it against (the
+# assessment-evidence layer was only just built). The extra fields are
+# included in the payload so that once real data has accumulated, doing that
+# retrain is a small follow-up with something real to check it against —
+# not a second speculative rebuild. Any future retrain must be validated
+# against real (not synthetic) student outcomes before being trusted, and
+# this comment must be updated to reflect what was actually validated.
+# ============================================================================
+
 # Path where the trained model is cached after first run
 # Avoids retraining on every report submission — improves performance
 MODEL_PATH = os.path.join(os.path.dirname(__file__), 'model_cache.pkl')
@@ -126,7 +152,11 @@ def classify_students(grades_data, model):
     Classify each student's risk level based on their average grade.
 
     Args:
-        grades_data: list of { student_id, average_grade }
+        grades_data: list of dicts with at least { student_id, average_grade }.
+            Laravel now also sends ww_mean, pt_mean, exam_mean,
+            failing_subject_count, weak_component_count, prev_term_average,
+            trend_delta — intentionally unused here for now, see the
+            TRAINING DATA LIMITATION note at the top of this file.
         model: trained RandomForestClassifier
 
     Returns:
