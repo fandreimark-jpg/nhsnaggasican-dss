@@ -74,6 +74,7 @@ Route::middleware(['auth', 'role:adviser'])
         Route::post('/students/import',   [AdviserStudentController::class, 'import'])->name('students.import');
         Route::get('/assessments',          [AdviserAssessmentController::class, 'index'])->name('assessments');
         Route::post('/assessments/detect',  [AdviserAssessmentController::class, 'detect'])->name('assessments.detect');
+        Route::post('/assessments/preview', [AdviserAssessmentController::class, 'preview'])->name('assessments.preview');
         Route::post('/assessments/import',  [AdviserAssessmentController::class, 'import'])->name('assessments.import');
     });
 

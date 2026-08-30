@@ -204,6 +204,54 @@ class AssessmentUploadServiceTest extends TestCase
         @unlink($path);
     }
 
+    public function test_preview_rows_reports_validity_without_writing_anything(): void
+    {
+        $adviser = User::factory()->create();
+        $section = Section::factory()->create(['adviser_id' => $adviser->id]);
+        $subject = Subject::factory()->create();
+        $goodStudent = Student::factory()->create(['section_id' => $section->id, 'lrn' => '100000000020']);
+
+        $path = $this->csvPath(
+            "lrn,last_name,first_name,Quiz 1\n" .
+            "100000000020,Dela Cruz,Juan,18\n" .   // valid
+            "999999999999,Nobody,Here,15\n" .      // unmatched student
+            "100000000020,Dela Cruz,Juan,10\n" .   // duplicate LRN
+            "100000000020x,Bad,Row,999\n"          // will be treated as its own unmatched lrn
+        );
+
+        $preview = $this->service->previewRows($path, ['Quiz 1' => ['component' => 'written_work', 'max_score' => 20]], $section);
+
+        $this->assertSame(0, Assessment::count());
+        $this->assertSame(0, AssessmentScore::count());
+
+        $this->assertSame(4, $preview['total_rows']);
+        // Both the original row and its duplicate resolve to the same real
+        // student — 2 rows "matched," even though only the first is usable.
+        $this->assertSame(2, $preview['matched_rows']);
+        $this->assertSame('ok', $preview['rows'][0]['cells'][0]['status']);
+        $this->assertSame('unmatched', $preview['rows'][1]['cells'][0]['status']);
+        $this->assertSame('duplicate', $preview['rows'][2]['cells'][0]['status']);
+
+        @unlink($path);
+    }
+
+    public function test_preview_rows_marks_a_blank_cell_without_counting_it_as_invalid(): void
+    {
+        $adviser = User::factory()->create();
+        $section = Section::factory()->create(['adviser_id' => $adviser->id]);
+        Student::factory()->create(['section_id' => $section->id, 'lrn' => '100000000021']);
+
+        $path = $this->csvPath("lrn,last_name,first_name,Quiz 1\n100000000021,Dela Cruz,Juan,\n");
+
+        $preview = $this->service->previewRows($path, ['Quiz 1' => ['component' => 'written_work', 'max_score' => 20]], $section);
+
+        $this->assertSame('blank', $preview['rows'][0]['cells'][0]['status']);
+        $this->assertSame(0, $preview['total_valid_cells']);
+        $this->assertSame(0, $preview['total_invalid_cells']);
+
+        @unlink($path);
+    }
+
     public function test_re_importing_the_same_column_updates_rather_than_duplicates(): void
     {
         $adviser = User::factory()->create();

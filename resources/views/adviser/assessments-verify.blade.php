@@ -15,7 +15,7 @@
         <span class="text-orange-600 font-medium">Columns marked "Unclassified" could not be guessed automatically — you must choose one before importing.</span>
     </p>
 
-    <form method="POST" action="{{ route('adviser.assessments.import') }}">
+    <form method="POST" action="{{ route('adviser.assessments.preview') }}">
         @csrf
         <input type="hidden" name="subject_id" value="{{ $subject->id }}">
         <input type="hidden" name="grading_period" value="{{ $gradingPeriod }}">
@@ -63,7 +63,7 @@
                class="px-4 py-2 text-sm text-gray-500">Cancel</a>
             <button type="submit"
                     class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-brand-800">
-                <i class="bi bi-check-circle"></i> Confirm & Import
+                <i class="bi bi-eye"></i> Preview
             </button>
         </div>
     </form>

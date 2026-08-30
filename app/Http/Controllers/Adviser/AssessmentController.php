@@ -19,19 +19,22 @@ use Illuminate\Support\Str;
 /**
  * AssessmentController (Adviser)
  *
- * The assessment upload workflow: select term/subject -> upload file ->
- * system detects likely columns -> adviser verifies/corrects the
- * classification and sets each item's max score -> import. An uploaded
- * assessment is EVIDENCE (see Assessment/AssessmentScore) — it never
- * touches grades.grade, the official final grade, which stays under the
- * existing adviser-verified grade workflow.
+ * The assessment upload workflow, matching CLAUDE.md's pipeline exactly:
+ * select term/subject -> upload file -> Detect columns -> adviser
+ * Verifies/corrects classification and sets max score -> Preview (dry
+ * run, nothing saved) -> Import. An uploaded assessment is EVIDENCE (see
+ * Assessment/AssessmentScore) — it never touches grades.grade, the
+ * official final grade, which stays under the existing adviser-verified
+ * grade workflow.
  *
- * detect() and import() are two separate requests because the adviser
- * must see and can correct the classification before anything is saved
- * (CLAUDE.md: "ambiguous columns must not be silently classified"). The
- * uploaded file is held in a temp disk location between the two requests,
- * referenced by a token in a hidden field — never trust a client-supplied
- * path directly (see the token validation in import()).
+ * detect()/preview()/import() are three separate requests because the
+ * adviser must see and can correct the classification before anything is
+ * saved (CLAUDE.md: "ambiguous columns must not be silently classified"),
+ * then see exactly what will happen before committing to it. The
+ * uploaded file is held in a temp disk location across all three
+ * requests, referenced by a token in a hidden field — never trust a
+ * client-supplied path directly (see the token validation in preview()
+ * and import()).
  */
 class AssessmentController extends Controller
 {
@@ -140,8 +143,72 @@ class AssessmentController extends Controller
     }
 
     /**
-     * Phase 2: the adviser has confirmed (or corrected) each column's
-     * component and supplied its max score — now actually import.
+     * Phase 2 (CLAUDE.md's "Preview" step): the adviser has confirmed each
+     * column's component and max score — show exactly what will happen
+     * (which rows match, which cells are valid/invalid) as a DRY RUN
+     * before anything is written. The confirmed mapping is round-tripped
+     * as hidden fields so the eventual import() call validates against
+     * the exact same input the adviser previewed, not a re-detected one.
+     */
+    public function preview(Request $request)
+    {
+        $section = Section::where('adviser_id', auth()->id())->firstOrFail();
+        $gradingPeriod = (int) $request->input('grading_period', 1);
+
+        $request->validate([
+            'subject_id'                => 'required|exists:subjects,id',
+            'stored_filename'           => ['required', 'string', 'regex:/^[a-f0-9\-]+\.(xlsx|xls|csv|txt)$/i'],
+            'columns'                   => 'required|array|min:1',
+            'columns.*.name'            => 'required|string',
+            'columns.*.component'       => 'required|in:written_work,performance_task,examination',
+            'columns.*.max_score'       => 'required|numeric|min:0.01',
+        ]);
+
+        $subject = Subject::forSection($section)->where('id', $request->subject_id)->first();
+        if (!$subject) {
+            return redirect()->route('adviser.assessments', ['period' => $gradingPeriod])
+                ->with('error', 'That subject is not offered to your section.');
+        }
+
+        if (!AcademicTerm::isOpen($section->school_year, $gradingPeriod)) {
+            return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
+                ->with('error', 'Term ' . $gradingPeriod . ' is currently closed for encoding. Contact the admin.');
+        }
+
+        $relativePath = self::TEMP_DIR . '/' . $request->input('stored_filename');
+        if (!Storage::disk('local')->exists($relativePath)) {
+            return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
+                ->with('error', 'The uploaded file has expired. Please upload it again.');
+        }
+
+        $columnMapping = [];
+        foreach ($request->input('columns') as $col) {
+            $columnMapping[$col['name']] = [
+                'component' => $col['component'],
+                'max_score' => (float) $col['max_score'],
+            ];
+        }
+
+        $preview = $this->uploads->previewRows(
+            Storage::disk('local')->path($relativePath),
+            $columnMapping,
+            $section
+        );
+
+        return view('adviser.assessments-preview', [
+            'section'         => $section,
+            'subject'         => $subject,
+            'gradingPeriod'   => $gradingPeriod,
+            'storedFilename'  => $request->input('stored_filename'),
+            'originalName'    => $request->input('original_filename'),
+            'columns'         => $request->input('columns'),
+            'preview'         => $preview,
+        ]);
+    }
+
+    /**
+     * Phase 3: the adviser has seen the preview and confirmed — now
+     * actually import.
      */
     public function import(Request $request)
     {

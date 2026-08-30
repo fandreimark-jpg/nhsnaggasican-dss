@@ -12,12 +12,13 @@ use Illuminate\Http\UploadedFile;
 use Tests\TestCase;
 
 /**
- * End-to-end HTTP round trip through the two-phase upload workflow:
- * detect() (upload -> classification-verification screen) then import()
- * (confirmed mapping -> saved evidence). AssessmentUploadServiceTest
- * covers import-logic edge cases directly against the service; this
+ * End-to-end HTTP round trip through the three-phase upload workflow:
+ * detect() (upload -> classification-verification screen), preview()
+ * (dry-run row-level check, nothing saved), then import() (confirmed
+ * mapping -> saved evidence). AssessmentUploadServiceTest covers
+ * import/preview-logic edge cases directly against the service; this
  * covers the controller's authorization, term-gating, and the actual
- * file hand-off between the two requests.
+ * file hand-off across all three requests.
  */
 class AssessmentUploadWorkflowTest extends TestCase
 {
@@ -28,7 +29,7 @@ class AssessmentUploadWorkflowTest extends TestCase
         return UploadedFile::fake()->createWithContent($name, $content);
     }
 
-    public function test_full_upload_detect_verify_import_round_trip(): void
+    public function test_full_upload_detect_verify_preview_import_round_trip(): void
     {
         $adviser = User::factory()->create();
         $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027']);
@@ -54,15 +55,32 @@ class AssessmentUploadWorkflowTest extends TestCase
 
         $storedFilename = $detectResponse->viewData('storedFilename');
 
+        $confirmedColumns = [
+            ['name' => 'Quiz 1', 'component' => 'written_work', 'max_score' => 20],
+            ['name' => 'Final Exam', 'component' => 'examination', 'max_score' => 50],
+        ];
+
+        $previewResponse = $this->actingAs($adviser)->post('/adviser/assessments/preview', [
+            'subject_id'         => $subject->id,
+            'grading_period'     => 1,
+            'stored_filename'    => $storedFilename,
+            'original_filename'  => 'assessment.csv',
+            'columns'            => $confirmedColumns,
+        ]);
+
+        $previewResponse->assertOk();
+        $previewResponse->assertViewIs('adviser.assessments-preview');
+        $previewResponse->assertViewHas('preview', fn($p) => $p['total_rows'] === 1 && $p['matched_rows'] === 1 && $p['total_valid_cells'] === 2);
+        // Nothing written yet — preview is a dry run.
+        $this->assertDatabaseCount('assessments', 0);
+        $this->assertDatabaseCount('assessment_scores', 0);
+
         $importResponse = $this->actingAs($adviser)->post('/adviser/assessments/import', [
             'subject_id'      => $subject->id,
             'grading_period'  => 1,
             'stored_filename' => $storedFilename,
             'original_filename' => 'assessment.csv',
-            'columns' => [
-                ['name' => 'Quiz 1', 'component' => 'written_work', 'max_score' => 20],
-                ['name' => 'Final Exam', 'component' => 'examination', 'max_score' => 50],
-            ],
+            'columns' => $confirmedColumns,
         ]);
 
         $importResponse->assertSessionHas('success');
@@ -107,6 +125,48 @@ class AssessmentUploadWorkflowTest extends TestCase
             'subject_id'     => $subject->id,
             'grading_period' => 1,
             'file'           => $this->csv("lrn,last_name,first_name,Quiz 1\n"),
+        ]);
+
+        $response->assertSessionHas('error');
+    }
+
+    public function test_preview_rejects_a_tampered_stored_filename(): void
+    {
+        $adviser = User::factory()->create();
+        $section = Section::factory()->create(['adviser_id' => $adviser->id]);
+        $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
+
+        AcademicTerm::ensureExistFor($section->school_year);
+
+        $response = $this->actingAs($adviser)->post('/adviser/assessments/preview', [
+            'subject_id'      => $subject->id,
+            'grading_period'  => 1,
+            'stored_filename' => '../../.env',
+            'columns' => [
+                ['name' => 'Quiz 1', 'component' => 'written_work', 'max_score' => 20],
+            ],
+        ]);
+
+        $response->assertSessionHasErrors('stored_filename');
+    }
+
+    public function test_preview_is_blocked_when_the_term_is_closed(): void
+    {
+        $admin   = User::factory()->admin()->create();
+        $adviser = User::factory()->create();
+        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027']);
+        $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
+
+        AcademicTerm::ensureExistFor($section->school_year);
+        $this->actingAs($admin)->post('/admin/academic-terms/1/close');
+
+        $response = $this->actingAs($adviser)->post('/adviser/assessments/preview', [
+            'subject_id'      => $subject->id,
+            'grading_period'  => 1,
+            'stored_filename' => '11111111-1111-1111-1111-111111111111.csv',
+            'columns' => [
+                ['name' => 'Quiz 1', 'component' => 'written_work', 'max_score' => 20],
+            ],
         ]);
 
         $response->assertSessionHas('error');
