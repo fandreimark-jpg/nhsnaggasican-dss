@@ -63,4 +63,12 @@ class UserFactory extends Factory
         });
     }
 
+    /** Indicate that the user is a principal. Same reasoning as admin() above. */
+    public function principal(): static
+    {
+        return $this->afterMaking(function (User $user) {
+            $user->role = 'principal';
+        });
+    }
+
 }

@@ -49,6 +49,10 @@
                         <span class="px-2 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
                             <i class="bi bi-shield-lock-fill"></i> Admin
                         </span>
+                    @elseif($user->role === 'principal')
+                        <span class="px-2 py-1 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-800">
+                            <i class="bi bi-mortarboard-fill"></i> Principal
+                        </span>
                     @else
                         <span class="px-2 py-1 rounded-full text-xs font-semibold bg-brand-100 text-brand-700">
                             <i class="bi bi-person-fill"></i> Adviser
@@ -181,6 +185,7 @@
                         class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
                     <option value="adviser">Adviser</option>
                     <option value="admin">Admin</option>
+                    <option value="principal">Principal</option>
                 </select>
             </div>
 

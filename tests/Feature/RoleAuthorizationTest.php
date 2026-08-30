@@ -116,6 +116,74 @@ class RoleAuthorizationTest extends TestCase
         $this->actingAs($adviser)->get('/adviser/students')->assertOk();
     }
 
+    public function test_principal_can_access_own_dashboard(): void
+    {
+        $principal = User::factory()->principal()->create();
+
+        $this->actingAs($principal)
+            ->get('/principal/dashboard')
+            ->assertOk();
+    }
+
+    public function test_admin_cannot_access_principal_dashboard(): void
+    {
+        $admin = User::factory()->admin()->create();
+
+        $this->actingAs($admin)
+            ->get('/principal/dashboard')
+            ->assertForbidden();
+    }
+
+    public function test_adviser_cannot_access_principal_dashboard(): void
+    {
+        $adviser = User::factory()->create();
+
+        $this->actingAs($adviser)
+            ->get('/principal/dashboard')
+            ->assertForbidden();
+    }
+
+    public function test_principal_cannot_access_admin_dashboard(): void
+    {
+        $principal = User::factory()->principal()->create();
+
+        $this->actingAs($principal)
+            ->get('/admin/dashboard')
+            ->assertForbidden();
+    }
+
+    public function test_principal_cannot_access_adviser_dashboard(): void
+    {
+        $principal = User::factory()->principal()->create();
+
+        $this->actingAs($principal)
+            ->get('/adviser/dashboard')
+            ->assertForbidden();
+    }
+
+    public function test_principal_cannot_modify_grades(): void
+    {
+        $principal = User::factory()->principal()->create();
+
+        $this->actingAs($principal)
+            ->post('/adviser/grades', ['grading_period' => 1, 'grades' => []])
+            ->assertForbidden();
+    }
+
+    public function test_principal_cannot_manage_admin_master_data(): void
+    {
+        $principal = User::factory()->principal()->create();
+
+        $this->actingAs($principal)
+            ->post('/admin/sections', ['name' => 'Narra'])
+            ->assertForbidden();
+    }
+
+    public function test_guest_is_redirected_to_login_from_principal_dashboard(): void
+    {
+        $this->get('/principal/dashboard')->assertRedirect(route('login'));
+    }
+
     public function test_adviser_grades_page_renders(): void
     {
         $adviser = User::factory()->create();

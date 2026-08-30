@@ -9,11 +9,14 @@ use Illuminate\Notifications\Notifiable;
 /**
  * User Model
  *
- * Represents a system user — either an Admin or Adviser.
- * Roles: 'admin' or 'adviser'
+ * Represents a system user — Admin, Adviser, or Principal.
+ * Roles: 'admin', 'adviser', or 'principal'
  *
- * Admin → can manage all data, view dashboard and reports
- * Adviser   → can encode grades and submit reports for their section
+ * Admin     → manages master/system data (users, tracks, sections, subjects, etc.)
+ * Adviser   → encodes grades and submits reports for their assigned section
+ * Principal → read-only academic monitoring and Decision Support; may only
+ *             write intervention/monitoring decisions, never grades or
+ *             assessment records directly
  */
 class User extends Authenticatable
 {
@@ -67,6 +70,26 @@ class User extends Authenticatable
     public function isAdmin(): bool
     {
         return $this->role === 'admin';
+    }
+
+    /** Returns true if user is a principal */
+    public function isPrincipal(): bool
+    {
+        return $this->role === 'principal';
+    }
+
+    /**
+     * The named route for this user's role's dashboard — kept here so a
+     * new role only needs to be added in one place, not re-derived at
+     * every redirect call site (root redirect, /dashboard, etc).
+     */
+    public function dashboardRouteName(): string
+    {
+        return match ($this->role) {
+            'admin'     => 'admin.dashboard',
+            'principal' => 'principal.dashboard',
+            default     => 'adviser.dashboard',
+        };
     }
 
     // =============================================

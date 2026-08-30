@@ -8,6 +8,9 @@ use App\Http\Controllers\Adviser\StudentController as AdviserStudentController;
 use App\Http\Controllers\Adviser\GradeController as AdviserGradeController;
 use App\Http\Controllers\Adviser\ReportController as AdviserReportController;
 
+// Principal controllers
+use App\Http\Controllers\Principal\DashboardController as PrincipalDashboardController;
+
 // Admin controllers
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\UserController;
@@ -23,19 +26,13 @@ use App\Http\Controllers\Admin\ActivityLogController;
 // Root redirect
 Route::get('/', function () {
     if (auth()->check()) {
-        if (auth()->user()->role === 'admin') {
-            return redirect()->route('admin.dashboard');
-        }
-        return redirect()->route('adviser.dashboard');
+        return redirect()->route(auth()->user()->dashboardRouteName());
     }
     return redirect()->route('login');
 });
 
 Route::get('/dashboard', function () {
-    if (auth()->user()->role === 'admin') {
-        return redirect()->route('admin.dashboard');
-    }
-    return redirect()->route('adviser.dashboard');
+    return redirect()->route(auth()->user()->dashboardRouteName());
 })->middleware('auth')->name('dashboard');
 
 // =============================================
@@ -73,6 +70,16 @@ Route::middleware(['auth', 'role:adviser'])
         Route::get('/submit-report',      [AdviserReportController::class, 'show'])->name('submit.report');
         Route::post('/submit-report',     [AdviserReportController::class, 'submit'])->name('submit.report.post');
         Route::post('/students/import',   [AdviserStudentController::class, 'import'])->name('students.import');
+    });
+
+// =============================================
+// PRINCIPAL ROUTES (read-only academic monitoring / Decision Support)
+// =============================================
+Route::middleware(['auth', 'role:principal'])
+    ->prefix('principal')
+    ->name('principal.')
+    ->group(function () {
+        Route::get('/dashboard', [PrincipalDashboardController::class, 'index'])->name('dashboard');
     });
 
 // =============================================

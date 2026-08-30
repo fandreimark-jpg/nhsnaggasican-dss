@@ -1,13 +1,21 @@
-{{-- This partial is rendered TWICE:
-     1. Included directly inside admin/dashboard.blade.php on a normal page load.
-     2. Returned standalone by DashboardController::index() when the request
-        is AJAX (see the filter form's fetch() call in the dashboard scripts).
-     Keeping it as one file means the two code paths can never drift apart —
-     whatever renders on first load is exactly what re-renders after filtering. --}}
+{{-- This partial is shared by BOTH the Admin and Principal dashboards (each
+     read-only over the same risk data — see DashboardAnalyticsService), and
+     within each role it's rendered TWICE:
+     1. Included directly inside {admin,principal}/dashboard.blade.php on a
+        normal page load.
+     2. Returned standalone by each role's DashboardController::index() when
+        the request is AJAX (see the filter form's fetch() call in the
+        dashboard scripts).
+     Keeping it as one file means all these code paths can never drift apart
+     from each other. $reportRoute is optional — the Admin dashboard passes
+     route('admin.reports'); Principal has no reports route yet, so it's
+     omitted there and the link simply doesn't render. --}}
 
 <p class="text-xs text-gray-500 px-5 pt-3">
-    {{ $atRiskStudentsTotal }} moderate/high risk student{{ $atRiskStudentsTotal === 1 ? '' : 's' }}, sorted by urgency —
-    <a href="{{ route('admin.reports') }}" class="text-green-700 font-medium hover:underline">Full section report &rarr;</a>
+    {{ $atRiskStudentsTotal }} moderate/high risk student{{ $atRiskStudentsTotal === 1 ? '' : 's' }}, sorted by urgency
+    @isset($reportRoute)
+        — <a href="{{ $reportRoute }}" class="text-green-700 font-medium hover:underline">Full section report &rarr;</a>
+    @endisset
 </p>
 <div class="max-h-[480px] overflow-y-auto mt-2">
 <table class="w-full text-sm">

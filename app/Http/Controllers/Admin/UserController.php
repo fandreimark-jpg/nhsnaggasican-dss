@@ -48,7 +48,7 @@ class UserController extends Controller
             'middle_name' => 'nullable|string|max:255',
             'username'    => 'required|string|max:255|alpha_dash',
             'password'    => 'required|string|min:8',
-            'role'        => 'required|in:adviser,admin',
+            'role'        => 'required|in:adviser,admin,principal',
         ]);
 
         // Build email from username
@@ -102,7 +102,7 @@ class UserController extends Controller
             'middle_name' => 'nullable|string|max:255',
             'username'    => 'required|string|max:255|alpha_dash',
             'password'    => 'nullable|string|min:8',
-            'role'        => 'required|in:adviser,admin',
+            'role'        => 'required|in:adviser,admin,principal',
         ]);
 
         $email = $request->username . '@naggasican.edu.ph';
