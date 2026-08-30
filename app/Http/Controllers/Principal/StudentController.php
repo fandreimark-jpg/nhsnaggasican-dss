@@ -8,6 +8,7 @@ use App\Models\Intervention;
 use App\Models\RiskResult;
 use App\Models\Student;
 use App\Models\Subject;
+use App\Services\DashboardAnalyticsService;
 use App\Services\PerformanceAnalysisService;
 use Illuminate\Http\Request;
 
@@ -25,8 +26,10 @@ use Illuminate\Http\Request;
  */
 class StudentController extends Controller
 {
-    public function __construct(private PerformanceAnalysisService $analysis = new PerformanceAnalysisService())
-    {
+    public function __construct(
+        private PerformanceAnalysisService $analysis = new PerformanceAnalysisService(),
+        private DashboardAnalyticsService $dashboardAnalytics = new DashboardAnalyticsService()
+    ) {
     }
 
     public function show(Request $request, Student $student)
@@ -63,8 +66,16 @@ class StudentController extends Controller
         $riskHistory = RiskResult::where('student_id', $student->id)->orderBy('grading_period')->get();
         $interventions = Intervention::where('student_id', $student->id)->latest()->get();
 
+        $dssStatus = $latestRisk
+            ? $this->dashboardAnalytics->dssStatusLabel(
+                $latestRisk->risk_level,
+                $this->dashboardAnalytics->computeTrend($riskHistory),
+                $this->dashboardAnalytics->computeConsecutiveDecline($riskHistory)
+            )
+            : null;
+
         return view('principal.student-detail', compact(
-            'student', 'section', 'period', 'subjectAnalysis', 'riskHistory', 'interventions', 'latestRisk'
+            'student', 'section', 'period', 'subjectAnalysis', 'riskHistory', 'interventions', 'latestRisk', 'dssStatus'
         ));
     }
 }

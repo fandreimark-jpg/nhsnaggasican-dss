@@ -297,6 +297,28 @@ class DashboardAnalyticsService
     }
 
     /**
+     * CLAUDE.md's Principal-facing language uses 4 buckets (On Track /
+     * Needs Monitoring / Needs Attention / At Risk) where the rest of the
+     * app uses risk_level's 3 (low/moderate/high) — this is a PURE
+     * DISPLAY mapping, never stored, never used for filtering/business
+     * logic. Deliberately not a schema change: risk_level's 3-level
+     * scheme is already used throughout the ML pipeline, dashboards, and
+     * reports, and remapping the stored value would be a much bigger,
+     * riskier change for a wording difference. 'low' risk with a
+     * declining trend becomes "Needs Monitoring" rather than "On Track"
+     * — an early warning that a 3-bucket badge alone wouldn't show.
+     */
+    public function dssStatusLabel(string $riskLevel, ?string $trend, bool $consecutiveDecline): string
+    {
+        return match (true) {
+            $riskLevel === 'high' => 'At Risk',
+            $riskLevel === 'moderate' => 'Needs Attention',
+            $consecutiveDecline || $trend === 'declining' => 'Needs Monitoring',
+            default => 'On Track',
+        };
+    }
+
+    /**
      * Compare a student's average grade across grading periods to see how
      * their performance is actually moving — not just a single snapshot.
      *

@@ -52,6 +52,23 @@ class PrincipalStudentDrilldownTest extends TestCase
         $response->assertSee('Moderate');
     }
 
+    public function test_student_detail_shows_the_4_bucket_dss_status(): void
+    {
+        $principal = User::factory()->principal()->create();
+        $section = Section::factory()->create();
+        $student = Student::factory()->create(['section_id' => $section->id]);
+        RiskResult::create([
+            'student_id' => $student->id, 'grading_period' => 1, 'average_grade' => 65,
+            'risk_level' => 'high', 'school_year' => $section->school_year, 'generated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($principal)->get('/principal/students/' . $student->id);
+
+        $response->assertOk();
+        $response->assertSee('DSS Status');
+        $response->assertSee('At Risk');
+    }
+
     public function test_student_detail_shows_intervention_history(): void
     {
         $principal = User::factory()->principal()->create();

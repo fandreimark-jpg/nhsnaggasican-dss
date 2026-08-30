@@ -22,6 +22,9 @@
             <span class="inline-block mt-1 px-3 py-1 rounded-full text-sm font-medium {{ $riskColors[$latestRisk->risk_level] ?? 'bg-gray-100 text-gray-600' }}">
                 {{ ucfirst($latestRisk->risk_level) }} — {{ number_format($latestRisk->average_grade, 2) }} avg
             </span>
+            <span class="block text-xs text-gray-400 mt-1" title="Plain-language status: On Track / Needs Monitoring / Needs Attention / At Risk">
+                DSS Status: <span class="font-medium text-gray-600">{{ $dssStatus }}</span>
+            </span>
         @else
             <p class="text-sm text-gray-400 mt-1">No risk classification yet.</p>
         @endif
