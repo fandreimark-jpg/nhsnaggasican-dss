@@ -53,7 +53,9 @@
             @forelse($rows as $row)
             <tr class="hover:bg-gray-50 align-top">
                 <td class="px-6 py-3 font-medium text-gray-800 whitespace-nowrap">
-                    {{ $row['name'] }}
+                    <a href="{{ route('principal.students.show', $row['student_id']) }}" class="hover:underline hover:text-brand-700">
+                        {{ $row['name'] }}
+                    </a>
                     <span class="block text-xs text-gray-400 font-normal">{{ $row['section'] }}</span>
                 </td>
                 <td class="px-3 py-3 text-center">

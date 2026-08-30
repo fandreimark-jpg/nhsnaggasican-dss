@@ -32,7 +32,15 @@
     <tbody class="divide-y divide-gray-50">
         @forelse($atRiskStudents as $student)
         <tr class="hover:bg-gray-50">
-            <td class="px-5 py-2 font-medium text-gray-800 text-sm align-top">{{ $student['name'] }}</td>
+            <td class="px-5 py-2 font-medium text-gray-800 text-sm align-top">
+                @if(auth()->user()->role === 'principal' && isset($student['student_id']))
+                    <a href="{{ route('principal.students.show', $student['student_id']) }}" class="hover:underline hover:text-brand-700">
+                        {{ $student['name'] }}
+                    </a>
+                @else
+                    {{ $student['name'] }}
+                @endif
+            </td>
             <td class="px-3 py-2 text-gray-600 text-sm align-top">{{ $student['section'] }}</td>
             <td class="px-3 py-2 text-center text-gray-700 text-sm align-top">
                 {{ is_numeric($student['average']) ? number_format($student['average'], 2) : $student['average'] }}
