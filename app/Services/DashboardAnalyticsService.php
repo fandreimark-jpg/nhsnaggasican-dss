@@ -7,7 +7,9 @@ use App\Models\Grade;
 use App\Models\Intervention;
 use App\Models\RiskResult;
 use App\Models\Section;
+use App\Models\Specialization;
 use App\Models\Student;
+use App\Models\Track;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
@@ -179,8 +181,12 @@ class DashboardAnalyticsService
      */
     public function getAtRiskStudentsData(): array
     {
-        $atRiskGradeLevel = request('ar_grade_level');
-        $atRiskSection    = request('ar_section_search');
+        $atRiskGradeLevel    = request('ar_grade_level');
+        $atRiskSection       = request('ar_section_search');
+        $atRiskTrack         = request('ar_track');
+        $atRiskSpecialization = request('ar_specialization');
+        $atRiskRiskLevel     = request('ar_risk_level');
+        $atRiskComponent     = request('ar_component');
 
         $atRiskStudents = Student::with(['section', 'riskResults.weakestSubject'])
         ->whereHas('riskResults')
@@ -189,6 +195,12 @@ class DashboardAnalyticsService
         )
         ->when($atRiskSection, fn($q) =>
             $q->whereHas('section', fn($s) => $s->where('name', $atRiskSection))
+        )
+        ->when($atRiskTrack, fn($q) =>
+            $q->whereHas('section', fn($s) => $s->where('track_id', $atRiskTrack))
+        )
+        ->when($atRiskSpecialization, fn($q) =>
+            $q->whereHas('section', fn($s) => $s->where('specialization_id', $atRiskSpecialization))
         )
         ->get()
         ->map(function ($student) {
@@ -215,6 +227,10 @@ class DashboardAnalyticsService
             ];
         })
         ->filter(fn($s) => in_array($s['risk_level'], ['moderate', 'high']))
+        ->when($atRiskRiskLevel, fn($rows) => $rows->where('risk_level', $atRiskRiskLevel))
+        ->when($atRiskComponent, fn($rows) => $rows->filter(
+            fn($s) => ($s['weakest_subject_component']['key'] ?? null) === $atRiskComponent
+        ))
         ->sortBy([
             fn($s) => $s['risk_level'] === 'high' ? 0 : 1,
             fn($s) => $s['consecutive_decline'] ? 0 : 1,
@@ -234,7 +250,13 @@ class DashboardAnalyticsService
             ->orderBy('name')
             ->get();
 
-        return compact('atRiskStudents', 'atRiskStudentsTotal', 'atRiskGradeLevels', 'atRiskSections');
+        $atRiskTracks = Track::orderBy('name')->get(['id', 'name']);
+        $atRiskSpecializations = Specialization::orderBy('name')->get(['id', 'name', 'track_id']);
+
+        return compact(
+            'atRiskStudents', 'atRiskStudentsTotal', 'atRiskGradeLevels', 'atRiskSections',
+            'atRiskTracks', 'atRiskSpecializations'
+        );
     }
 
     /**

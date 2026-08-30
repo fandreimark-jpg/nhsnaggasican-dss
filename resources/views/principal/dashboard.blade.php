@@ -129,8 +129,12 @@
     </div>
 </div>
 
+@php
+    $atRiskFilterKeys = ['ar_grade_level', 'ar_section_search', 'ar_track', 'ar_specialization', 'ar_risk_level', 'ar_component'];
+    $atRiskFiltersActive = collect($atRiskFilterKeys)->contains(fn($k) => request($k));
+@endphp
 {{-- At-Risk Students Table — shared partial with the Admin dashboard --}}
-@if($atRiskStudentsTotal > 0 || request('ar_grade_level') || request('ar_section_search'))
+@if($atRiskStudentsTotal > 0 || $atRiskFiltersActive)
 <div class="bg-white rounded-lg shadow-sm mb-4">
     <div class="px-5 py-3 border-b">
         <h3 class="font-semibold text-gray-800 text-sm">Students Needing Attention</h3>
@@ -172,7 +176,46 @@
                         @endforeach
                     </select>
                 </div>
-                @if(request('ar_grade_level') || request('ar_section_search'))
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Track</label>
+                    <select name="ar_track" class="border rounded-md text-sm px-2 py-1.5 min-w-[130px]">
+                        <option value="">All tracks</option>
+                        @foreach($atRiskTracks as $track)
+                            <option value="{{ $track->id }}" {{ request('ar_track') == $track->id ? 'selected' : '' }}>
+                                {{ $track->name }}
+                            </option>
+                        @endforeach
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Specialization</label>
+                    <select name="ar_specialization" class="border rounded-md text-sm px-2 py-1.5 min-w-[130px]">
+                        <option value="">All specializations</option>
+                        @foreach($atRiskSpecializations as $spec)
+                            <option value="{{ $spec->id }}" {{ request('ar_specialization') == $spec->id ? 'selected' : '' }}>
+                                {{ $spec->name }}
+                            </option>
+                        @endforeach
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Risk Level</label>
+                    <select name="ar_risk_level" class="border rounded-md text-sm px-2 py-1.5 min-w-[120px]">
+                        <option value="">All levels</option>
+                        <option value="high" {{ request('ar_risk_level') === 'high' ? 'selected' : '' }}>High</option>
+                        <option value="moderate" {{ request('ar_risk_level') === 'moderate' ? 'selected' : '' }}>Moderate</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Assessment Component</label>
+                    <select name="ar_component" class="border rounded-md text-sm px-2 py-1.5 min-w-[160px]">
+                        <option value="">All components</option>
+                        <option value="written_work" {{ request('ar_component') === 'written_work' ? 'selected' : '' }}>Written Work</option>
+                        <option value="performance_task" {{ request('ar_component') === 'performance_task' ? 'selected' : '' }}>Performance Task</option>
+                        <option value="examination" {{ request('ar_component') === 'examination' ? 'selected' : '' }}>Examination</option>
+                    </select>
+                </div>
+                @if($atRiskFiltersActive)
                     <a href="{{ route('principal.dashboard') }}" class="text-sm text-gray-500 hover:underline pb-1.5">Clear</a>
                 @endif
             </form>
