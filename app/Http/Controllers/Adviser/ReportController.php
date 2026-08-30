@@ -12,6 +12,7 @@ use App\Models\ReportSubmission;
 use App\Models\AcademicTerm;
 use App\Helpers\LogActivity;
 use App\Services\RiskFeatureExtractor;
+use App\Services\TermReadinessService;
 use Illuminate\Http\Request;
 
 /**
@@ -23,8 +24,10 @@ use Illuminate\Http\Request;
  */
 class ReportController extends Controller
 {
-    public function __construct(private RiskFeatureExtractor $riskFeatures = new RiskFeatureExtractor())
-    {
+    public function __construct(
+        private RiskFeatureExtractor $riskFeatures = new RiskFeatureExtractor(),
+        private TermReadinessService $termReadiness = new TermReadinessService()
+    ) {
     }
 
     /**
@@ -94,11 +97,14 @@ class ReportController extends Controller
             $encoded = $allGrades->where('grading_period', $term)->count();
 
             $termStatus[$term] = [
-                'encoded'    => $encoded,
-                'expected'   => $totalExpected,
-                'complete'   => $totalExpected > 0 && $encoded >= $totalExpected,
-                'submitted'  => isset($submissions[$term]),
-                'submission' => $submissions[$term] ?? null,
+                'encoded'            => $encoded,
+                'expected'           => $totalExpected,
+                'complete'           => $totalExpected > 0 && $encoded >= $totalExpected,
+                'submitted'          => isset($submissions[$term]),
+                'submission'         => $submissions[$term] ?? null,
+                // Informational only — see TermReadinessService's doc
+                // comment for why this never blocks submission.
+                'assessment_evidence' => $this->termReadiness->assessmentEvidenceStatus($section, $term),
             ];
         }
 
