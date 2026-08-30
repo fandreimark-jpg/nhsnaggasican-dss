@@ -1,0 +1,52 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\RiskResult;
+use App\Models\Section;
+use App\Models\Student;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+/**
+ * Admin\DashboardController's risk-count widgets must only reflect the
+ * ACTIVE school year. Before the fix, "latest risk result per student" was
+ * picked via MAX(id) with no school_year filter at all — a student whose
+ * ONLY risk result is from a PRIOR school year (e.g. classified at the end
+ * of last year, not yet re-classified this year) would still have that
+ * stale result counted into this year's dashboard totals, since it's the
+ * only (and therefore "latest") row for that student_id.
+ */
+class AdminDashboardScopingTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_a_students_stale_prior_year_risk_result_is_not_counted_in_the_active_years_totals(): void
+    {
+        $admin = User::factory()->admin()->create();
+
+        // The student's only risk result is from LAST school year.
+        $oldSection = Section::factory()->create(['school_year' => '2025-2026']);
+        $student    = Student::factory()->create(['section_id' => $oldSection->id]);
+        RiskResult::create([
+            'student_id'     => $student->id,
+            'grading_period' => 3,
+            'average_grade'  => 60,
+            'risk_level'     => 'high',
+            'school_year'    => '2025-2026',
+            'generated_at'   => now(),
+        ]);
+
+        // A section created afterward makes '2026-2027' the active school
+        // year (Section::activeSchoolYear() = most recently created), but
+        // nobody has been classified for it yet.
+        Section::factory()->create(['school_year' => '2026-2027']);
+
+        $response = $this->actingAs($admin)->get('/admin/dashboard');
+
+        $response->assertOk();
+        // The stale 2025-2026 "high" result must not leak into this year's count.
+        $response->assertViewHas('highRisk', 0);
+    }
+}

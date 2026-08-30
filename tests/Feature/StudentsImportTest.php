@@ -134,6 +134,28 @@ class StudentsImportTest extends TestCase
         $this->assertDatabaseMissing('students', ['last_name' => 'Invalid']);
     }
 
+    public function test_duplicate_lrn_within_the_same_file_is_rejected_without_crashing(): void
+    {
+        // Both rows share an LRN that does NOT exist in the DB yet — the
+        // DB-only 'unique' rule alone would let both pass validation
+        // independently and the second insert would then throw a raw
+        // QueryException against the students.lrn unique index instead of
+        // failing gracefully via SkipsOnFailure.
+        $adviser = User::factory()->create();
+        $section = Section::factory()->create(['adviser_id' => $adviser->id]);
+
+        $import = $this->importCsv($section, [
+            ['100000000008', 'One', 'Row', '', 'male', '2008-05-01'],
+            ['100000000008', 'Two', 'Row', '', 'female', '2008-05-01'],
+        ]);
+
+        // Laravel's 'distinct' rule flags the later duplicate occurrence(s),
+        // not every row that shares the value — so exactly one failure, and
+        // at most one of the two same-LRN students ever gets inserted.
+        $this->assertCount(1, $import->failures());
+        $this->assertSame(1, Student::where('lrn', '100000000008')->count());
+    }
+
     public function test_students_are_always_assigned_to_the_importing_advisers_section(): void
     {
         // Security measure documented on StudentsImport::model() — the

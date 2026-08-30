@@ -132,4 +132,57 @@ class AcademicTermTest extends TestCase
             ->post('/admin/academic-terms/1/open')
             ->assertForbidden();
     }
+
+    public function test_report_submission_is_blocked_when_the_term_is_closed(): void
+    {
+        $admin   = User::factory()->admin()->create();
+        $adviser = User::factory()->create();
+        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027']);
+        $student = Student::factory()->create(['section_id' => $section->id]);
+        $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
+
+        $this->fullyEncodeTerm($section, $student, $subject, 1);
+        $this->actingAs($admin)->post('/admin/academic-terms/1/close');
+
+        $response = $this->actingAs($adviser)->post('/adviser/submit-report', ['grading_period' => 1]);
+
+        $response->assertSessionHas('error');
+        $this->assertDatabaseMissing('report_submissions', ['section_id' => $section->id]);
+    }
+
+    public function test_closing_an_already_closed_term_returns_an_error_instead_of_reclosing(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $section = Section::factory()->create(['school_year' => '2026-2027']);
+        AcademicTerm::ensureExistFor('2026-2027');
+
+        $this->actingAs($admin)->post('/admin/academic-terms/1/close');
+        $firstClosedAt = AcademicTerm::where('school_year', '2026-2027')->where('term', 1)->value('closed_at');
+
+        $response = $this->actingAs($admin)->post('/admin/academic-terms/1/close');
+
+        $response->assertSessionHas('error');
+        $secondClosedAt = AcademicTerm::where('school_year', '2026-2027')->where('term', 1)->value('closed_at');
+        $this->assertEquals($firstClosedAt, $secondClosedAt);
+    }
+
+    public function test_opening_a_later_term_does_not_overwrite_an_earlier_terms_closed_at_history(): void
+    {
+        $admin   = User::factory()->admin()->create();
+        $section = Section::factory()->create(['school_year' => '2026-2027']);
+        $student = Student::factory()->create(['section_id' => $section->id]);
+        $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
+
+        $this->fullyEncodeTerm($section, $student, $subject, 1);
+        $this->actingAs($admin)->post('/admin/academic-terms/2/open'); // closes term 1
+
+        $term1ClosedAtAfterTerm2 = AcademicTerm::where('school_year', '2026-2027')->where('term', 1)->value('closed_at');
+        $this->assertNotNull($term1ClosedAtAfterTerm2);
+
+        $this->fullyEncodeTerm($section, $student, $subject, 2);
+        $this->actingAs($admin)->post('/admin/academic-terms/3/open'); // closes term 2, must NOT touch term 1
+
+        $term1ClosedAtAfterTerm3 = AcademicTerm::where('school_year', '2026-2027')->where('term', 1)->value('closed_at');
+        $this->assertEquals($term1ClosedAtAfterTerm2, $term1ClosedAtAfterTerm3);
+    }
 }

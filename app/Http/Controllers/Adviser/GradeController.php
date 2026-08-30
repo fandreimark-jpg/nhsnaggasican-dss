@@ -88,12 +88,20 @@ class GradeController extends Controller
             ->pluck('id')
             ->toArray();
 
+        // Same reasoning as $validStudentIds above: 'exists:subjects,id' alone
+        // only proves the subject exists SOMEWHERE, not that it's actually
+        // offered to this section (grade level / track / specialization).
+        // Without this, an adviser could POST a subject_id belonging to a
+        // different grade level or track and have it silently accepted.
+        $validSubjectIds = Subject::forSection($section)->pluck('id')->toArray();
+
         foreach ($request->grades as $gradeData) {
             if (!isset($gradeData['grade']) || $gradeData['grade'] === null || $gradeData['grade'] === '') {
                 continue;
             }
 
             if (!in_array($gradeData['student_id'], $validStudentIds)) continue;
+            if (!in_array($gradeData['subject_id'], $validSubjectIds)) continue;
 
             Grade::updateOrCreate(
                 [

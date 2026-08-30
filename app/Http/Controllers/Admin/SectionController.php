@@ -9,6 +9,7 @@ use App\Models\Specialization;
 use App\Models\User;
 use App\Helpers\LogActivity;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 /**
  * SectionController (Admin)
@@ -59,7 +60,9 @@ class SectionController extends Controller
             'track_id'          => 'required|exists:tracks,id',
             'specialization_id' => 'required|exists:specializations,id',
             'school_year'       => 'required|string|max:20',
-            'adviser_id'        => 'nullable|exists:users,id',
+            // exists:users,id alone would let a non-adviser account (e.g.
+            // another admin) be assigned as a section's adviser.
+            'adviser_id'        => ['nullable', Rule::exists('users', 'id')->where('role', 'adviser')],
         ]);
 
         Section::create([
@@ -92,7 +95,9 @@ class SectionController extends Controller
             'track_id'          => 'required|exists:tracks,id',
             'specialization_id' => 'required|exists:specializations,id',
             'school_year'       => 'required|string|max:20',
-            'adviser_id'        => 'nullable|exists:users,id',
+            // exists:users,id alone would let a non-adviser account (e.g.
+            // another admin) be assigned as a section's adviser.
+            'adviser_id'        => ['nullable', Rule::exists('users', 'id')->where('role', 'adviser')],
         ]);
 
         // Prevent assigning an adviser who is already assigned to another section

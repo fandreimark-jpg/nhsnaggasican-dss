@@ -9,6 +9,7 @@ use App\Models\Grade;
 use App\Models\Section;
 use App\Models\RiskResult;
 use App\Models\ReportSubmission;
+use App\Models\AcademicTerm;
 use App\Helpers\LogActivity;
 use Illuminate\Http\Request;
 
@@ -116,6 +117,16 @@ class ReportController extends Controller
         ]);
 
         $gradingPeriod = (int) $request->grading_period;
+
+        // Same server-side rule as grade encoding — a term that's been
+        // closed by the admin (or was never opened) must not accept a
+        // submission, even a resubmission, regardless of what the UI shows.
+        if (!AcademicTerm::isOpen($section->school_year, $gradingPeriod)) {
+            return back()->with('error',
+                'Term ' . $gradingPeriod . ' is currently closed. Contact the admin to reopen it before submitting.'
+            );
+        }
+
         $subjects      = $this->getSectionSubjects($section);
         $students      = Student::where('section_id', $section->id)->get();
         $totalExpected = $students->count() * $subjects->count();
@@ -176,7 +187,7 @@ class ReportController extends Controller
             ];
         })->toArray();
 
-        $this->runAnalytics($gradesData, $section, $gradingPeriod);
+        $analyticsSucceeded = $this->runAnalytics($gradesData, $section, $gradingPeriod);
 
         ReportSubmission::updateOrCreate(
             [
@@ -201,6 +212,11 @@ class ReportController extends Controller
             null
         );
 
+        if (!$analyticsSucceeded) {
+            return redirect()->route('adviser.submit.report')
+                ->with('warning', 'Term ' . $gradingPeriod . ' report was submitted, but risk analysis failed to generate. Contact the admin — grades are saved and the submission is recorded, but risk levels for this term are missing until analytics is re-run.');
+        }
+
         return redirect()->route('adviser.submit.report')
             ->with('success', 'Term ' . $gradingPeriod . ' report submitted successfully!');
     }
@@ -218,8 +234,12 @@ class ReportController extends Controller
      * Note: exec() is used instead of Laravel Process facade
      * because Process facade causes WinError 10106 on Windows
      * when scikit-learn (joblib/asyncio) is involved.
+     *
+     * Returns true if risk results were generated and saved, false if the
+     * classifier failed for any reason — the caller uses this to tell the
+     * adviser their submission went through but risk levels didn't.
      */
-   private function runAnalytics(array $gradesData, Section $section, int $gradingPeriod): void
+   private function runAnalytics(array $gradesData, Section $section, int $gradingPeriod): bool
     {
         $tempFile   = storage_path('app/temp_grades_' . $section->id . '.json');
         $outputFile = storage_path('app/temp_results_' . $section->id . '.json');
@@ -233,7 +253,7 @@ class ReportController extends Controller
 
         file_put_contents($tempFile, json_encode($pythonPayload));
 
-        $pythonPath = env('PYTHON_PATH', 'python');
+        $pythonPath = config('services.python_path');
         $scriptPath = base_path('analytics' . DIRECTORY_SEPARATOR . 'classify.py');
 
         $command    = "\"{$pythonPath}\" \"{$scriptPath}\" \"{$tempFile}\" \"{$outputFile}\"";
@@ -245,7 +265,7 @@ class ReportController extends Controller
         if ($exitCode !== 0 || !file_exists($outputFile)) {
             \Log::error('Analytics failed (exit: ' . $exitCode . '). Output: ' . implode("\n", $execOutput));
             @unlink($tempFile);
-            return;
+            return false;
         }
 
         $raw = file_get_contents($outputFile);
@@ -256,7 +276,7 @@ class ReportController extends Controller
 
         if (json_last_error() !== JSON_ERROR_NONE || !$results) {
             \Log::error('JSON decode error: ' . json_last_error_msg());
-            return;
+            return false;
         }
 
         // Keyed lookup so we can merge back the weakest-subject data
@@ -291,6 +311,8 @@ class ReportController extends Controller
                 ]
             );
         }
+
+        return true;
     }
 
     /**

@@ -47,7 +47,14 @@ class StudentsImport implements ToModel, WithHeadingRow, WithValidation, SkipsOn
     public function rules(): array
     {
         return [
-            '*.lrn'         => ['required', 'digits:12', 'unique:students,lrn'],
+            // 'unique:students,lrn' only checks against rows already in the
+            // DB — two NEW rows in the SAME file sharing an LRN would both
+            // pass that check independently (neither exists yet at
+            // validation time), then the second insert would crash on the
+            // students.lrn unique index instead of failing gracefully.
+            // 'distinct' catches that by comparing every row's lrn against
+            // every other row's in this upload.
+            '*.lrn'         => ['required', 'digits:12', 'distinct', 'unique:students,lrn'],
             '*.last_name'   => ['required', 'string', 'max:255'],
             '*.first_name'  => ['required', 'string', 'max:255'],
             '*.gender'      => ['required', 'in:male,female,Male,Female,MALE,FEMALE'],
@@ -59,6 +66,7 @@ class StudentsImport implements ToModel, WithHeadingRow, WithValidation, SkipsOn
     {
         return [
             '*.lrn.digits'              => 'LRN must be exactly 12 digits (numbers only).',
+            '*.lrn.distinct'            => 'This LRN appears more than once in the uploaded file.',
             '*.lrn.unique'              => 'A student with this LRN already exists.',
             '*.birthdate.before_or_equal' => 'Birthdate cannot be a future date.',
         ];

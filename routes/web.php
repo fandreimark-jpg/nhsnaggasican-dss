@@ -121,8 +121,8 @@ Route::middleware(['auth', 'role:admin'])
 
         //Academic Term
         Route::get('/academic-terms',               [AcademicTermController::class, 'index'])->name('academic-terms');
-        Route::post('/academic-terms/{term}/open',  [AcademicTermController::class, 'open'])->name('academic-terms.open'); 
-        Route::post('/academic-terms/{term}/close',[AcademicTermController::class, 'close'])->name('academic-terms.close');
+        Route::post('/academic-terms/{term}/open',  [AcademicTermController::class, 'open'])->whereNumber('term')->name('academic-terms.open');
+        Route::post('/academic-terms/{term}/close',[AcademicTermController::class, 'close'])->whereNumber('term')->name('academic-terms.close');
         // Students Management
         // NOTE: no POST /students (add) route here anymore — adding students
         // is now exclusively an Adviser action (see adviser.students.store above),

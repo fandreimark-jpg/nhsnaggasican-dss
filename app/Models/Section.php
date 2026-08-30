@@ -61,4 +61,16 @@ class Section extends Model
     {
         return $this->hasMany(ReportSubmission::class);
     }
+
+    /**
+     * The school year currently in use system-wide — the most recently
+     * created section's school_year, or a fresh default if none exist yet.
+     * Shared by AcademicTermController and the Admin dashboard so both
+     * agree on which year is "active" instead of each guessing separately.
+     */
+    public static function activeSchoolYear(): string
+    {
+        return static::orderByDesc('id')->value('school_year')
+            ?? date('Y') . '-' . (date('Y') + 1);
+    }
 }

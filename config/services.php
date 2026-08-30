@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    // Python interpreter used to invoke the risk classifier (analytics/classify.py)
+    // via exec() in Adviser\ReportController::runAnalytics(). Read through
+    // config() rather than env() directly in the controller so it behaves
+    // correctly under config caching and can be overridden in tests.
+    'python_path' => env('PYTHON_PATH', 'python'),
+
 ];

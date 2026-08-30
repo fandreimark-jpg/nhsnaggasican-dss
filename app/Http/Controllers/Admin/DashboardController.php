@@ -36,10 +36,17 @@ class DashboardController extends Controller
         $totalSections = Section::count();
         $totalAdvisers = User::where('role', 'adviser')->count();
 
-        // Get the latest risk result per student using MAX(id) grouping
-        // This avoids duplicate counts when students have results for multiple terms
+        // The currently active school year — without scoping to it, a
+        // returning student's risk history from a PRIOR school year could
+        // be picked up as their "latest" result and counted here.
+        $schoolYear = Section::activeSchoolYear();
+
+        // Get the latest risk result per student using MAX(id) grouping,
+        // scoped to the active school year. This avoids duplicate counts
+        // when students have results for multiple terms.
         $latestPerStudent = RiskResult::whereIn('id',
-            RiskResult::selectRaw('MAX(id) as id')
+            RiskResult::where('school_year', $schoolYear)
+                ->selectRaw('MAX(id) as id')
                 ->groupBy('student_id')
                 ->pluck('id')
         )->get();
@@ -49,10 +56,12 @@ class DashboardController extends Controller
         $moderateRisk = $latestPerStudent->where('risk_level', 'moderate')->count();
         $highRisk     = $latestPerStudent->where('risk_level', 'high')->count();
 
-        // Load sections with only the relationships needed for charts
-        // Avoids loading unnecessary grade data for dashboard
+        // Load sections with only the relationships needed for charts.
+        // riskResults scoped to the active school year for the same reason
+        // as $latestPerStudent above — otherwise sectionRiskData below could
+        // pick a stale risk result from a prior school year.
         $sections = Section::with([
-            'students.riskResults',
+            'students.riskResults' => fn($q) => $q->where('school_year', $schoolYear),
             'adviser',
             'track',
             'specialization',
@@ -105,10 +114,11 @@ class DashboardController extends Controller
             ];
         });
 
-        // Academic Honors — based on latest average_grade from risk_results
+        // Academic Honors — based on latest average_grade from risk_results,
+        // scoped to the active school year for the same reason as above.
         // DepEd honors thresholds: Highest (98+), High (95-97), With Honors (90-94)
-        $allStudentsWithRisk = Student::with(['section', 'riskResults'])
-            ->whereHas('riskResults')
+        $allStudentsWithRisk = Student::with(['section', 'riskResults' => fn($q) => $q->where('school_year', $schoolYear)])
+            ->whereHas('riskResults', fn($q) => $q->where('school_year', $schoolYear))
             ->get()
             ->map(function ($student) {
                 $latest = $student->riskResults->sortByDesc('grading_period')->first();

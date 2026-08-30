@@ -19,8 +19,7 @@ class AcademicTermController extends Controller
 {
     private function activeSchoolYear(): string
     {
-        return Section::orderByDesc('id')->value('school_year')
-            ?? date('Y') . '-' . (date('Y') + 1);
+        return Section::activeSchoolYear();
     }
 
     public function index()
@@ -60,8 +59,12 @@ class AcademicTermController extends Controller
             }
         }
 
-        // Close every term for this school year, then open only this one.
+        // Close whichever term is currently open (should be at most one),
+        // stamping closed_at only for it. Updating ALL terms unconditionally
+        // would overwrite the closed_at of terms that were already closed
+        // earlier — destroying the true history of when each one closed.
         AcademicTerm::where('school_year', $schoolYear)
+            ->where('is_open', true)
             ->update(['is_open' => false, 'closed_at' => now()]);
 
         AcademicTerm::where('school_year', $schoolYear)
@@ -83,9 +86,21 @@ class AcademicTermController extends Controller
     {
         $schoolYear = $this->activeSchoolYear();
 
-        AcademicTerm::where('school_year', $schoolYear)
+        $record = AcademicTerm::where('school_year', $schoolYear)
             ->where('term', $term)
-            ->update(['is_open' => false, 'closed_at' => now()]);
+            ->first();
+
+        if (!$record) {
+            return redirect()->route('admin.academic-terms')
+                ->with('error', 'Term ' . $term . ' does not exist for school year ' . $schoolYear . '.');
+        }
+
+        if (!$record->is_open) {
+            return redirect()->route('admin.academic-terms')
+                ->with('error', 'Term ' . $term . ' is already closed.');
+        }
+
+        $record->update(['is_open' => false, 'closed_at' => now()]);
 
         LogActivity::log(
             action:      'close_term',
