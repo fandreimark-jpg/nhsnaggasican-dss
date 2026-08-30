@@ -11,6 +11,7 @@ use App\Http\Controllers\Adviser\AssessmentController as AdviserAssessmentContro
 
 // Principal controllers
 use App\Http\Controllers\Principal\DashboardController as PrincipalDashboardController;
+use App\Http\Controllers\Principal\InterventionController as PrincipalInterventionController;
 
 // Admin controllers
 use App\Http\Controllers\Admin\DashboardController;
@@ -84,6 +85,12 @@ Route::middleware(['auth', 'role:principal'])
     ->name('principal.')
     ->group(function () {
         Route::get('/dashboard', [PrincipalDashboardController::class, 'index'])->name('dashboard');
+
+        // The one WRITE surface the Principal role has — intervention
+        // decisions only, never grades or assessments (see RoleAuthorizationTest).
+        Route::get('/interventions',            [PrincipalInterventionController::class, 'index'])->name('interventions');
+        Route::post('/interventions',           [PrincipalInterventionController::class, 'store'])->name('interventions.store');
+        Route::put('/interventions/{intervention}', [PrincipalInterventionController::class, 'update'])->name('interventions.update');
     });
 
 // =============================================

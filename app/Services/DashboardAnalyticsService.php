@@ -142,6 +142,7 @@ class DashboardAnalyticsService
             $latestRisk = $history->last();
 
             return [
+                'student_id'              => $student->id,
                 'name'                    => $student->last_name . ', ' . $student->first_name,
                 'section'                 => $student->section->name ?? '—',
                 'grade_level'             => $student->section->grade_level ?? null,
