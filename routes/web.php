@@ -122,12 +122,14 @@ Route::middleware(['auth', 'role:admin'])
         // Tracks Management
         Route::get('/tracks',           [TrackController::class, 'index'])->name('tracks');
         Route::post('/tracks',          [TrackController::class, 'store'])->name('tracks.store');
+        Route::post('/tracks/import',   [TrackController::class, 'import'])->name('tracks.import');
         Route::put('/tracks/{id}',      [TrackController::class, 'update'])->name('tracks.update');
         Route::delete('/tracks/{id}',   [TrackController::class, 'destroy'])->name('tracks.destroy');
 
         // Specializations Management
         Route::get('/specializations',          [SpecializationController::class, 'index'])->name('specializations');
         Route::post('/specializations',         [SpecializationController::class, 'store'])->name('specializations.store');
+        Route::post('/specializations/import',  [SpecializationController::class, 'import'])->name('specializations.import');
         Route::put('/specializations/{id}',     [SpecializationController::class, 'update'])->name('specializations.update');
         Route::delete('/specializations/{id}',  [SpecializationController::class, 'destroy'])->name('specializations.destroy');
 

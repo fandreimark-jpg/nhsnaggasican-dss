@@ -395,6 +395,15 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     // =============================================
+    // ADMIN — IMPORT TRACKS MODAL
+    // =============================================
+    if (document.getElementById("importTracksModal")) {
+        window.openImportTracksModal = () => window.showModal("importTracksModal");
+        window.closeImportTracksModal = () => window.hideModal("importTracksModal");
+        window.bindModalOverlayClose("importTracksModal");
+    }
+
+    // =============================================
     // ADMIN — SPECIALIZATION MANAGEMENT MODAL
     // =============================================
     const specForm = document.getElementById("specForm");
@@ -424,6 +433,15 @@ document.addEventListener("DOMContentLoaded", function () {
 
         window.closeSpecModal = () => window.hideModal("specModal");
         window.bindModalOverlayClose("specModal");
+    }
+
+    // =============================================
+    // ADMIN — IMPORT SPECIALIZATIONS MODAL
+    // =============================================
+    if (document.getElementById("importSpecializationsModal")) {
+        window.openImportSpecializationsModal = () => window.showModal("importSpecializationsModal");
+        window.closeImportSpecializationsModal = () => window.hideModal("importSpecializationsModal");
+        window.bindModalOverlayClose("importSpecializationsModal");
     }
 
     // =============================================

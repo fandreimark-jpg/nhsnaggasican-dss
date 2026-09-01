@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Track;
+use App\Imports\TracksImport;
 use App\Helpers\LogActivity;
 use Illuminate\Http\Request;
+use Maatwebsite\Excel\Facades\Excel;
 
 /**
  * TrackController (Admin)
@@ -48,6 +50,49 @@ class TrackController extends Controller
 
         return redirect()->route('admin.tracks')
             ->with('success', 'Track added successfully!');
+    }
+
+    /**
+     * Bulk-import tracks from an Excel/CSV file. See App\Imports\TracksImport
+     * for the expected column layout and duplicate-detection rules.
+     */
+    public function import(Request $request)
+    {
+        $request->validateWithBag('import', [
+            'file' => 'required|mimes:xlsx,xls,csv,txt|max:2048',
+        ]);
+
+        $import = new TracksImport();
+        Excel::import($import, $request->file('file'));
+
+        $failures = $import->failures();
+
+        if ($failures->count() > 0) {
+            $errorMessages = $failures->map(function ($failure) {
+                return 'Row ' . $failure->row() . ': ' . implode(', ', $failure->errors());
+            })->toArray();
+
+            LogActivity::log(
+                'import_tracks',
+                'Imported ' . $import->importedCount . ' track(s), ' . $failures->count() . ' row(s) skipped',
+                'tracks',
+                null
+            );
+
+            return redirect()->route('admin.tracks')
+                ->with('warning', $import->importedCount . ' track(s) imported. ' . $failures->count() . ' row(s) were skipped:')
+                ->with('import_errors', $errorMessages);
+        }
+
+        LogActivity::log(
+            'import_tracks',
+            'Bulk imported ' . $import->importedCount . ' track(s) via file upload',
+            'tracks',
+            null
+        );
+
+        return redirect()->route('admin.tracks')
+            ->with('success', $import->importedCount . ' track(s) imported successfully!');
     }
 
     /**
