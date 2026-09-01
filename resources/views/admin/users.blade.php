@@ -81,7 +81,10 @@
                     @if($user->id !== auth()->id())
                         @if($user->is_active)
                         <form method="POST" action="{{ route('admin.users.disable', $user->id) }}" class="inline"
-                            data-confirm="Disable {{ $user->first_name }} {{ $user->last_name }}? They will no longer be able to log in.">
+                            data-confirm="Disable {{ $user->first_name }} {{ $user->last_name }}? They will no longer be able to log in."
+                            data-confirm-label="Yes, Disable"
+                            data-confirm-icon="bi-slash-circle"
+                            data-confirm-loading-label="Disabling...">
                             @csrf
                             @method('POST')
                             <button type="submit"

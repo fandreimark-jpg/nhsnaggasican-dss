@@ -36,6 +36,19 @@ document.addEventListener("DOMContentLoaded", function () {
             e.preventDefault();
             pendingDeleteForm = form;
             document.getElementById("confirmDeleteMessage").textContent = form.dataset.confirm;
+
+            // This modal is shared by every destructive-looking action
+            // (delete section/subject/track/student/user, disable user).
+            // Only the label/icon/in-flight text differ — data-confirm-*
+            // overrides let a non-delete action (like "Disable") say so,
+            // while every plain data-confirm form keeps the original
+            // "Yes, Delete" wording by falling back to these defaults.
+            const btn = document.getElementById("confirmDeleteBtn");
+            const label = form.dataset.confirmLabel || "Yes, Delete";
+            const icon = form.dataset.confirmIcon || "bi-trash";
+            btn.dataset.loadingLabel = form.dataset.confirmLoadingLabel || "Deleting...";
+            btn.innerHTML = `<i class="bi ${icon} mr-1"></i> ${label}`;
+
             window.showModal("confirmDeleteModal");
             return;
         }
@@ -56,7 +69,7 @@ document.addEventListener("DOMContentLoaded", function () {
         if (!pendingDeleteForm) return;
         const btn = document.getElementById("confirmDeleteBtn");
         btn.disabled = true;
-        btn.innerHTML = '<i class="bi bi-hourglass-split mr-1"></i> Deleting...';
+        btn.innerHTML = `<i class="bi bi-hourglass-split mr-1"></i> ${btn.dataset.loadingLabel || "Deleting..."}`;
         pendingDeleteForm.submit();
     };
 
