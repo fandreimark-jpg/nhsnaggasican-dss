@@ -14,7 +14,13 @@ use Tests\TestCase;
 /**
  * Extends the at-risk widget's filters beyond grade-level/section
  * (CLAUDE.md lists track, specialization, risk level, and assessment
- * component among the Principal dashboard's filters).
+ * component among the Principal dashboard's filters) — but Track and
+ * Specialization are explicitly NOT independent, manually-selectable
+ * filters: CLAUDE.md requires them to be read-only values automatically
+ * derived from whichever Section is selected. See
+ * test_selecting_a_section_auto_displays_its_track_and_specialization_readonly
+ * below for that behavior instead of a standalone ar_track/ar_specialization
+ * filter.
  */
 class AtRiskFilterTest extends TestCase
 {
@@ -30,38 +36,44 @@ class AtRiskFilterTest extends TestCase
         return $student;
     }
 
-    public function test_track_filter_narrows_the_at_risk_list(): void
+    public function test_selecting_a_section_narrows_the_at_risk_list_by_its_track_and_specialization(): void
     {
         $principal = User::factory()->principal()->create();
         $trackA = Track::factory()->create(['name' => 'Academic']);
         $trackB = Track::factory()->create(['name' => 'TechPro']);
-        $sectionA = Section::factory()->create(['track_id' => $trackA->id]);
-        $sectionB = Section::factory()->create(['track_id' => $trackB->id]);
-        $this->makeAtRiskStudent($sectionA)->update(['last_name' => 'InTrackA']);
-        $this->makeAtRiskStudent($sectionB)->update(['last_name' => 'InTrackB']);
+        $sectionA = Section::factory()->create(['name' => 'Steve', 'track_id' => $trackA->id]);
+        $sectionB = Section::factory()->create(['name' => 'Newton', 'track_id' => $trackB->id]);
+        $this->makeAtRiskStudent($sectionA)->update(['last_name' => 'InSectionA']);
+        $this->makeAtRiskStudent($sectionB)->update(['last_name' => 'InSectionB']);
 
-        $response = $this->actingAs($principal)->get('/principal/dashboard?ar_track=' . $trackA->id);
+        // Filtering by Section alone already narrows by its Track (and
+        // Specialization) — there is no separate ar_track/ar_specialization
+        // parameter to filter by.
+        $response = $this->actingAs($principal)->get('/principal/dashboard?ar_section_search=' . $sectionA->name);
 
         $response->assertOk();
-        $response->assertSee('InTrackA');
-        $response->assertDontSee('InTrackB');
+        $response->assertSee('InSectionA');
+        $response->assertDontSee('InSectionB');
     }
 
-    public function test_specialization_filter_narrows_the_at_risk_list(): void
+    public function test_selecting_a_section_auto_displays_its_track_and_specialization_readonly(): void
     {
         $principal = User::factory()->principal()->create();
-        $specA = Specialization::factory()->create(['name' => 'STEM']);
-        $specB = Specialization::factory()->create(['name' => 'HUMSS']);
-        $sectionA = Section::factory()->create(['specialization_id' => $specA->id]);
-        $sectionB = Section::factory()->create(['specialization_id' => $specB->id]);
-        $this->makeAtRiskStudent($sectionA)->update(['last_name' => 'InSpecA']);
-        $this->makeAtRiskStudent($sectionB)->update(['last_name' => 'InSpecB']);
+        $track = Track::factory()->create(['name' => 'Academic Track']);
+        $spec  = Specialization::factory()->create(['name' => 'Humanities and Social Sciences']);
+        $section = Section::factory()->create(['name' => 'Steve', 'track_id' => $track->id, 'specialization_id' => $spec->id]);
+        $this->makeAtRiskStudent($section);
 
-        $response = $this->actingAs($principal)->get('/principal/dashboard?ar_specialization=' . $specA->id);
+        $response = $this->actingAs($principal)->get('/principal/dashboard');
 
         $response->assertOk();
-        $response->assertSee('InSpecA');
-        $response->assertDontSee('InSpecB');
+        // Track/Specialization are not independently selectable dropdowns.
+        $response->assertDontSee('name="ar_track"', false);
+        $response->assertDontSee('name="ar_specialization"', false);
+        // But the Section option carries its Track/Specialization as data
+        // for the page to auto-display read-only once that Section is chosen.
+        $response->assertSee('data-track="' . $track->name . '"', false);
+        $response->assertSee('data-specialization="' . $spec->name . '"', false);
     }
 
     public function test_risk_level_filter_narrows_the_at_risk_list(): void

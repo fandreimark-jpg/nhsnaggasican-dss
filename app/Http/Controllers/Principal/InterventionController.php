@@ -35,7 +35,13 @@ class InterventionController extends Controller
 
     public function index()
     {
-        $atRiskStudents = $this->analytics->getAtRiskStudentsData()['atRiskStudents'];
+        // Same filter params (ar_grade_level/ar_section_search/ar_risk_level/
+        // ar_component) and the same Grade Level -> Section -> auto Track/
+        // Specialization dependency as the Principal dashboard — reusing
+        // getAtRiskStudentsData() keeps both pages' filtering identical
+        // instead of drifting apart.
+        $atRiskData     = $this->analytics->getAtRiskStudentsData();
+        $atRiskStudents = $atRiskData['atRiskStudents'];
 
         $existingByStudentId = Intervention::with(['decidedBy'])
             ->whereIn('status', ['recommended', 'in_review', 'approved', 'in_progress', 'monitoring'])
@@ -46,6 +52,7 @@ class InterventionController extends Controller
 
         $rows = collect($atRiskStudents)->map(function ($row) use ($existingByStudentId) {
             $row['recommendation'] = $this->recommender->recommend($row);
+            $row['priority'] = $row['risk_level'] === 'high' ? 'High' : 'Medium';
             $row['existing_intervention'] = $existingByStudentId->get($row['student_id']);
             $row['progress'] = $row['existing_intervention']
                 ? $this->progress->compare($row['existing_intervention'])
@@ -53,11 +60,11 @@ class InterventionController extends Controller
             return $row;
         });
 
-        return view('principal.interventions', [
+        return view('principal.interventions', array_merge($atRiskData, [
             'rows'     => $rows,
             'statuses' => Intervention::STATUSES,
             'types'    => Intervention::TYPES,
-        ]);
+        ]));
     }
 
     public function store(Request $request)

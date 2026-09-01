@@ -1,0 +1,205 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Imports\SubjectsImport;
+use App\Models\Specialization;
+use App\Models\Subject;
+use App\Models\Track;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Maatwebsite\Excel\Facades\Excel;
+use Tests\TestCase;
+
+/**
+ * SubjectsImport is driven through Excel::import() against a real generated
+ * CSV (same reasoning as StudentsImportTest — WithValidation's row-skipping
+ * only kicks in through the full Maatwebsite pipeline).
+ */
+class SubjectsImportTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private function importCsv(array $rows, string $header = "name,type,grade_level,track,specialization"): SubjectsImport
+    {
+        $csv = $header . "\n";
+        foreach ($rows as $row) {
+            $csv .= implode(',', $row) . "\n";
+        }
+
+        $path = tempnam(sys_get_temp_dir(), 'subjects_import_') . '.csv';
+        file_put_contents($path, $csv);
+
+        $import = new SubjectsImport();
+        Excel::import($import, $path);
+
+        @unlink($path);
+
+        return $import;
+    }
+
+    public function test_admin_subjects_page_renders_with_new_import_modal(): void
+    {
+        $admin = User::factory()->admin()->create();
+
+        $this->actingAs($admin)->get('/admin/subjects')->assertOk();
+    }
+
+    public function test_valid_core_subject_is_imported(): void
+    {
+        $import = $this->importCsv([
+            ['General Mathematics', 'core', '11', '', ''],
+        ]);
+
+        $this->assertCount(0, $import->failures());
+        $this->assertSame(1, $import->importedCount);
+        $this->assertDatabaseHas('subjects', [
+            'name'        => 'General Mathematics',
+            'type'        => 'core',
+            'grade_level' => 11,
+            'track_id'    => null,
+        ]);
+    }
+
+    public function test_elective_subject_resolves_track_and_specialization_by_name(): void
+    {
+        $track = Track::factory()->create(['name' => 'Technical-Professional Track', 'code' => 'TVL']);
+        $spec  = Specialization::factory()->create(['track_id' => $track->id, 'name' => 'Information and Communications Technology', 'code' => 'ICT']);
+
+        $import = $this->importCsv([
+            ['Programming', 'elective', '12', 'Technical-Professional Track', 'ICT'],
+        ]);
+
+        $this->assertCount(0, $import->failures());
+        $this->assertDatabaseHas('subjects', [
+            'name'              => 'Programming',
+            'track_id'          => $track->id,
+            'specialization_id' => $spec->id,
+        ]);
+    }
+
+    public function test_elective_subject_resolves_track_by_code(): void
+    {
+        $track = Track::factory()->create(['name' => 'Academic Track', 'code' => 'ACAD']);
+
+        $import = $this->importCsv([
+            ['Research', 'elective', '12', 'ACAD', ''],
+        ]);
+
+        $this->assertCount(0, $import->failures());
+        $this->assertDatabaseHas('subjects', ['name' => 'Research', 'track_id' => $track->id]);
+    }
+
+    public function test_unknown_track_name_leaves_track_null_instead_of_failing(): void
+    {
+        // Track/specialization are optional lookups, not required fields —
+        // matching the existing manual Add Subject form's own leniency.
+        $import = $this->importCsv([
+            ['Mystery Elective', 'elective', '12', 'Nonexistent Track', ''],
+        ]);
+
+        $this->assertCount(0, $import->failures());
+        $this->assertDatabaseHas('subjects', ['name' => 'Mystery Elective', 'track_id' => null]);
+    }
+
+    public function test_invalid_type_is_rejected(): void
+    {
+        $import = $this->importCsv([
+            ['Weird Subject', 'bogus', '11', '', ''],
+        ]);
+
+        $this->assertCount(1, $import->failures());
+        $this->assertDatabaseMissing('subjects', ['name' => 'Weird Subject']);
+    }
+
+    public function test_invalid_grade_level_is_rejected(): void
+    {
+        $import = $this->importCsv([
+            ['Grade 10 Subject', 'core', '10', '', ''],
+        ]);
+
+        $this->assertCount(1, $import->failures());
+        $this->assertDatabaseMissing('subjects', ['name' => 'Grade 10 Subject']);
+    }
+
+    public function test_duplicate_against_existing_database_subject_is_rejected(): void
+    {
+        Subject::factory()->create(['name' => 'Filipino', 'grade_level' => 11, 'type' => 'core']);
+
+        $import = $this->importCsv([
+            ['Filipino', 'core', '11', '', ''],
+        ]);
+
+        $this->assertCount(1, $import->failures());
+        $this->assertSame(1, Subject::where('name', 'Filipino')->count());
+    }
+
+    public function test_duplicate_within_the_same_file_is_rejected_without_crashing(): void
+    {
+        $import = $this->importCsv([
+            ['Physical Education', 'core', '11', '', ''],
+            ['Physical Education', 'core', '11', '', ''],
+        ]);
+
+        $this->assertCount(1, $import->failures());
+        $this->assertSame(1, Subject::where('name', 'Physical Education')->count());
+    }
+
+    public function test_same_name_different_grade_level_is_not_a_duplicate(): void
+    {
+        $import = $this->importCsv([
+            ['Statistics', 'core', '11', '', ''],
+            ['Statistics', 'core', '12', '', ''],
+        ]);
+
+        $this->assertCount(0, $import->failures());
+        $this->assertSame(2, Subject::where('name', 'Statistics')->count());
+    }
+
+    public function test_valid_and_invalid_rows_in_the_same_file_are_handled_independently(): void
+    {
+        $import = $this->importCsv([
+            ['Valid Subject', 'core', '11', '', ''],
+            ['Invalid Subject', 'not-a-type', '11', '', ''],
+        ]);
+
+        $this->assertCount(1, $import->failures());
+        $this->assertDatabaseHas('subjects', ['name' => 'Valid Subject']);
+        $this->assertDatabaseMissing('subjects', ['name' => 'Invalid Subject']);
+    }
+
+    public function test_admin_can_import_subjects_via_http_and_gets_a_summary(): void
+    {
+        $admin = User::factory()->admin()->create();
+
+        $csv  = "name,type,grade_level,track,specialization\n";
+        $csv .= "Empowerment Technologies,core,11,,\n";
+        $path = tempnam(sys_get_temp_dir(), 'subjects_http_import_') . '.csv';
+        file_put_contents($path, $csv);
+        $file = new \Illuminate\Http\UploadedFile($path, 'subjects.csv', 'text/csv', null, true);
+
+        $response = $this->actingAs($admin)->post('/admin/subjects/import', ['file' => $file]);
+
+        @unlink($path);
+
+        $response->assertRedirect(route('admin.subjects'));
+        $response->assertSessionHas('success', '1 subject(s) imported successfully!');
+        $this->assertDatabaseHas('subjects', ['name' => 'Empowerment Technologies']);
+    }
+
+    public function test_adviser_cannot_import_subjects(): void
+    {
+        $adviser = User::factory()->create();
+
+        $this->actingAs($adviser)->post('/admin/subjects/import', [])
+            ->assertForbidden();
+    }
+
+    public function test_principal_cannot_import_subjects(): void
+    {
+        $principal = User::factory()->principal()->create();
+
+        $this->actingAs($principal)->post('/admin/subjects/import', [])
+            ->assertForbidden();
+    }
+}

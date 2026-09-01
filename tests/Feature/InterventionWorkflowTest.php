@@ -7,8 +7,10 @@ use App\Models\AssessmentScore;
 use App\Models\Intervention;
 use App\Models\RiskResult;
 use App\Models\Section;
+use App\Models\Specialization;
 use App\Models\Student;
 use App\Models\Subject;
+use App\Models\Track;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -183,5 +185,51 @@ class InterventionWorkflowTest extends TestCase
         ]);
 
         $response->assertSessionHasErrors('recommended_type');
+    }
+
+    public function test_interventions_page_can_be_filtered_by_grade_level_and_section(): void
+    {
+        $principal = User::factory()->principal()->create();
+        $sectionA  = Section::factory()->create(['grade_level' => 11, 'name' => 'Narra']);
+        $sectionB  = Section::factory()->create(['grade_level' => 12, 'name' => 'Molave']);
+        $studentA  = Student::factory()->create(['section_id' => $sectionA->id, 'last_name' => 'InSectionA']);
+        $studentB  = Student::factory()->create(['section_id' => $sectionB->id, 'last_name' => 'InSectionB']);
+
+        foreach ([$studentA, $studentB] as $student) {
+            RiskResult::create([
+                'student_id' => $student->id, 'grading_period' => 1, 'average_grade' => 65,
+                'risk_level' => 'high', 'school_year' => $student->section->school_year, 'generated_at' => now(),
+            ]);
+        }
+
+        $response = $this->actingAs($principal)->get('/principal/interventions?ar_grade_level=11');
+
+        $response->assertOk();
+        $response->assertSee('InSectionA');
+        $response->assertDontSee('InSectionB');
+    }
+
+    public function test_interventions_page_auto_displays_track_and_specialization_readonly_for_the_selected_section(): void
+    {
+        $principal = User::factory()->principal()->create();
+        $track     = Track::factory()->create(['name' => 'Academic Track']);
+        $spec      = Specialization::factory()->create(['name' => 'Humanities and Social Sciences']);
+        $section   = Section::factory()->create(['name' => 'Steve', 'track_id' => $track->id, 'specialization_id' => $spec->id]);
+        $student   = Student::factory()->create(['section_id' => $section->id]);
+        RiskResult::create([
+            'student_id' => $student->id, 'grading_period' => 1, 'average_grade' => 65,
+            'risk_level' => 'high', 'school_year' => $section->school_year, 'generated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($principal)->get('/principal/interventions');
+
+        $response->assertOk();
+        $response->assertDontSee('name="ar_track"', false);
+        $response->assertDontSee('name="ar_specialization"', false);
+        $response->assertSee('data-track="' . $track->name . '"', false);
+        $response->assertSee('data-specialization="' . $spec->name . '"', false);
+        // Also shown directly in the row itself, not just the filter chrome.
+        $response->assertSee($track->name);
+        $response->assertSee($spec->name);
     }
 }

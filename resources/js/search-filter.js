@@ -140,3 +140,27 @@ window.initCascadingSelect = function (controllingSelectId, dependentSelectId) {
     controlling.addEventListener('change', applyFilter);
     applyFilter(); // apply on load too, in case a filter is already active
 };
+
+// Read-only Track/Specialization display driven entirely by whichever
+// Section option is currently selected — no separate request, no
+// independently selectable Track/Specialization dropdowns. The selected
+// <option>'s data-track / data-specialization attributes (set server-side
+// from the Section->track/specialization relationship) are copied straight
+// into the two display elements; an empty section selection ("All
+// sections") or a section with no track/specialization assigned falls back
+// to an em dash rather than showing stale text.
+window.initSectionDerivedDisplay = function (sectionSelectId, trackDisplayId, specializationDisplayId) {
+    const select = document.getElementById(sectionSelectId);
+    const trackEl = document.getElementById(trackDisplayId);
+    const specEl  = document.getElementById(specializationDisplayId);
+    if (!select || !trackEl || !specEl) return;
+
+    function applyDisplay() {
+        const opt = select.options[select.selectedIndex];
+        trackEl.textContent = (opt && opt.value && opt.dataset.track) ? opt.dataset.track : '—';
+        specEl.textContent  = (opt && opt.value && opt.dataset.specialization) ? opt.dataset.specialization : '—';
+    }
+
+    select.addEventListener('change', applyDisplay);
+    applyDisplay(); // apply on load too, in case a section is already selected
+};

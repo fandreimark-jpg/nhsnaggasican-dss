@@ -8,13 +8,17 @@ use App\Services\DashboardAnalyticsService;
 /**
  * DashboardController (Admin)
  *
- * Handles the Admin Dashboard — the main Decision Support System interface.
- * Shows risk distribution, performance trends, at-risk students,
- * academic honors, and intervention recommendations.
+ * The Admin Dashboard is a SYSTEM/MASTER-DATA overview only — user,
+ * student, section, subject, track, and academic-term counts. It
+ * deliberately shows none of the Principal's Decision Support analytics
+ * (risk distribution, at-risk students, recommendations, subject/component
+ * analysis) so the two dashboards can never be mistaken for each other;
+ * that data lives exclusively under /principal (see
+ * Principal\DashboardController).
  *
- * The actual data computation lives in DashboardAnalyticsService, shared
- * with Principal\DashboardController, so the two role's dashboards can
- * never drift out of sync with each other.
+ * The actual data computation lives in DashboardAnalyticsService::getAdminSummary(),
+ * so counting logic (e.g. "active school year") stays in one place even
+ * though the Admin and Principal dashboards no longer share any view data.
  */
 class DashboardController extends Controller
 {
@@ -27,27 +31,7 @@ class DashboardController extends Controller
 
     public function index()
     {
-        // AJAX partial refresh — the person only changed the "Students
-        // Needing Attention" filters, so there's no need to recompute
-        // the whole dashboard (charts, honors, section summaries) just
-        // to update a small list. This is what makes the filter feel
-        // instant instead of reloading the entire page: the browser
-        // fetches this in the background and only swaps out the
-        // results container, not the address bar, sidebar, or charts.
-        $reportRoute = route('admin.reports');
-
-        if (request()->ajax()) {
-            return view('admin.partials.at-risk-results', array_merge(
-                $this->analytics->getAtRiskStudentsData(),
-                compact('reportRoute')
-            ));
-        }
-
-        return view('admin.dashboard', array_merge(
-            $this->analytics->getSummaryData(),
-            $this->analytics->getAtRiskStudentsData(),
-            compact('reportRoute')
-        ));
+        return view('admin.dashboard', $this->analytics->getAdminSummary());
     }
 
     /** @deprecated Kept for direct-call test coverage — use DashboardAnalyticsService. */

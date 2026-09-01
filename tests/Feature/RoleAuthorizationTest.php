@@ -100,13 +100,21 @@ class RoleAuthorizationTest extends TestCase
         $this->actingAs($admin)->get('/admin/academic-terms')->assertOk();
     }
 
-    public function test_admin_dashboard_ajax_at_risk_partial_renders(): void
+    public function test_admin_dashboard_has_no_risk_or_at_risk_analytics(): void
     {
         $admin = User::factory()->admin()->create();
 
-        $this->actingAs($admin)
-            ->get('/admin/dashboard', ['X-Requested-With' => 'XMLHttpRequest'])
-            ->assertOk();
+        // Admin dashboard is master-data-only — no ajax at-risk partial
+        // branch exists anymore (that's exclusively a Principal-dashboard
+        // concept now), and even a plain load must never surface DSS
+        // language like "At Risk" / "Risk Level" / "Recommendations".
+        $response = $this->actingAs($admin)->get('/admin/dashboard');
+
+        $response->assertOk();
+        $response->assertViewHas('totalUsers');
+        $response->assertDontSee('Risk Distribution');
+        $response->assertDontSee('At-Risk');
+        $response->assertDontSee('Students Needing Attention');
     }
 
     public function test_adviser_students_page_renders(): void

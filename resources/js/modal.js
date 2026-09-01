@@ -105,24 +105,6 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     // =============================================
-    // ADVISER — ADD STUDENT MODAL
-    // =============================================
-    if (document.getElementById("adviserAddStudentModal")) {
-        window.openAdviserAddStudent = () => window.showModal("adviserAddStudentModal");
-        window.closeAdviserAddStudent = () => window.hideModal("adviserAddStudentModal");
-        window.bindModalOverlayClose("adviserAddStudentModal");
-    }
-
-    // =============================================
-    // ADVISER — IMPORT STUDENTS MODAL
-    // =============================================
-    if (document.getElementById("importModal")) {
-        window.openImportModal = () => window.showModal("importModal");
-        window.closeImportModal = () => window.hideModal("importModal");
-        window.bindModalOverlayClose("importModal");
-    }
-
-    // =============================================
     // PROFILE MODAL (used on every page, adviser or admin)
     // =============================================
     if (document.getElementById("profileModal")) {
@@ -365,6 +347,24 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     // =============================================
+    // ADMIN — ADD STUDENT MODAL
+    // =============================================
+    if (document.getElementById("addStudentModal")) {
+        window.openAddStudentModal = () => window.showModal("addStudentModal");
+        window.closeAddStudentModal = () => window.hideModal("addStudentModal");
+        window.bindModalOverlayClose("addStudentModal");
+    }
+
+    // =============================================
+    // ADMIN — IMPORT STUDENTS MODAL
+    // =============================================
+    if (document.getElementById("importStudentsModal")) {
+        window.openImportStudentsModal = () => window.showModal("importStudentsModal");
+        window.closeImportStudentsModal = () => window.hideModal("importStudentsModal");
+        window.bindModalOverlayClose("importStudentsModal");
+    }
+
+    // =============================================
     // ADMIN — TRACK MANAGEMENT MODAL
     // =============================================
     const trackForm = document.getElementById("trackForm");
@@ -493,5 +493,14 @@ document.addEventListener("DOMContentLoaded", function () {
 
         window.closeSubjectModal = () => window.hideModal("subjectModal");
         window.bindModalOverlayClose("subjectModal");
+    }
+
+    // =============================================
+    // ADMIN — IMPORT SUBJECTS MODAL
+    // =============================================
+    if (document.getElementById("importSubjectsModal")) {
+        window.openImportSubjectsModal = () => window.showModal("importSubjectsModal");
+        window.closeImportSubjectsModal = () => window.hideModal("importSubjectsModal");
+        window.bindModalOverlayClose("importSubjectsModal");
     }
 });

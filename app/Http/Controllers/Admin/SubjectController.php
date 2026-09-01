@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Subject;
 use App\Models\Track;
 use App\Models\Specialization;
+use App\Imports\SubjectsImport;
+use Maatwebsite\Excel\Facades\Excel;
 use App\Helpers\LogActivity;
 use Illuminate\Http\Request;
 
@@ -70,6 +72,50 @@ class SubjectController extends Controller
 
         return redirect()->route('admin.subjects')
             ->with('success', 'Subject added successfully!');
+    }
+
+    /**
+     * Bulk-import subjects from an Excel/CSV file so Admin doesn't have to
+     * manually encode every subject. See App\Imports\SubjectsImport for the
+     * expected column layout and validation/duplicate rules.
+     */
+    public function import(Request $request)
+    {
+        $request->validateWithBag('import', [
+            'file' => 'required|mimes:xlsx,xls,csv,txt|max:2048',
+        ]);
+
+        $import = new SubjectsImport();
+        Excel::import($import, $request->file('file'));
+
+        $failures = $import->failures();
+
+        if ($failures->count() > 0) {
+            $errorMessages = $failures->map(function ($failure) {
+                return 'Row ' . $failure->row() . ': ' . implode(', ', $failure->errors());
+            })->toArray();
+
+            LogActivity::log(
+                'import_subjects',
+                'Imported ' . $import->importedCount . ' subject(s), ' . $failures->count() . ' row(s) skipped',
+                'subjects',
+                null
+            );
+
+            return redirect()->route('admin.subjects')
+                ->with('warning', $import->importedCount . ' subject(s) imported. ' . $failures->count() . ' row(s) were skipped:')
+                ->with('import_errors', $errorMessages);
+        }
+
+        LogActivity::log(
+            'import_subjects',
+            'Bulk imported ' . $import->importedCount . ' subject(s) via file upload',
+            'subjects',
+            null
+        );
+
+        return redirect()->route('admin.subjects')
+            ->with('success', $import->importedCount . ' subject(s) imported successfully!');
     }
 
     /** Update an existing subject. */

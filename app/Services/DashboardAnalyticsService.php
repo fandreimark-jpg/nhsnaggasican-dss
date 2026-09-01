@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\AcademicTerm;
 use App\Models\Assessment;
 use App\Models\Grade;
 use App\Models\Intervention;
@@ -9,16 +10,19 @@ use App\Models\RiskResult;
 use App\Models\Section;
 use App\Models\Specialization;
 use App\Models\Student;
+use App\Models\Subject;
 use App\Models\Track;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
 /**
  * The read-only Decision Support dashboard data (risk distribution, at-risk
- * students, performance trends, academic honors) used by BOTH the Admin
- * dashboard and the Principal dashboard. Extracted here so the two roles
- * share one computation instead of the Principal view drifting out of sync
- * with whatever the Admin dashboard does.
+ * students, performance trends, academic honors) — the Principal dashboard's
+ * data source. Also provides getAdminSummary(), the deliberately separate
+ * MASTER-DATA-ONLY dataset for the Admin dashboard: Admin manages system
+ * configuration (users, sections, tracks, subjects...), not academic risk,
+ * so the two dashboards intentionally do not share risk/DSS data — only the
+ * service class, to keep the counting logic in one place.
  *
  * Everything here is read-only by construction — it only ever queries data,
  * never writes it — matching the rule that Principal may view but not
@@ -123,6 +127,31 @@ class DashboardAnalyticsService
     }
 
     /**
+     * Admin-dashboard-only summary data: pure system/master-data counts —
+     * no risk levels, no at-risk students, no DSS analytics. That data
+     * belongs solely to the Principal (see getSummaryData/getPrincipalSummary),
+     * so the two dashboards can never look alike by accident.
+     */
+    public function getAdminSummary(): array
+    {
+        $schoolYear = Section::activeSchoolYear();
+        $openTerm   = AcademicTerm::currentOpenTerm($schoolYear);
+
+        return [
+            'totalUsers'            => User::count(),
+            'totalStudents'         => Student::count(),
+            'totalAdvisers'         => User::where('role', 'adviser')->count(),
+            'totalPrincipals'       => User::where('role', 'principal')->count(),
+            'totalSections'         => Section::count(),
+            'totalSubjects'         => Subject::count(),
+            'totalTracks'           => Track::count(),
+            'totalSpecializations'  => Specialization::count(),
+            'activeSchoolYear'      => $schoolYear,
+            'activeTerm'            => $openTerm,
+        ];
+    }
+
+    /**
      * Principal-dashboard-only summary data: intervention status counts
      * and assessment-evidence completion — the two elements CLAUDE.md's
      * Principal dashboard spec calls for ("Under Intervention",
@@ -183,24 +212,16 @@ class DashboardAnalyticsService
     {
         $atRiskGradeLevel    = request('ar_grade_level');
         $atRiskSection       = request('ar_section_search');
-        $atRiskTrack         = request('ar_track');
-        $atRiskSpecialization = request('ar_specialization');
         $atRiskRiskLevel     = request('ar_risk_level');
         $atRiskComponent     = request('ar_component');
 
-        $atRiskStudents = Student::with(['section', 'riskResults.weakestSubject'])
+        $atRiskStudents = Student::with(['section.track', 'section.specialization', 'riskResults.weakestSubject'])
         ->whereHas('riskResults')
         ->when($atRiskGradeLevel, fn($q) =>
             $q->whereHas('section', fn($s) => $s->where('grade_level', $atRiskGradeLevel))
         )
         ->when($atRiskSection, fn($q) =>
             $q->whereHas('section', fn($s) => $s->where('name', $atRiskSection))
-        )
-        ->when($atRiskTrack, fn($q) =>
-            $q->whereHas('section', fn($s) => $s->where('track_id', $atRiskTrack))
-        )
-        ->when($atRiskSpecialization, fn($q) =>
-            $q->whereHas('section', fn($s) => $s->where('specialization_id', $atRiskSpecialization))
         )
         ->get()
         ->map(function ($student) {
@@ -212,6 +233,12 @@ class DashboardAnalyticsService
                 'name'                    => $student->last_name . ', ' . $student->first_name,
                 'section'                 => $student->section->name ?? '—',
                 'grade_level'             => $student->section->grade_level ?? null,
+                // Section already determines these — displayed read-only
+                // next to the Section filter rather than offered as
+                // separate selectable dropdowns (CLAUDE.md: Track/
+                // Specialization must not be manually selectable).
+                'track'                   => $student->section->track->name ?? null,
+                'specialization'          => $student->section->specialization->name ?? null,
                 'average'                 => $latestRisk->average_grade ?? '—',
                 'risk_level'              => $latestRisk->risk_level ?? '—',
                 'weakest_subject'         => $latestRisk->weakest_subject ?? null,
@@ -245,18 +272,16 @@ class DashboardAnalyticsService
             ->orderBy('grade_level')
             ->pluck('grade_level');
 
-        $atRiskSections = Section::select('id', 'name', 'grade_level')
+        // Track/Specialization are carried as data-* attributes on each
+        // <option> so the page can display them read-only the instant a
+        // Section is picked, with no extra request.
+        $atRiskSections = Section::select('id', 'name', 'grade_level', 'track_id', 'specialization_id')
+            ->with(['track:id,name', 'specialization:id,name'])
             ->orderBy('grade_level')
             ->orderBy('name')
             ->get();
 
-        $atRiskTracks = Track::orderBy('name')->get(['id', 'name']);
-        $atRiskSpecializations = Specialization::orderBy('name')->get(['id', 'name', 'track_id']);
-
-        return compact(
-            'atRiskStudents', 'atRiskStudentsTotal', 'atRiskGradeLevels', 'atRiskSections',
-            'atRiskTracks', 'atRiskSpecializations'
-        );
+        return compact('atRiskStudents', 'atRiskStudentsTotal', 'atRiskGradeLevels', 'atRiskSections');
     }
 
     /**

@@ -5,6 +5,17 @@
 
 @section('content')
 
+@if(session('import_errors'))
+<div class="bg-yellow-100 text-yellow-800 text-sm p-4 rounded-lg mb-4">
+    <p class="font-medium mb-1">{{ session('warning') }}</p>
+    <ul class="list-disc list-inside">
+        @foreach(session('import_errors') as $error)
+            <li>{{ $error }}</li>
+        @endforeach
+    </ul>
+</div>
+@endif
+
 <div class="bg-white rounded-xl shadow-sm mb-0">
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 px-6 py-4 border-b">
         <div>
@@ -26,6 +37,10 @@
                     class="border rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 w-56">
                 <i class="bi bi-search absolute left-3 top-2.5 text-gray-400 text-sm"></i>
             </div>
+            <button type="button" onclick="openImportSubjectsModal()"
+                class="bg-white border border-brand-700 text-brand-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-50 whitespace-nowrap">
+                <i class="bi bi-upload"></i> Import Subjects
+            </button>
             <button type="button" onclick="openAddSubjectModal()"
                 class="bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-800 whitespace-nowrap">
                 <i class="bi bi-plus-lg"></i> Add Subject
@@ -174,6 +189,52 @@
     </div>
 </div>
 {{-- Modal logic now lives in resources/js/modal.js. --}}
+
+{{-- IMPORT SUBJECTS MODAL --}}
+<div id="importSubjectsModal"
+     class="{{ $errors->import->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
+    <div class="modal-box {{ $errors->import->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
+
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold text-gray-800">Import Subjects</h3>
+            <button type="button" onclick="closeImportSubjectsModal()" class="text-gray-400 hover:text-gray-600">✕</button>
+        </div>
+
+        @if($errors->import->any())
+            <div class="bg-red-100 text-red-700 text-sm p-3 rounded-lg mb-4">
+                <ul class="list-disc list-inside">
+                    @foreach($errors->import->all() as $error)
+                        <li>{{ $error }}</li>
+                    @endforeach
+                </ul>
+            </div>
+        @endif
+
+        <p class="text-sm text-gray-500 mb-4">
+            Upload an Excel (.xlsx) or CSV file. Required columns:
+            <strong>name, type, grade_level</strong>.
+            Optional: <strong>track, specialization</strong> (by name or code —
+            for elective subjects). Type must be <strong>core</strong> or
+            <strong>elective</strong>; grade_level must be <strong>11</strong> or <strong>12</strong>.
+        </p>
+
+        <form method="POST" action="{{ route('admin.subjects.import') }}"
+              enctype="multipart/form-data" class="space-y-4">
+            @csrf
+            <input type="file" name="file" accept=".xlsx,.xls,.csv" required
+                   class="w-full border rounded-lg px-3 py-2 text-sm">
+
+            <div class="flex justify-end gap-3 pt-2">
+                <button type="button" onclick="closeImportSubjectsModal()"
+                        class="px-4 py-2 text-sm text-gray-500">Cancel</button>
+                <button type="submit"
+                        class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium">
+                    Upload & Import
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
 
 @push('scripts')
 <script>

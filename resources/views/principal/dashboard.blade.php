@@ -130,8 +130,9 @@
 </div>
 
 @php
-    $atRiskFilterKeys = ['ar_grade_level', 'ar_section_search', 'ar_track', 'ar_specialization', 'ar_risk_level', 'ar_component'];
+    $atRiskFilterKeys = ['ar_grade_level', 'ar_section_search', 'ar_risk_level', 'ar_component'];
     $atRiskFiltersActive = collect($atRiskFilterKeys)->contains(fn($k) => request($k));
+    $selectedSection = $atRiskSections->firstWhere('name', request('ar_section_search'));
 @endphp
 {{-- At-Risk Students Table — shared partial with the Admin dashboard --}}
 @if($atRiskStudentsTotal > 0 || $atRiskFiltersActive)
@@ -170,33 +171,30 @@
                         <option value="">All sections</option>
                         @foreach($atRiskSections as $sec)
                             <option value="{{ $sec->name }}" data-grade-level="{{ $sec->grade_level }}"
+                                    data-track="{{ $sec->track->name ?? '' }}"
+                                    data-specialization="{{ $sec->specialization->name ?? '' }}"
                                     {{ request('ar_section_search') === $sec->name ? 'selected' : '' }}>
                                 {{ $sec->name }} (Grade {{ $sec->grade_level }})
                             </option>
                         @endforeach
                     </select>
                 </div>
+                {{-- Track/Specialization are NOT selectable — they are
+                     automatically derived from whichever Section is chosen
+                     above (CLAUDE.md: "must NOT be manually selectable
+                     dropdowns"), via the existing Section->track/
+                     specialization relationship. --}}
                 <div>
                     <label class="block text-xs text-gray-500 mb-1">Track</label>
-                    <select name="ar_track" class="border rounded-md text-sm px-2 py-1.5 min-w-[130px]">
-                        <option value="">All tracks</option>
-                        @foreach($atRiskTracks as $track)
-                            <option value="{{ $track->id }}" {{ request('ar_track') == $track->id ? 'selected' : '' }}>
-                                {{ $track->name }}
-                            </option>
-                        @endforeach
-                    </select>
+                    <p id="atRiskTrackDisplay" class="border rounded-md text-sm px-2 py-1.5 min-w-[130px] bg-gray-50 text-gray-600">
+                        {{ $selectedSection->track->name ?? '—' }}
+                    </p>
                 </div>
                 <div>
                     <label class="block text-xs text-gray-500 mb-1">Specialization</label>
-                    <select name="ar_specialization" class="border rounded-md text-sm px-2 py-1.5 min-w-[130px]">
-                        <option value="">All specializations</option>
-                        @foreach($atRiskSpecializations as $spec)
-                            <option value="{{ $spec->id }}" {{ request('ar_specialization') == $spec->id ? 'selected' : '' }}>
-                                {{ $spec->name }}
-                            </option>
-                        @endforeach
-                    </select>
+                    <p id="atRiskSpecializationDisplay" class="border rounded-md text-sm px-2 py-1.5 min-w-[150px] bg-gray-50 text-gray-600">
+                        {{ $selectedSection->specialization->name ?? '—' }}
+                    </p>
                 </div>
                 <div>
                     <label class="block text-xs text-gray-500 mb-1">Risk Level</label>
@@ -334,6 +332,7 @@
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         initCascadingSelect('atRiskGradeLevelSelect', 'atRiskSectionSelect');
+        initSectionDerivedDisplay('atRiskSectionSelect', 'atRiskTrackDisplay', 'atRiskSpecializationDisplay');
         initAutoSubmitFilter('atRiskFilterForm', { ajaxTarget: 'atRiskResultsContainer' });
     });
 </script>

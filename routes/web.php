@@ -63,10 +63,10 @@ Route::middleware(['auth', 'role:adviser'])
     ->name('adviser.')
     ->group(function () {
         Route::get('/dashboard',          [AdviserDashboardController::class, 'index'])->name('dashboard');
+        // Advisers view students in their assigned section only. Adding and
+        // importing students is exclusively an Admin action (see admin.students.store
+        // / admin.students.import below) — advisers may only edit existing records.
         Route::get('/students',           [AdviserStudentController::class, 'index'])->name('students');
-        // NEW ROUTE: the "Add Student" modal on the adviser students page
-        // submits (POST) here, which runs the store() function in StudentController.
-        Route::post('/students',          [AdviserStudentController::class, 'store'])->name('students.store');
         Route::put('/students/{id}',      [AdviserStudentController::class, 'update'])->name('students.update');
         Route::get('/grades',             [AdviserGradeController::class, 'index'])->name('grades');
         Route::post('/grades',            [AdviserGradeController::class, 'store'])->name('grades.store');
@@ -75,7 +75,6 @@ Route::middleware(['auth', 'role:adviser'])
         Route::post('/grades/verify', [AdviserGradeController::class, 'verifyComputedGrade'])->name('grades.verify');
         Route::get('/submit-report',      [AdviserReportController::class, 'show'])->name('submit.report');
         Route::post('/submit-report',     [AdviserReportController::class, 'submit'])->name('submit.report.post');
-        Route::post('/students/import',   [AdviserStudentController::class, 'import'])->name('students.import');
         Route::get('/assessments',          [AdviserAssessmentController::class, 'index'])->name('assessments');
         Route::post('/assessments/detect',  [AdviserAssessmentController::class, 'detect'])->name('assessments.detect');
         Route::post('/assessments/preview', [AdviserAssessmentController::class, 'preview'])->name('assessments.preview');
@@ -136,6 +135,7 @@ Route::middleware(['auth', 'role:admin'])
         // Subjects Management
         Route::get('/subjects',         [SubjectController::class, 'index'])->name('subjects');
         Route::post('/subjects',        [SubjectController::class, 'store'])->name('subjects.store');
+        Route::post('/subjects/import', [SubjectController::class, 'import'])->name('subjects.import');
         Route::put('/subjects/{id}',    [SubjectController::class, 'update'])->name('subjects.update');
         Route::delete('/subjects/{id}', [SubjectController::class, 'destroy'])->name('subjects.destroy');
 
@@ -149,11 +149,12 @@ Route::middleware(['auth', 'role:admin'])
         Route::get('/academic-terms',               [AcademicTermController::class, 'index'])->name('academic-terms');
         Route::post('/academic-terms/{term}/open',  [AcademicTermController::class, 'open'])->whereNumber('term')->name('academic-terms.open');
         Route::post('/academic-terms/{term}/close',[AcademicTermController::class, 'close'])->whereNumber('term')->name('academic-terms.close');
-        // Students Management
-        // NOTE: no POST /students (add) route here anymore — adding students
-        // is now exclusively an Adviser action (see adviser.students.store above),
-        // matching the paper's design: "advisers encode, admin monitors."
+        // Students Management — adding and importing students is exclusively
+        // an Admin action (master-data ownership); advisers may only view
+        // their own section's students and edit existing records.
         Route::get('/students',         [StudentController::class, 'index'])->name('students');
+        Route::post('/students',        [StudentController::class, 'store'])->name('students.store');
+        Route::post('/students/import', [StudentController::class, 'import'])->name('students.import');
         Route::put('/students/{id}',    [StudentController::class, 'update'])->name('students.update');
         Route::delete('/students/{id}', [StudentController::class, 'destroy'])->name('students.destroy');
 
