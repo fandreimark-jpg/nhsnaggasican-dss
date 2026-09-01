@@ -18,7 +18,14 @@ class InterventionFactory extends Factory
             'recommendation_reason' => 'Failing subject(s) detected.',
             'status'                => 'recommended',
             'principal_notes'       => null,
-            'created_by'            => User::factory()->principal(),
+            // Inactive by default: 'created_by' is just an audit-trail FK
+            // — its identity doesn't matter to most tests, but an ACTIVE
+            // principal here would compete for the same
+            // role_singleton_key UNIQUE slot as whichever principal a
+            // test separately creates via User::factory()->principal()
+            // for actingAs(). Tests that DO care who created it should
+            // override this explicitly.
+            'created_by'            => User::factory()->principal()->inactive(),
         ];
     }
 }

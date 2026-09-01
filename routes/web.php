@@ -115,6 +115,8 @@ Route::middleware(['auth', 'role:admin'])
         Route::get('/users',            [UserController::class, 'index'])->name('users');
         Route::post('/users',           [UserController::class, 'store'])->name('users.store');
         Route::put('/users/{id}',       [UserController::class, 'update'])->name('users.update');
+        Route::post('/users/{id}/disable', [UserController::class, 'disable'])->name('users.disable');
+        Route::post('/users/{id}/activate', [UserController::class, 'activate'])->name('users.activate');
         Route::delete('/users/{id}',    [UserController::class, 'destroy'])->name('users.destroy');
 
         // Tracks Management

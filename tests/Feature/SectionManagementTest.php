@@ -42,7 +42,10 @@ class SectionManagementTest extends TestCase
     public function test_only_a_user_with_the_adviser_role_can_be_assigned_to_a_section(): void
     {
         $admin        = User::factory()->admin()->create();
-        $anotherAdmin = User::factory()->admin()->create();
+        // Inactive — only one ACTIVE admin account is allowed at a time
+        // (see UserManagementTest); this admin only needs to exist with
+        // the 'admin' role for this assertion, not be a second active one.
+        $anotherAdmin = User::factory()->admin()->inactive()->create();
 
         $response = $this->actingAs($admin)->post('/admin/sections', $this->sectionPayload([
             'adviser_id' => $anotherAdmin->id,

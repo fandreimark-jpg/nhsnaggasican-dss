@@ -34,6 +34,7 @@
                 <th class="text-left px-6 py-3">Middle Name</th>
                 <th class="text-left px-6 py-3">Email</th>
                 <th class="text-left px-6 py-3">Role</th>
+                <th class="text-left px-6 py-3">Status</th>
                 <th class="px-6 py-3 text-right">Actions</th>
             </tr>
         </thead>
@@ -59,6 +60,17 @@
                         </span>
                     @endif
                 </td>
+                <td class="px-6 py-3">
+                    @if($user->is_active)
+                        <span class="px-2 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                            <i class="bi bi-check-circle-fill"></i> Active
+                        </span>
+                    @else
+                        <span class="px-2 py-1 rounded-full text-xs font-semibold bg-gray-200 text-gray-600">
+                            <i class="bi bi-slash-circle-fill"></i> Inactive
+                        </span>
+                    @endif
+                </td>
                 <td class="px-6 py-3 text-right space-x-2">
                     <button type="button"
                         onclick='openUserEditModal(@json($user))'
@@ -67,6 +79,26 @@
                     </button>
 
                     @if($user->id !== auth()->id())
+                        @if($user->is_active)
+                        <form method="POST" action="{{ route('admin.users.disable', $user->id) }}" class="inline"
+                            data-confirm="Disable {{ $user->first_name }} {{ $user->last_name }}? They will no longer be able to log in.">
+                            @csrf
+                            @method('POST')
+                            <button type="submit"
+                                class="inline-flex items-center gap-1 text-orange-600 hover:text-orange-800 text-xs font-medium border border-orange-200 rounded px-2 py-1 hover:bg-orange-50">
+                                <i class="bi bi-slash-circle"></i> Disable
+                            </button>
+                        </form>
+                        @else
+                        <form method="POST" action="{{ route('admin.users.activate', $user->id) }}" class="inline">
+                            @csrf
+                            <button type="submit"
+                                class="inline-flex items-center gap-1 text-green-600 hover:text-green-800 text-xs font-medium border border-green-200 rounded px-2 py-1 hover:bg-green-50">
+                                <i class="bi bi-check-circle"></i> Activate
+                            </button>
+                        </form>
+                        @endif
+
                     <form method="POST"
                         action="{{ route('admin.users.destroy', $user->id) }}"
                         class="inline"
@@ -83,7 +115,7 @@
             </tr>
             @empty
             <tr id="emptyRow">
-                <td colspan="6" class="px-6 py-8 text-center text-gray-400">
+                <td colspan="7" class="px-6 py-8 text-center text-gray-400">
                     <i class="bi bi-people text-2xl block mb-2"></i>
                     No users yet.
                 </td>

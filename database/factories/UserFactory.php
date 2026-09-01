@@ -71,4 +71,21 @@ class UserFactory extends Factory
         });
     }
 
+    /**
+     * Indicate that the account is disabled. Useful for tests that need a
+     * second admin/principal-role row alongside an active one — an
+     * inactive row never competes for the role_singleton_key UNIQUE index
+     * (see the migration), so this is how tests get a second same-role
+     * user without tripping the new one-active-account-per-singleton-role
+     * rule. 'is_active' isn't in $fillable (see the model), so this uses
+     * the same direct-property-assignment pattern as admin()/principal()
+     * above rather than state()'s attribute merge.
+     */
+    public function inactive(): static
+    {
+        return $this->afterMaking(function (User $user) {
+            $user->is_active = false;
+        });
+    }
+
 }

@@ -51,6 +51,23 @@ class LoginRequest extends FormRequest
         }
 
         RateLimiter::clear($this->throttleKey());
+
+        // Credentials were correct, but the account has been disabled by
+        // an Admin — log them right back out (Auth::attempt already
+        // started the session) and show a specific reason rather than the
+        // generic "these credentials do not match" message. Checked only
+        // AFTER the password is verified, not before, so a disabled
+        // account's existence/status is never revealed to someone who
+        // doesn't actually know its password.
+        if (! Auth::user()->isActive()) {
+            Auth::guard('web')->logout();
+            $this->session()->invalidate();
+            $this->session()->regenerateToken();
+
+            throw ValidationException::withMessages([
+                'email' => 'Your account has been disabled. Please contact the system administrator.',
+            ]);
+        }
     }
 
     /**

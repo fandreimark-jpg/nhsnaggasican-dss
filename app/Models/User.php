@@ -27,7 +27,11 @@ class User extends Authenticatable
     // UserController instead (see $user->role = ...), so that even if
     // some future code accidentally mass-assigns from raw request input,
     // a user could never sneak a 'role' field into their own request
-    // and self-promote to admin.
+    // and self-promote to admin. 'is_active' and 'role_singleton_key' are
+    // excluded for the same reason — account status is an Admin-only
+    // action (UserController::disable/activate), never end-user input, and
+    // role_singleton_key is NEVER set directly by any caller at all (see
+    // boot() below).
     protected $fillable = [
         'name',
         'last_name',
@@ -42,6 +46,41 @@ class User extends Authenticatable
         'password',
         'remember_token',
     ];
+
+    protected $casts = [
+        'is_active' => 'boolean',
+    ];
+
+    // Matches the DB column default — makes sure a freshly-instantiated
+    // `new User()` already has is_active = true in memory BEFORE the first
+    // save(), so the boot() saving hook below (which reads $user->is_active
+    // to compute role_singleton_key) never sees an unset/null value and
+    // wrongly treats a new active admin/principal as inactive.
+    protected $attributes = [
+        'is_active' => true,
+    ];
+
+    /**
+     * Keeps role_singleton_key in sync with (role, is_active) on every
+     * save, from every code path — factories, seeders, UserController,
+     * tinker — so it can never drift out of sync the way a value that
+     * callers set by hand could. Only 'admin' and 'principal' are
+     * singleton roles; 'adviser' always computes to null (unlimited
+     * advisers, active or not). See the migration for why a UNIQUE index
+     * on this nullable column is what makes "only one active Admin /
+     * Principal" an actual database constraint instead of just an
+     * application-level check.
+     */
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::saving(function (User $user) {
+            $user->role_singleton_key = ($user->is_active && in_array($user->role, ['admin', 'principal'], true))
+                ? $user->role
+                : null;
+        });
+    }
 
     // =============================================
     // ACCESSORS
@@ -90,6 +129,50 @@ class User extends Authenticatable
             'principal' => 'principal.dashboard',
             default     => 'adviser.dashboard',
         };
+    }
+
+    // =============================================
+    // ACCOUNT STATUS / ROLE UNIQUENESS
+    // =============================================
+
+    /** Roles that must have at most one ACTIVE account at any time. */
+    public const SINGLETON_ROLES = ['admin', 'principal'];
+
+    public function isActive(): bool
+    {
+        return (bool) $this->is_active;
+    }
+
+    /** Only 'admin' and 'principal' are capped at one active account — Advisers are unlimited. */
+    public static function isSingletonRole(string $role): bool
+    {
+        return in_array($role, self::SINGLETON_ROLES, true);
+    }
+
+    /**
+     * Does an ACTIVE account for this role already exist? Used for the
+     * friendly, synchronous validation message on the happy path
+     * (UserController::store/update/activate) — the actual guarantee
+     * against a concurrent duplicate is the role_singleton_key UNIQUE
+     * index (see the migration + boot() above), which this check cannot
+     * race-proof on its own.
+     */
+    public static function hasActiveAccountForRole(string $role, ?int $excludeUserId = null): bool
+    {
+        return static::where('role', $role)
+            ->where('is_active', true)
+            ->when($excludeUserId, fn($q) => $q->where('id', '!=', $excludeUserId))
+            ->exists();
+    }
+
+    public function scopeActive($query)
+    {
+        return $query->where('is_active', true);
+    }
+
+    public function scopeInactive($query)
+    {
+        return $query->where('is_active', false);
     }
 
     // =============================================
