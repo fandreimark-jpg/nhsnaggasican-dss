@@ -36,7 +36,9 @@ class DashboardController extends Controller
             [
                 'dataHealth'     => $this->analytics->getDataHealthChecks(),
                 'openTermPanel'  => $this->analytics->getOpenTermPanel(),
-                'recentActivity' => $this->analytics->getRecentActivity(),
+                // WORK ORDER Part 5 — the dashboard is a glance, not the
+                // log; admin.activity.logs is the full list.
+                'recentActivity' => $this->analytics->getRecentActivity(5),
             ]
         ));
     }
