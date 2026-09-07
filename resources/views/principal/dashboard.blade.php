@@ -40,27 +40,24 @@
      Assessment Completion gets a visible progress bar alongside the
      percentage it was always showing as plain text. --}}
 <div class="grid grid-cols-2 gap-3 mb-4 max-w-xl">
-    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-gray-300">
-        <p class="text-xs text-gray-500">Total Students</p>
-        <p class="text-2xl font-bold text-gray-800 mt-1 tabular-nums">{{ $totalStudents }}</p>
-        <p class="text-xs text-gray-400 mt-1">Across every section, Term {{ $inTermTerm }}, {{ \App\Models\Section::activeSchoolYear() }}</p>
-    </div>
+    <x-stat-card label="Total Students" :value="$totalStudents" accent="count-8"
+        :note="'Across every section, Term '.$inTermTerm.', '.\App\Models\Section::activeSchoolYear()" />
     {{-- Moved here from the decisions row below — Assessment Completion is
          evidence-on-file, same as In-Term Status, not a decision the
          Principal is making. --}}
-    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-gray-300">
-        <p class="text-xs text-gray-500">Assessment Completion</p>
-        @if($assessment_completion['has_data'])
-            <p class="text-2xl font-bold text-gray-800 mt-1 tabular-nums">{{ $assessment_completion['percentage'] }}%</p>
-            <div class="h-1.5 bg-gray-100 rounded-full overflow-hidden mt-2" role="progressbar" aria-valuenow="{{ $assessment_completion['percentage'] }}" aria-valuemin="0" aria-valuemax="100">
-                <div class="h-full bg-brand-700 rounded-full" style="width: {{ min(100, $assessment_completion['percentage']) }}%"></div>
-            </div>
-            <p class="text-xs text-gray-400 mt-1.5 tabular-nums">{{ $assessment_completion['actual'] }} of {{ $assessment_completion['expected'] }} expected scores entered</p>
-        @else
-            <p class="text-lg font-medium text-gray-300 mt-1">No data yet</p>
-            <p class="text-xs text-gray-400 mt-1">No assessment forms uploaded this school year</p>
-        @endif
-    </div>
+    <x-stat-card label="Assessment Completion" accent="count-8"
+        :value="$assessment_completion['has_data'] ? $assessment_completion['percentage'].'%' : 'No data yet'">
+        <x-slot:note>
+            @if($assessment_completion['has_data'])
+                <div class="h-1.5 bg-gray-100 rounded-full overflow-hidden mt-1" role="progressbar" aria-valuenow="{{ $assessment_completion['percentage'] }}" aria-valuemin="0" aria-valuemax="100">
+                    <div class="h-full bg-brand-700 rounded-full" style="width: {{ min(100, $assessment_completion['percentage']) }}%"></div>
+                </div>
+                <span class="block mt-1.5 tabular-nums">{{ $assessment_completion['actual'] }} of {{ $assessment_completion['expected'] }} expected scores entered</span>
+            @else
+                No assessment forms uploaded this school year
+            @endif
+        </x-slot:note>
+    </x-stat-card>
 </div>
 
 {{-- TASK 3 of "close the intervention loop": populated the instant
@@ -79,12 +76,10 @@
      on whichever subject it defaults to, filtered — not literally "every
      subject at once," which no single list on this system currently
      shows). --}}
-<div class="mb-1">
-    <h3 class="text-sm font-semibold text-gray-800">In-Term Status — Term {{ $inTermTerm }}</h3>
-    <p class="text-xs text-gray-400">From assessment evidence already on file, across every subject — available before any term report is submitted.</p>
-</div>
+<x-panel title="In-Term Status — Term {{ $inTermTerm }}"
+    subtitle="From assessment evidence already on file, across every subject — available before any term report is submitted."
+    class="mb-4">
 @if($inTermTotal > 0)
-<div class="bg-white rounded-lg shadow-sm p-4 mb-1 mt-2">
     <div class="flex h-6 rounded-full overflow-hidden bg-gray-100">
         @if($inTermOnTrack > 0)
         <a href="{{ route('principal.students', ['status_filter' => 'On Track', 'period' => $inTermTerm]) }}"
@@ -119,10 +114,10 @@
             @endif
         </a>
     </div>
-</div>
 @else
-<p class="text-xs text-gray-400 -mt-2 mb-1">No assessment evidence uploaded yet this term — these counts populate as advisers import assessment scores.</p>
+<p class="text-xs text-gray-400">No assessment evidence uploaded yet this term — these counts populate as advisers import assessment scores.</p>
 @endif
+</x-panel>
 
 {{-- TASK 6b of "correctness and interface pass" — "the single most
      useful thing the dashboard is currently missing": the SAME stacked-bar
@@ -130,10 +125,8 @@
      direction across the year at a glance rather than only a snapshot of
      the current term. A term with no evidence yet renders as an empty
      (all-grey) bar, not a hidden one — absence is itself informative here. --}}
-<div class="bg-white rounded-lg shadow-sm p-4 mb-4">
-    <h3 class="font-semibold text-gray-800 text-sm mb-1">Term-over-Term Trend</h3>
-    <p class="text-xs text-gray-400 mb-3">On Track / Needs Attention / At Risk, across every subject, per term.</p>
-    <div class="grid grid-cols-3 gap-4">
+<x-panel title="Term-over-Term Trend" subtitle="On Track / Needs Attention / At Risk, across every subject, per term." class="mb-4">
+    <div class="grid grid-cols-3 gap-3">
         @foreach($inTermStatusTrend as $t)
         <div>
             <p class="text-xs font-medium text-gray-600 mb-1">Term {{ $t['term'] }}</p>
@@ -151,7 +144,7 @@
         </div>
         @endforeach
     </div>
-</div>
+</x-panel>
 
 {{-- ============================================================
      ZONE 2 — What needs a decision. TASK 1 of "dashboard structure
@@ -177,34 +170,32 @@
      On Track, the one place on this row where the status table's
      meaning actually applies. --}}
 <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-    <a href="{{ route('principal.interventions') }}" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-gray-300 hover:shadow-md transition-shadow block">
-        <p class="text-xs text-gray-500">Under Intervention</p>
-        <p class="text-2xl font-bold text-gray-800 mt-1">{{ $under_intervention }}</p>
-        <p class="text-xs text-gray-400 mt-1">Approved, in progress, or being monitored</p>
-    </a>
-    <a href="{{ route('principal.interventions', ['awaiting_decision' => 1]) }}" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-gray-300 hover:shadow-md transition-shadow block">
-        <p class="text-xs text-gray-500">Awaiting Your Decision</p>
-        <p class="text-2xl font-bold text-gray-800 mt-1">{{ $awaiting_decision }}</p>
-        {{-- "Master pass" PART 1.3b — "Recommended, not yet reviewed"
-             implied every one of these was a DSS recommendation; most are
-             Principal-recorded batches awaiting the Principal's own
-             approval, not a review of something the system suggested. --}}
-        <p class="text-xs text-gray-400 mt-1">Recorded but not yet approved</p>
-    </a>
+    <x-stat-card label="Under Intervention" :value="$under_intervention" accent="count-8"
+        :href="route('principal.interventions')" note="Approved, in progress, or being monitored" />
+    {{-- "Master pass" PART 1.3b — "Recommended, not yet reviewed" implied
+         every one of these was a DSS recommendation; most are
+         Principal-recorded batches awaiting the Principal's own approval,
+         not a review of something the system suggested. --}}
+    <x-stat-card label="Awaiting Your Decision" :value="$awaiting_decision" accent="count-8"
+        :href="route('principal.interventions', ['awaiting_decision' => 1])" note="Recorded but not yet approved" />
     {{-- TASK 2 of "bulk dialog and intervention closure" — a signal the
          Principal still has to act on (see
-         InTermStatusService::isReadyForReview()), never an auto-close. --}}
-    <a href="{{ route('principal.interventions', ['ready_for_review' => 1]) }}" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-status-ontrack hover:shadow-md transition-shadow block">
-        <p class="text-xs text-gray-500">Ready to Close</p>
-        <p class="text-2xl font-bold text-status-ontrack mt-1 tabular-nums">{{ $ready_for_review }}</p>
+         InTermStatusService::isReadyForReview()), never an auto-close.
+         "Ready to Close" keeps status-ontrack deliberately: it literally
+         reports that the student reached On Track, the one place on this
+         row where the status table's meaning actually applies. --}}
+    <x-stat-card label="Ready to Close" :value="$ready_for_review" accent="status-ontrack"
+        :href="route('principal.interventions', ['ready_for_review' => 1])">
         {{-- TASK 6e of "correctness and interface pass" — a bare "0" here
              reads as "nothing is working," not "nothing needs it yet." --}}
-        @if($ready_for_review > 0)
-            <p class="text-xs text-gray-400 mt-1">Delivered — student is now On Track</p>
-        @else
-            <p class="text-xs text-gray-400 mt-1">None yet — learners appear here once a delivered intervention brings them back On Track.</p>
-        @endif
-    </a>
+        <x-slot:note>
+            @if($ready_for_review > 0)
+                Delivered — student is now On Track
+            @else
+                None yet — learners appear here once a delivered intervention brings them back On Track.
+            @endif
+        </x-slot:note>
+    </x-stat-card>
 </div>
 @else
 <div class="bg-white rounded-lg shadow-sm p-4 mb-4 text-sm text-gray-500">
@@ -241,11 +232,8 @@
     </p>
 </div>
 <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4 mt-2">
-    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-status-failing">
-        <p class="text-xs text-gray-500">Failed this term</p>
-        <p class="text-2xl font-bold text-status-failing mt-1">{{ $failingCount }}</p>
-        <p class="text-xs text-gray-400 mt-1">Official grade 74 and below. Verified grades only. Available after the Adviser encodes final grades.</p>
-    </div>
+    <x-stat-card label="Failed this term" :value="$failingCount" accent="status-failing"
+        note="Official grade 74 and below. Verified grades only. Available after the Adviser encodes final grades." />
 </div>
 
 @php
@@ -274,18 +262,14 @@
      in this system to send a click to, so linking it would only ever land
      on an empty result with no explanation. --}}
 <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4 mt-2">
-    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-status-ontrack">
-        <p class="text-xs text-gray-500">Low Risk</p>
-        <p class="text-2xl font-bold text-status-ontrack mt-1 tabular-nums">{{ $lowRisk }}</p>
-    </div>
-    <a href="{{ route('principal.dashboard', ['ar_risk_level' => 'moderate']) }}#atRiskResultsContainer" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-status-attention hover:shadow-md transition-shadow block">
-        <p class="text-xs text-gray-500">Moderate Risk</p>
-        <p class="text-2xl font-bold text-status-attention mt-1 tabular-nums">{{ $moderateRisk }}</p>
-    </a>
-    <a href="{{ route('principal.dashboard', ['ar_risk_level' => 'high']) }}#atRiskResultsContainer" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-status-risk hover:shadow-md transition-shadow block">
-        <p class="text-xs text-gray-500">High Risk</p>
-        <p class="text-2xl font-bold text-status-risk mt-1 tabular-nums">{{ $highRisk }}</p>
-    </a>
+    {{-- Low Risk is deliberately NOT a link — see the note above:
+         getAtRiskStudentsData() only ever returns moderate/high students,
+         so there is no roster to send a click to. --}}
+    <x-stat-card label="Low Risk" :value="$lowRisk" accent="status-ontrack" />
+    <x-stat-card label="Moderate Risk" :value="$moderateRisk" accent="status-attention"
+        :href="route('principal.dashboard', ['ar_risk_level' => 'moderate']).'#atRiskResultsContainer'" />
+    <x-stat-card label="High Risk" :value="$highRisk" accent="status-risk"
+        :href="route('principal.dashboard', ['ar_risk_level' => 'high']).'#atRiskResultsContainer'" />
 </div>
 
 {{-- Risk levels and per-student focus areas measure different things and
@@ -304,17 +288,14 @@
      branch) are untouched — this is a conditional render, nothing was
      deleted, and it reappears exactly as it was the moment a term report
      is submitted (see PrincipalDashboardRiskCollapseTest). --}}
-<div class="bg-white rounded-lg shadow-sm p-6 mb-4 text-center">
-    <i class="bi bi-hourglass-split text-2xl text-gray-300"></i>
-    <p class="text-sm text-gray-600 mt-2">
-        Risk Level appears once advisers submit their term reports. It covers every subject and factors in the
-        trend across terms, produced by the classifier from the submitted report.
-    </p>
-    <p class="text-xs text-gray-400 mt-1">
+<x-empty-state icon="bi-hourglass-split"
+    message="Risk Level appears once advisers submit their term reports. It covers every subject and factors in the trend across terms, produced by the classifier from the submitted report."
+    class="bg-white rounded-lg shadow-sm mb-4">
+    <x-slot:hint>
         <strong>In-Term Status</strong> above is available now, from assessment evidence already on file — no need
         to wait for a submitted report.
-    </p>
-</div>
+    </x-slot:hint>
+</x-empty-state>
 @endif
 
 {{-- Performance Trend — TASK 3 of "status clarity and progress
@@ -327,9 +308,7 @@
      which used to collapse this chart along with the two that
      genuinely need risk_results. --}}
 <div class="grid grid-cols-1 mb-4">
-    <div class="bg-white rounded-lg shadow-sm p-4">
-        <h3 class="font-semibold text-gray-800 text-sm mb-1">Performance Trend</h3>
-        <p class="text-xs text-gray-400 mb-2">Average COMPUTED grade per term, from assessment evidence — not the official/transmuted grade, and not gated on a submitted term report.</p>
+    <x-panel title="Performance Trend" subtitle="Average COMPUTED grade per term, from assessment evidence — not the official/transmuted grade, and not gated on a submitted term report.">
         <div style="height:180px;" class="{{ $hasTrendData ? '' : 'flex items-center justify-center' }}">
             @if($hasTrendData)
                 <canvas id="termTrendChart"></canvas>
@@ -337,7 +316,7 @@
                 <p class="text-xs text-gray-400 text-center px-4">No student/subject yet has scored evidence in all three components for any term — this fills in as that evidence is entered.</p>
             @endif
         </div>
-    </div>
+    </x-panel>
 </div>
 
 {{-- Charts Row — TASK 1 of "close the delivery loop": collapsed into the
@@ -347,16 +326,12 @@
      cards above; only Performance Trend (above) was pulled out of it. --}}
 @if($hasRiskData)
 <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
-    <div class="bg-white rounded-lg shadow-sm p-4">
-        <h3 class="font-semibold text-gray-800 text-sm mb-1">Risk Distribution</h3>
-        <p class="text-xs text-gray-400 mb-2">Overall student risk levels</p>
+    <x-panel title="Risk Distribution" subtitle="Overall student risk levels">
         <div style="height:180px;">
             <canvas id="riskDonutChart"></canvas>
         </div>
-    </div>
-    <div class="bg-white rounded-lg shadow-sm p-4">
-        <h3 class="font-semibold text-gray-800 text-sm mb-1">At-Risk per Section</h3>
-        <p class="text-xs text-gray-400 mb-2">Moderate + High risk per section</p>
+    </x-panel>
+    <x-panel title="At-Risk per Section" subtitle="Moderate + High risk per section">
         <div style="height:180px;" class="{{ $hasSectionRiskData ? '' : 'flex items-center justify-center' }}">
             @if($hasSectionRiskData)
                 <canvas id="sectionRiskChart"></canvas>
@@ -364,15 +339,13 @@
                 <p class="text-xs text-gray-400 text-center px-4">No section has a submitted term report yet — this fills in once term reports come in.</p>
             @endif
         </div>
-    </div>
+    </x-panel>
 </div>
 @endif
 
 {{-- Recommendations — the DSS provides these; the Principal makes the
      final decision (see Intervention, a later phase). --}}
-<div class="bg-white rounded-lg shadow-sm p-4 mb-4">
-    <h3 class="font-semibold text-gray-800 text-sm mb-3">Recommendations</h3>
-
+<x-panel title="Recommendations" class="mb-4">
     <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
 
         <div class="flex gap-3 p-3 bg-status-ontrack/5 rounded-lg border border-status-ontrack/20">
@@ -419,7 +392,7 @@
         </div>
 
     </div>
-</div>
+</x-panel>
 
 @php
     $atRiskFilterKeys = ['ar_grade_level', 'ar_section_search', 'ar_risk_level', 'ar_component'];
@@ -428,10 +401,80 @@
 @endphp
 {{-- At-Risk Students Table — shared partial with the Admin dashboard --}}
 @if($atRiskStudentsTotal > 0 || $atRiskFiltersActive)
-<div class="bg-white rounded-lg shadow-sm mb-4">
-    <div class="px-5 py-3 border-b">
-        <h3 class="font-semibold text-gray-800 text-sm">Students Needing Attention</h3>
-        <div class="flex items-center gap-4 mt-2 text-xs text-gray-500">
+{{-- WORK ORDER Part 6a item 4 — the one consistent filter-bar shape,
+     standalone above the panel it filters rather than nested as that
+     panel's header row. --}}
+<div class="bg-white rounded-lg shadow-sm p-3 mb-4">
+    <form method="GET" id="atRiskFilterForm" class="flex flex-wrap gap-2 items-end">
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">Grade Level</label>
+            <select name="ar_grade_level" id="atRiskGradeLevelSelect"
+                    class="border rounded-md text-sm px-2 py-1.5 min-w-[130px]">
+                <option value="">All grade levels</option>
+                @foreach($atRiskGradeLevels as $gl)
+                    <option value="{{ $gl }}" {{ request('ar_grade_level') == $gl ? 'selected' : '' }}>
+                        Grade {{ $gl }}
+                    </option>
+                @endforeach
+            </select>
+        </div>
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">Section</label>
+            <select name="ar_section_search" id="atRiskSectionSelect"
+                    class="border rounded-md text-sm px-2 py-1.5 min-w-[130px]">
+                <option value="">All sections</option>
+                @foreach($atRiskSections as $sec)
+                    <option value="{{ $sec->name }}" data-grade-level="{{ $sec->grade_level }}"
+                            data-track="{{ $sec->track->name ?? '' }}"
+                            data-specialization="{{ $sec->specialization->name ?? '' }}"
+                            {{ request('ar_section_search') === $sec->name ? 'selected' : '' }}>
+                        {{ $sec->name }} (Grade {{ $sec->grade_level }})
+                    </option>
+                @endforeach
+            </select>
+        </div>
+        {{-- Track/Specialization are NOT selectable — they are
+             automatically derived from whichever Section is chosen
+             above (CLAUDE.md: "must NOT be manually selectable
+             dropdowns"), via the existing Section->track/
+             specialization relationship. --}}
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">Track</label>
+            <p id="atRiskTrackDisplay" class="border rounded-md text-sm px-2 py-1.5 min-w-[130px] bg-gray-50 text-gray-600">
+                {{ $selectedSection->track->name ?? '—' }}
+            </p>
+        </div>
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">Specialization</label>
+            <p id="atRiskSpecializationDisplay" class="border rounded-md text-sm px-2 py-1.5 min-w-[150px] bg-gray-50 text-gray-600">
+                {{ $selectedSection->specialization->name ?? '—' }}
+            </p>
+        </div>
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">Risk Level</label>
+            <select name="ar_risk_level" class="border rounded-md text-sm px-2 py-1.5 min-w-[120px]">
+                <option value="">All levels</option>
+                <option value="high" {{ request('ar_risk_level') === 'high' ? 'selected' : '' }}>High</option>
+                <option value="moderate" {{ request('ar_risk_level') === 'moderate' ? 'selected' : '' }}>Moderate</option>
+            </select>
+        </div>
+        <div>
+            <label class="block text-xs text-gray-500 mb-1">Assessment Component</label>
+            <select name="ar_component" class="border rounded-md text-sm px-2 py-1.5 min-w-[160px]">
+                <option value="">All components</option>
+                <option value="written_work" {{ request('ar_component') === 'written_work' ? 'selected' : '' }}>Written Work</option>
+                <option value="performance_task" {{ request('ar_component') === 'performance_task' ? 'selected' : '' }}>Performance Task</option>
+                <option value="examination" {{ request('ar_component') === 'examination' ? 'selected' : '' }}>Examination</option>
+            </select>
+        </div>
+        @if($atRiskFiltersActive)
+            <a href="{{ route('principal.dashboard') }}" class="text-sm text-gray-500 hover:underline pb-1.5">Clear</a>
+        @endif
+    </form>
+</div>
+<x-panel title="Students Needing Attention">
+    <x-slot:subtitle>
+        <span class="flex flex-wrap items-center gap-4 text-xs text-gray-500 mt-1">
             <span class="flex items-center gap-1">
                 <span class="w-2 h-2 rounded-full bg-red-600 inline-block"></span>
                 Currently failing (below 75 this term)
@@ -440,81 +483,12 @@
                 <span class="w-2 h-2 rounded-full bg-orange-500 inline-block"></span>
                 Declining 5+ points vs. last term (may still be passing)
             </span>
-        </div>
-
-        <div class="flex flex-wrap items-end gap-3 mt-3 pt-3 border-t">
-            <form method="GET" id="atRiskFilterForm" class="flex flex-wrap items-end gap-3">
-                <div>
-                    <label class="block text-xs text-gray-500 mb-1">Grade Level</label>
-                    <select name="ar_grade_level" id="atRiskGradeLevelSelect"
-                            class="border rounded-md text-sm px-2 py-1.5 min-w-[130px]">
-                        <option value="">All grade levels</option>
-                        @foreach($atRiskGradeLevels as $gl)
-                            <option value="{{ $gl }}" {{ request('ar_grade_level') == $gl ? 'selected' : '' }}>
-                                Grade {{ $gl }}
-                            </option>
-                        @endforeach
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-xs text-gray-500 mb-1">Section</label>
-                    <select name="ar_section_search" id="atRiskSectionSelect"
-                            class="border rounded-md text-sm px-2 py-1.5 min-w-[130px]">
-                        <option value="">All sections</option>
-                        @foreach($atRiskSections as $sec)
-                            <option value="{{ $sec->name }}" data-grade-level="{{ $sec->grade_level }}"
-                                    data-track="{{ $sec->track->name ?? '' }}"
-                                    data-specialization="{{ $sec->specialization->name ?? '' }}"
-                                    {{ request('ar_section_search') === $sec->name ? 'selected' : '' }}>
-                                {{ $sec->name }} (Grade {{ $sec->grade_level }})
-                            </option>
-                        @endforeach
-                    </select>
-                </div>
-                {{-- Track/Specialization are NOT selectable — they are
-                     automatically derived from whichever Section is chosen
-                     above (CLAUDE.md: "must NOT be manually selectable
-                     dropdowns"), via the existing Section->track/
-                     specialization relationship. --}}
-                <div>
-                    <label class="block text-xs text-gray-500 mb-1">Track</label>
-                    <p id="atRiskTrackDisplay" class="border rounded-md text-sm px-2 py-1.5 min-w-[130px] bg-gray-50 text-gray-600">
-                        {{ $selectedSection->track->name ?? '—' }}
-                    </p>
-                </div>
-                <div>
-                    <label class="block text-xs text-gray-500 mb-1">Specialization</label>
-                    <p id="atRiskSpecializationDisplay" class="border rounded-md text-sm px-2 py-1.5 min-w-[150px] bg-gray-50 text-gray-600">
-                        {{ $selectedSection->specialization->name ?? '—' }}
-                    </p>
-                </div>
-                <div>
-                    <label class="block text-xs text-gray-500 mb-1">Risk Level</label>
-                    <select name="ar_risk_level" class="border rounded-md text-sm px-2 py-1.5 min-w-[120px]">
-                        <option value="">All levels</option>
-                        <option value="high" {{ request('ar_risk_level') === 'high' ? 'selected' : '' }}>High</option>
-                        <option value="moderate" {{ request('ar_risk_level') === 'moderate' ? 'selected' : '' }}>Moderate</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-xs text-gray-500 mb-1">Assessment Component</label>
-                    <select name="ar_component" class="border rounded-md text-sm px-2 py-1.5 min-w-[160px]">
-                        <option value="">All components</option>
-                        <option value="written_work" {{ request('ar_component') === 'written_work' ? 'selected' : '' }}>Written Work</option>
-                        <option value="performance_task" {{ request('ar_component') === 'performance_task' ? 'selected' : '' }}>Performance Task</option>
-                        <option value="examination" {{ request('ar_component') === 'examination' ? 'selected' : '' }}>Examination</option>
-                    </select>
-                </div>
-                @if($atRiskFiltersActive)
-                    <a href="{{ route('principal.dashboard') }}" class="text-sm text-gray-500 hover:underline pb-1.5">Clear</a>
-                @endif
-            </form>
-        </div>
-    </div>
-    <div id="atRiskResultsContainer">
+        </span>
+    </x-slot:subtitle>
+    <div id="atRiskResultsContainer" class="-m-4">
         @include('principal.partials.at-risk-results')
     </div>
-</div>
+</x-panel>
 @endif
 
 @endsection
