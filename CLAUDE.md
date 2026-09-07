@@ -826,6 +826,31 @@ a person decided. The DSS produces the recommendation text, the focus area,
 and the risk classification that inform the Principal's judgment. It does not
 create, approve, or close intervention records.
 
+## Recommendations for future work
+
+Three items from the "COMPLETE WORK ORDER" (Parts 7-9) were deliberately deferred
+for the defence — the pilot (one adviser, one section, two electives) never
+exposes any of them, and none touches grading, risk, or authorization logic, so
+none blocks demonstrating the system as it stands. If the school decides to run
+this beyond the pilot, they become the next engineering pass, in this order:
+
+1. **The elective pivot** (`section_subject` table) — see "Elective selection is
+   per-cluster, not per-learner" above. Needs the school's answer to "does every
+   learner in a section take the same subjects?" before any code is written; the
+   answer changes whether the pivot is per-section or per-student.
+2. **Transmutation table verification** — see "The `do015_2026` transmutation
+   table is not yet confirmed against the signed order" above. Research, not
+   code: download DO 015, s. 2026 from deped.gov.ph and check all 41 bands.
+3. **Subject teachers** — `sections.adviser_id` is a single user who encodes
+   every subject in the section; a real SHS assigns one teacher per subject,
+   with the class adviser compiling. Invisible in the pilot (one section, two
+   subjects, one adviser) for the same reason the elective limitation is.
+   Touches authorization, the encoding screen, upload scoping, term readiness,
+   and report submission together — grep `adviser_id` for the full list of call
+   sites this would change. Most likely schema: a nullable `teacher_id` folded
+   into the `section_subject` table from item 1, once it exists. Not built here;
+   this paragraph is the future work item, not a design doc.
+
 ---
 
 # UI DESIGN SYSTEM
