@@ -218,19 +218,48 @@
     </div>
 </div>
 
-{{-- TASK 4e — master-data counts kept, but secondary: one quiet row of
-     labelled figures rather than eight large coloured cards. --}}
-<div class="bg-white rounded-lg shadow-sm p-4 mb-4">
-    <div class="flex flex-wrap gap-x-6 gap-y-2 text-xs text-gray-500">
-        <span>Users <span class="font-semibold text-gray-700">{{ $totalUsers }}</span></span>
-        <span>Students <span class="font-semibold text-gray-700">{{ $totalStudents }}</span></span>
-        <span>Advisers <span class="font-semibold text-gray-700">{{ $totalAdvisers }}</span></span>
-        <span>Principals <span class="font-semibold text-gray-700">{{ $totalPrincipals }}</span></span>
-        <span>Sections <span class="font-semibold text-gray-700">{{ $totalSections }}</span></span>
-        <span>Subjects <span class="font-semibold text-gray-700">{{ $totalSubjects }}</span></span>
-        <span>Tracks <span class="font-semibold text-gray-700">{{ $totalTracks }}</span></span>
-        <span>Specializations <span class="font-semibold text-gray-700">{{ $totalSpecializations }}</span></span>
-    </div>
+{{-- "UI work order" PART 2 — restored as a proper card grid. A prior pass
+     (formerly labelled TASK 4e) collapsed these into one quiet row of text
+     figures with no click-through; a count the Admin cannot act on is a
+     dead end, and eight master-data totals with no visual weight read as
+     an afterthought on what is otherwise this role's whole job. Each
+     card's border is a literal Tailwind colour, not a status.* token —
+     this is card IDENTITY (which master-data type this is), never a DSS
+     status, and must not resolve to the same values as the four status
+     colours reserved for On Track/Needs Attention/At Risk/Failing. --}}
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+    <a href="{{ route('admin.users') }}" class="bg-white rounded-lg shadow-sm p-4 border-t-4 border-brand-600 hover:shadow-md transition-shadow block">
+        <p class="text-xs text-gray-500"><i class="bi bi-people text-gray-400"></i> Total Users</p>
+        <p class="text-2xl font-bold text-gray-800 mt-1 tabular-nums">{{ $totalUsers }}</p>
+    </a>
+    <a href="{{ route('admin.students') }}" class="bg-white rounded-lg shadow-sm p-4 border-t-4 border-blue-500 hover:shadow-md transition-shadow block">
+        <p class="text-xs text-gray-500"><i class="bi bi-mortarboard text-gray-400"></i> Total Students</p>
+        <p class="text-2xl font-bold text-gray-800 mt-1 tabular-nums">{{ $totalStudents }}</p>
+    </a>
+    <a href="{{ route('admin.users') }}" class="bg-white rounded-lg shadow-sm p-4 border-t-4 border-teal-500 hover:shadow-md transition-shadow block">
+        <p class="text-xs text-gray-500"><i class="bi bi-person-fill text-gray-400"></i> Total Advisers</p>
+        <p class="text-2xl font-bold text-gray-800 mt-1 tabular-nums">{{ $totalAdvisers }}</p>
+    </a>
+    <a href="{{ route('admin.users') }}" class="bg-white rounded-lg shadow-sm p-4 border-t-4 border-purple-500 hover:shadow-md transition-shadow block">
+        <p class="text-xs text-gray-500"><i class="bi bi-mortarboard-fill text-gray-400"></i> Total Principals</p>
+        <p class="text-2xl font-bold text-gray-800 mt-1 tabular-nums">{{ $totalPrincipals }}</p>
+    </a>
+    <a href="{{ route('admin.sections') }}" class="bg-white rounded-lg shadow-sm p-4 border-t-4 border-amber-500 hover:shadow-md transition-shadow block">
+        <p class="text-xs text-gray-500"><i class="bi bi-grid text-gray-400"></i> Total Sections</p>
+        <p class="text-2xl font-bold text-gray-800 mt-1 tabular-nums">{{ $totalSections }}</p>
+    </a>
+    <a href="{{ route('admin.subjects') }}" class="bg-white rounded-lg shadow-sm p-4 border-t-4 border-rose-500 hover:shadow-md transition-shadow block">
+        <p class="text-xs text-gray-500"><i class="bi bi-book text-gray-400"></i> Total Subjects</p>
+        <p class="text-2xl font-bold text-gray-800 mt-1 tabular-nums">{{ $totalSubjects }}</p>
+    </a>
+    <a href="{{ route('admin.tracks') }}" class="bg-white rounded-lg shadow-sm p-4 border-t-4 border-indigo-500 hover:shadow-md transition-shadow block">
+        <p class="text-xs text-gray-500"><i class="bi bi-diagram-3 text-gray-400"></i> Total Tracks</p>
+        <p class="text-2xl font-bold text-gray-800 mt-1 tabular-nums">{{ $totalTracks }}</p>
+    </a>
+    <a href="{{ route('admin.specializations') }}" class="bg-white rounded-lg shadow-sm p-4 border-t-4 border-cyan-500 hover:shadow-md transition-shadow block">
+        <p class="text-xs text-gray-500"><i class="bi bi-collection text-gray-400"></i> Total Specializations</p>
+        <p class="text-2xl font-bold text-gray-800 mt-1 tabular-nums">{{ $totalSpecializations }}</p>
+    </a>
 </div>
 
 {{-- Quick links to master-data management — the Admin dashboard's actual
