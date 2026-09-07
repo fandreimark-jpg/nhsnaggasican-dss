@@ -58,25 +58,22 @@
         ],
     ])->filter(fn($item) => $item['count'] > 0)->values();
 @endphp
-<div class="bg-white rounded-xl shadow-sm mb-4">
-    <div class="px-6 py-4 border-b">
-        <h3 class="text-sm font-semibold text-gray-800">What Needs Your Attention Now</h3>
-    </div>
+<x-panel title="What Needs Your Attention Now" class="mb-4">
     @if($attentionItems->isEmpty())
-        <div class="px-6 py-5 text-sm text-gray-500">
+        <div class="text-sm text-gray-500">
             <i class="bi bi-check-circle text-status-ontrack"></i> Nothing needs your attention right now.
         </div>
     @else
-        <ul class="divide-y divide-gray-100">
+        <ul class="divide-y divide-gray-100 -mx-4 -mb-4">
             @foreach($attentionItems as $item)
-            <li class="px-6 py-3 flex items-center justify-between gap-3 text-sm">
+            <li class="px-4 py-3 flex items-center justify-between gap-3 text-sm">
                 <span class="text-gray-700"><span class="font-semibold">{{ $item['count'] }}</span> {{ $item['label'] }}</span>
                 <a href="{{ $item['link'] }}" class="text-xs text-brand-700 hover:underline shrink-0">Review &rarr;</a>
             </li>
             @endforeach
         </ul>
     @endif
-</div>
+</x-panel>
 
 <details class="mb-6 text-xs text-gray-500">
     <summary class="cursor-pointer select-none font-medium text-gray-600 px-1">What's the difference between In-Term Status and Risk Level?</summary>
@@ -88,28 +85,25 @@
 {{-- TASK 1c of "close the intervention loop": always visible, even with
      zero rows — an adviser must be able to tell "nothing assigned" apart
      from "this feature doesn't exist." --}}
-<div class="bg-white rounded-xl shadow-sm mb-6">
-    <div class="px-6 py-4 border-b flex justify-between items-center">
-        <div>
-            <h3 class="text-sm font-semibold text-gray-800">Interventions Needing Your Attention</h3>
-            <p class="text-sm text-gray-500">Decisions the Principal has recorded for your students that you haven't acknowledged yet</p>
-        </div>
+<x-panel title="Interventions Needing Your Attention"
+    subtitle="Decisions the Principal has recorded for your students that you haven't acknowledged yet" class="mb-6">
+    <x-slot:action>
         <a href="{{ route('adviser.interventions') }}" class="text-sm text-brand-600 hover:underline whitespace-nowrap">
             View all →
         </a>
-    </div>
+    </x-slot:action>
     @if($unacknowledgedInterventions->isEmpty())
-        <div class="px-6 py-5 text-sm text-gray-400">
+        <div class="text-sm text-gray-400">
             <i class="bi bi-check-circle"></i> No unacknowledged interventions right now.
         </div>
     @else
-        <div class="px-6 py-3 text-xs text-orange-600 bg-orange-50 border-b">
+        <div class="text-xs text-orange-600 bg-orange-50 -mx-4 -mt-4 mb-4 px-4 py-3 border-b">
             <i class="bi bi-exclamation-circle-fill"></i>
             {{ $unacknowledgedInterventions->count() }} intervention{{ $unacknowledgedInterventions->count() === 1 ? '' : 's' }} awaiting your acknowledgement.
         </div>
-        <ul class="divide-y divide-gray-100">
+        <ul class="divide-y divide-gray-100 -mx-4 -mb-4">
             @foreach($unacknowledgedInterventions->take(5) as $iv)
-            <li class="px-6 py-3 text-sm flex justify-between items-center gap-3">
+            <li class="px-4 py-3 text-sm flex justify-between items-center gap-3">
                 <div>
                     <span class="font-medium text-gray-800">{{ $iv->student->last_name }}, {{ $iv->student->first_name }}</span>
                     <span class="text-gray-500"> — {{ $ivTypeLabels[$iv->recommended_type] ?? ucfirst(str_replace('_', ' ', $iv->recommended_type)) }}</span>
@@ -125,36 +119,25 @@
             @endforeach
         </ul>
         @if($unacknowledgedInterventions->count() > 5)
-            <p class="px-6 py-2 text-xs text-gray-400 border-t">And {{ $unacknowledgedInterventions->count() - 5 }} more — see the Interventions page.</p>
+            <p class="px-4 py-2 -mx-4 -mb-4 text-xs text-gray-400 border-t">And {{ $unacknowledgedInterventions->count() - 5 }} more — see the Interventions page.</p>
         @endif
     @endif
-</div>
+</x-panel>
 
 {{-- Summary Cards — TASK 7a of "clarity, progress, and visual design
      pass": none of these four is a status (At Risk/Needs Attention/On
      Track/Failing), so none carries a status colour — a quiet, neutral
-     group instead of a rainbow of unrelated counts. --}}
+     group (one shared count-* hue) instead of a rainbow of unrelated
+     counts. --}}
 <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-gray-300">
-        <p class="text-xs text-gray-500">Total Students</p>
-        <p class="text-2xl font-bold text-gray-800 mt-1">{{ $totalStudents }}</p>
-    </div>
-    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-gray-300">
-        <p class="text-xs text-gray-500">Grades Encoded</p>
-        <p class="text-2xl font-bold text-gray-800 mt-1">{{ $totalGradesEncoded }}</p>
-        {{-- "Decision flow, report scoping, and dashboard pass" TASK 6a —
-             this is the count across ALL 3 terms, not one term; a reader
-             could otherwise mistake it for "this term's" count. --}}
-        <p class="text-xs text-gray-400 mt-0.5">of {{ $totalExpectedPerTerm * 3 }} across 3 terms</p>
-    </div>
-    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-gray-300">
-        <p class="text-xs text-gray-500">Pending Submission</p>
-        <p class="text-2xl font-bold text-gray-800 mt-1">{{ $pendingCount }}</p>
-    </div>
-    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-gray-300">
-        <p class="text-xs text-gray-500">Terms Submitted</p>
-        <p class="text-2xl font-bold text-gray-800 mt-1">{{ $submissions->count() }}</p>
-    </div>
+    <x-stat-card label="Total Students" :value="$totalStudents" accent="count-8" />
+    {{-- "Decision flow, report scoping, and dashboard pass" TASK 6a — this
+         is the count across ALL 3 terms, not one term; a reader could
+         otherwise mistake it for "this term's" count. --}}
+    <x-stat-card label="Grades Encoded" :value="$totalGradesEncoded" accent="count-8"
+        :note="'of '.($totalExpectedPerTerm * 3).' across 3 terms'" />
+    <x-stat-card label="Pending Submission" :value="$pendingCount" accent="count-8" />
+    <x-stat-card label="Terms Submitted" :value="$submissions->count()" accent="count-8" />
 </div>
 
 {{-- Term Submission Status — "correctness and interface pass" TASK 6f:
@@ -223,29 +206,27 @@
      from InTermStatusService (assessment evidence), not risk_results, so
      this has something real to show from the first upload onward instead
      of "No data — Submit report to generate" on every row. --}}
-<div class="bg-white rounded-xl shadow-sm">
-    <div class="px-6 py-4 border-b flex justify-between items-center">
-        <div>
-            <h3 class="text-sm font-semibold text-gray-800">My Students</h3>
-            <p class="text-sm text-gray-500">Overall In-Term Status — Term {{ $openTerm }}, combining every subject this section takes into one worst-case status per student</p>
-            {{-- TASK 5c of "clarity, progress, and visual design pass" —
-                 the whole picture without scrolling, since the table
-                 below now shows only the top 10 highest-priority rows. --}}
-            @if($students->isNotEmpty())
-            <p class="text-xs text-gray-500 mt-1">
-                <span class="text-status-risk font-medium">{{ $inTermStatusCounts['At Risk'] }} At Risk</span>,
-                <span class="text-status-attention font-medium">{{ $inTermStatusCounts['Needs Attention'] }} Needs Attention</span>,
-                <span class="text-status-ontrack font-medium">{{ $inTermStatusCounts['On Track'] }} On Track</span>
-            </p>
-            @endif
-        </div>
-        <a href="{{ route('adviser.students') }}"
-           class="text-sm text-brand-600 hover:underline">
+<x-panel title="My Students">
+    <x-slot:subtitle>
+        Overall In-Term Status — Term {{ $openTerm }}, combining every subject this section takes into one worst-case status per student
+        {{-- TASK 5c of "clarity, progress, and visual design pass" — the
+             whole picture without scrolling, since the table below now
+             shows only the top 10 highest-priority rows. --}}
+        @if($students->isNotEmpty())
+        <span class="block text-xs text-gray-500 mt-1">
+            <span class="text-status-risk font-medium">{{ $inTermStatusCounts['At Risk'] }} At Risk</span>,
+            <span class="text-status-attention font-medium">{{ $inTermStatusCounts['Needs Attention'] }} Needs Attention</span>,
+            <span class="text-status-ontrack font-medium">{{ $inTermStatusCounts['On Track'] }} On Track</span>
+        </span>
+        @endif
+    </x-slot:subtitle>
+    <x-slot:action>
+        <a href="{{ route('adviser.students') }}" class="text-sm text-brand-600 hover:underline whitespace-nowrap">
             View all →
         </a>
-    </div>
+    </x-slot:action>
     @if($students->isNotEmpty())
-    <p class="text-xs text-gray-500 px-6 pt-3">
+    <p class="text-xs text-gray-500">
         <strong>Overall In-Term Status</strong> is the WORST status among every subject with evidence so far this
         term — one weak subject is enough to flag a student here, even if their other subjects are fine. Click a
         student's name for the subject-by-subject breakdown, or see the
@@ -263,7 +244,7 @@
          8, s. 2015; 70% for DO 015, s. 2026 — see "correctness and
          interface pass" TASK 4a). A worst subject already passing on the
          report card is marked <strong>passing on paper</strong> below. --}}
-    <p class="text-xs text-gray-500 px-6 pt-1">
+    <p class="text-xs text-gray-500 pt-1">
         The status below is based on that worst subject's <strong>Computed</strong> grade (the raw weighted
         evidence), not its Transmuted (report-card) grade — see <strong>passing on paper</strong> below when they disagree.
     </p>
@@ -275,7 +256,7 @@
          scroll potential is moot (it's capped at 10) but this keeps the
          header pinned if a section ever has fewer than 10 and the panel
          is short, and keeps the pattern consistent app-wide. --}}
-    <div class="tbl-scroll">
+    <div class="tbl-scroll mt-2 -mx-4">
     <table class="tbl tbl-sticky">
         <thead>
             <tr>
@@ -356,12 +337,12 @@
     </table>
     </div>
     @if($allInTermRows->count() > $inTermRows->count())
-    <p class="px-6 py-2 text-xs text-gray-400 border-t">
+    <p class="px-4 py-2 -mx-4 -mb-4 text-xs text-gray-400 border-t">
         Showing the {{ $inTermRows->count() }} highest-priority of {{ $allInTermRows->count() }} students —
         <a href="{{ route('adviser.students') }}" class="text-brand-600 hover:underline">view all →</a>
     </p>
     @endif
-</div>
+</x-panel>
 
 {{-- TASK 2 of "dashboard structure and upload safeguards" — the
      subject-by-subject breakdown behind the single "Overall" status
