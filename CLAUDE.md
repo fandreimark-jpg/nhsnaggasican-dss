@@ -683,6 +683,56 @@ Principal dashboard's whole-school aggregate used to exist for exactly
 that reason, and it was wrong the whole time no one was measuring it
 against the truth.
 
+## Part 3 sweep — other figures shown on more than one screen
+
+Same work order, Part 3: every other figure that appears on more than one
+screen, checked against its actual code path rather than its label.
+**Not fixed here** — each of these needs its own diagnosis, the same way
+In-Term Status did, and a batch of simultaneous "corrections" is worse
+than a known list.
+
+- **Total Students** (Admin, Principal) — both call the identical
+  `Student::count()`, so they can never disagree with each other. But
+  neither is scoped to the active school year despite Principal's card
+  reading "Across every section, Term N, [school year]" — a school that
+  retains prior-year student records (e.g. not-yet-graduated learners
+  from an earlier cohort) would show a bigger number than that label
+  promises. Adviser's is correctly section-scoped, a different question
+  by design. All three read 40 today only because exactly one section
+  and one school year of data currently exist.
+- **Grades Encoded** (Adviser dashboard, Adviser Submit Report) — both
+  query `Grade::where(section, term, school_year)->count()` the same
+  way; low drift risk. Found a THIRD copy of the `Subject::forSection()`
+  query, byte-identical, private to `Adviser\ReportController::
+  getSectionSubjects()` — the same "duplicate that agrees today" shape
+  Part 2 just removed from `Adviser\DashboardController`. Not fixed here.
+  Principal's "Assessment Completion" is a genuinely different metric
+  (raw assessment-score entries across the whole school year, upstream
+  of verification) from Grades Encoded (verified `grades` rows, per
+  term) — correctly not the same number.
+- **At Risk counts** — the Adviser/Principal dashboards' In-Term Status
+  At Risk counts are now the same call (Part 2). Principal dashboard's
+  separate Risk Level "High Risk" card and Principal Students' per-row
+  Risk Level column are scoped differently on purpose (dashboard = the
+  student's latest risk result this school year; Students page = the
+  one term currently selected in that page's filter) — not expected to
+  sum to the same total, and nothing in the interface claims they should.
+- **Intervention counts** — a genuine latent duplicate rule, currently
+  invisible: the Principal dashboard's "Awaiting Your Decision" counts
+  `status IN ('recommended', 'in_review')`
+  (`DashboardAnalyticsService::getPrincipalSummary()`); the Principal
+  Interventions page's banner/link count is `status = 'recommended' OR
+  decided_by IS NULL` (`Principal\InterventionController::index()`).
+  These are two different rules. They read the same number today (18)
+  only because no `in_review` row currently has `decided_by` set — the
+  moment one does, they will disagree exactly the way the two In-Term
+  Status paths did. Adviser dashboard's intervention counts answer a
+  different question (what THIS adviser needs to act on next) and were
+  never meant to match Principal's.
+- **Risk Level distribution** — Principal dashboard's Low/Moderate/High
+  cards and Principal Students' per-row Risk Level are scoped
+  differently by design, same reasoning as the At Risk counts above.
+
 ---
 
 # KNOWN LIMITATIONS
