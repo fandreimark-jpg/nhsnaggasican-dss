@@ -172,6 +172,7 @@ def train_model():
         cv_predictions = cross_val_predict(model, X_train, y_train, cv=5)
 
         write_model_accuracy_report(
+            model=model,
             scores=scores,
             y_true=y_train,
             y_pred=cv_predictions,
@@ -184,7 +185,7 @@ def train_model():
     return model
 
 
-def write_model_accuracy_report(scores, y_true, y_pred, class_names, class_counts):
+def write_model_accuracy_report(model, scores, y_true, y_pred, class_names, class_counts):
     """
     Rewrites model_accuracy.txt so the caveat travels WITH the number —
     see the "honest model evaluation" prompt. This file gets read,
@@ -202,6 +203,11 @@ def write_model_accuracy_report(scores, y_true, y_pred, class_names, class_count
          perfect score here is expected arithmetic, not a finding
       5. that it has never been validated against real outcomes
       6. what real validation would actually require
+      7. WORK ORDER Part 6c — the trained model's own feature_importances_,
+         direct numeric evidence of point 2 in the model's own numbers
+         rather than only a comment. Single-feature training makes this
+         trivially [1.0]; that triviality IS the finding, not a bug in
+         this report.
     """
     avg = round(scores.mean() * 100, 2)
     cm = confusion_matrix(y_true, y_pred)
@@ -269,7 +275,24 @@ def write_model_accuracy_report(scores, y_true, y_pred, class_names, class_count
         f.write("end-of-year outcomes (e.g. did the student actually end up at risk /\n")
         f.write("fail / need intervention), held out from training and evaluated on\n")
         f.write("after the fact — see train_from_real_data() in classify.py, which\n")
-        f.write("this report's numbers do NOT come from and were not used to produce.\n")
+        f.write("this report's numbers do NOT come from and were not used to produce.\n\n")
+
+        f.write("7. FEATURE IMPORTANCE (this trained model)\n")
+        f.write("-" * 78 + "\n")
+        feature_names = ['average_grade']
+        for name, importance in zip(feature_names, model.feature_importances_):
+            f.write(f"  {name}: {importance:.4f} ({importance * 100:.1f}%)\n")
+        f.write("\n")
+        f.write("Reads as 100% on average_grade because average_grade is the ONLY\n")
+        f.write("feature this model was trained on — direct numeric confirmation of\n")
+        f.write("section 2, in the model's own numbers rather than only a comment.\n")
+        f.write("A healthy multi-feature model trained on real outcomes would instead\n")
+        f.write("show importance SPREAD across several of the seven features Laravel\n")
+        f.write("already sends (ww_mean, pt_mean, exam_mean, weak_component_count,\n")
+        f.write("prev_term_average, trend_delta) rather than concentrated in one\n")
+        f.write("column — a single feature still dominating after a real retrain\n")
+        f.write("would itself be a finding worth investigating, not an assumption to\n")
+        f.write("start from.\n")
 
 
 def classify_students(grades_data, model):
