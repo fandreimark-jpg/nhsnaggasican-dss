@@ -95,11 +95,18 @@ class ProgressMonitoringServiceTest extends TestCase
 
         $result = $this->service->compare($intervention);
 
+        $this->assertSame('awaiting_evidence', $result['status']);
         $this->assertEquals(60.0, $result['before_percentage']);
         $this->assertNull($result['after_percentage']);
         $this->assertNull($result['change']);
     }
 
+    /**
+     * "Progress column honesty" work order, PART 1d — before_term + 1
+     * would be Term 4, which does not exist in a three-term year. Must
+     * read a distinct 'no_later_term' status, never silently reference a
+     * "Term 4" that isn't real.
+     */
     public function test_returns_before_only_when_baseline_term_was_already_the_final_term(): void
     {
         $this->score(3, 'written_work', 90);
@@ -110,14 +117,56 @@ class ProgressMonitoringServiceTest extends TestCase
 
         $result = $this->service->compare($intervention);
 
+        $this->assertSame('no_later_term', $result['status']);
         $this->assertNull($result['after_period']);
         $this->assertNull($result['change']);
     }
 
-    public function test_returns_null_when_the_intervention_has_no_linked_subject(): void
+    public function test_returns_not_applicable_when_the_intervention_has_no_linked_subject(): void
     {
         $intervention = Intervention::factory()->create(['subject_id' => null, 'risk_result_id' => null]);
 
-        $this->assertNull($this->service->compare($intervention));
+        $result = $this->service->compare($intervention);
+
+        $this->assertSame('not_applicable', $result['status']);
+        $this->assertNull($result['component']);
+    }
+
+    /**
+     * "Progress column honesty" work order, PART 1d — a Principal-recorded
+     * intervention (no risk_result_id) must render the specific
+     * not-applicable status, never the generic catch-all. This is the
+     * shape of all 29 real interventions on file today — see the STOP
+     * POINT 1 count.
+     */
+    public function test_a_principal_recorded_intervention_with_no_risk_result_id_is_not_applicable(): void
+    {
+        $intervention = Intervention::factory()->create([
+            'student_id' => $this->student->id, 'subject_id' => $this->subject->id,
+            'risk_result_id' => null, 'origin' => 'principal',
+        ]);
+
+        $result = $this->service->compare($intervention);
+
+        $this->assertSame('not_applicable', $result['status']);
+        $this->assertNull($result['before_period']);
+        $this->assertNull($result['after_period']);
+    }
+
+    public function test_a_full_comparison_is_status_available(): void
+    {
+        $this->score(1, 'written_work', 90);
+        $this->score(1, 'performance_task', 60);
+        $this->score(1, 'examination', 90);
+        $this->score(2, 'written_work', 90);
+        $this->score(2, 'performance_task', 78);
+        $this->score(2, 'examination', 90);
+
+        $intervention = $this->makeIntervention(riskTerm: 1);
+
+        $result = $this->service->compare($intervention);
+
+        $this->assertSame('available', $result['status']);
+        $this->assertEquals(18.0, $result['change']);
     }
 }

@@ -233,6 +233,12 @@
     <p class="text-xs text-gray-500 px-6 pt-3">
         <x-count-label :count="$interventions->total()" noun="intervention" />
     </p>
+    {{-- "Progress column honesty" work order, PART 1c — said once, here,
+         rather than repeated as an excuse on every row that can't fill. --}}
+    <p class="text-xs text-gray-400 px-6 pt-1">
+        <strong>Term-over-Term Progress</strong> compares the focus component in the term the intervention was raised
+        against the next term. Only available for interventions raised from a submitted term report.
+    </p>
     <div class="tbl-scroll mt-2">
     <table class="tbl tbl-sticky">
         <thead>
@@ -394,22 +400,35 @@
                     @include('partials.within-term-progress', ['p' => $iv->withinTermProgress ?? null])
                 </td>
                 <td class="min-w-[220px]">
-                    @if($iv->progress)
-                        @php $p = $iv->progress; @endphp
+                    @php $p = $iv->progress; @endphp
+                    @if($p['status'] === 'available' || $p['status'] === 'awaiting_evidence')
                         <div class="text-xs text-gray-500 bg-gray-50 rounded-md px-2 py-1.5">
                             <span class="font-medium text-gray-600">{{ $componentLabels[$p['component']] ?? $p['component'] }}:</span>
                             Term {{ $p['before_period'] }} was {{ number_format($p['before_percentage'], 1) }}%
-                            @if($p['after_percentage'] !== null)
+                            @if($p['status'] === 'available')
                                 , Term {{ $p['after_period'] }} is {{ number_format($p['after_percentage'], 1) }}%.
                                 <span class="{{ $p['change'] > 0 ? 'text-green-600' : ($p['change'] < 0 ? 'text-red-500' : 'text-gray-500') }} font-medium">
                                     Change: {{ $p['change'] >= 0 ? '+' : '' }}{{ number_format($p['change'], 1) }} points.
                                 </span>
                             @else
-                                — no Term {{ $p['before_period'] + 1 }} evidence yet to compare against.
+                                — no Term {{ $p['after_period'] }} evidence yet to compare against.
                             @endif
                         </div>
+                    @elseif($p['status'] === 'no_later_term')
+                        <span class="text-xs text-gray-300">No later term in this school year to compare against.</span>
+                    @elseif($p['status'] === 'not_applicable')
+                        {{-- PART 1b — origin, not the null itself, explains WHY:
+                             every row today is 'principal' (recorded from
+                             in-term evidence, so no term-report baseline ever
+                             existed); 'system' is reserved for a future DSS-
+                             generated source and would mean something else. --}}
+                        @if(!$iv->isSystemGenerated())
+                            <span class="text-xs text-gray-300">Not applicable — recorded from in-term evidence, so there is no term-report baseline to compare against.</span>
+                        @else
+                            <span class="text-xs text-gray-300">No term-report baseline is linked to this recommendation.</span>
+                        @endif
                     @else
-                        <span class="text-xs text-gray-300">No comparison available yet</span>
+                        <span class="text-xs text-gray-300">No comparison available</span>
                     @endif
                 </td>
             </tr>

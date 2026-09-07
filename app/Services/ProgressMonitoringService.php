@@ -33,24 +33,58 @@ class ProgressMonitoringService
     {
     }
 
+    /** The last grading period in a school year — see the 'no_later_term' status below. */
+    private const LAST_TERM = 3;
+
     /**
+     * "Progress column honesty" work order — `status` tells the caller
+     * WHY a comparison is or isn't available, instead of collapsing every
+     * reason into a single null. Four statuses:
+     *
+     *   'not_applicable'   — no risk_result_id (recorded from in-term
+     *                         evidence, e.g. every Principal-recorded
+     *                         intervention today — see Intervention::
+     *                         ORIGINS/isSystemGenerated()). There never
+     *                         was a term-report baseline to compare from.
+     *   'no_later_term'    — a baseline exists, but it was already the
+     *                         last term of the school year (before_term
+     *                         + 1 doesn't exist). Never fills, by
+     *                         construction, for a last-term intervention.
+     *   'awaiting_evidence' — a later term exists but has no assessment
+     *                         evidence for this component yet. May fill
+     *                         once that evidence is entered.
+     *   'available'         — the comparison exists: before/after/change
+     *                         are all populated.
+     *
+     * 'unavailable' is a fifth, unnamed-by-design catch-all for the rare
+     * edge cases the four statuses above don't cover (no subject/section
+     * on record, or a baseline term with literally no assessment evidence
+     * for any component) — these aren't part of the normal Principal-
+     * recorded-vs-report-baseline distinction the other four describe.
+     *
      * @return array{
-     *     component: string,
-     *     before_period: int,
-     *     before_percentage: float,
+     *     status: 'not_applicable'|'no_later_term'|'awaiting_evidence'|'available'|'unavailable',
+     *     component: string|null,
+     *     before_period: int|null,
+     *     before_percentage: float|null,
      *     after_period: int|null,
      *     after_percentage: float|null,
      *     change: float|null,
-     * }|null null when there isn't enough information to compare anything
-     * (no linked subject/risk result, or no weakest component was ever
-     * identified at baseline).
+     * }
      */
-    public function compare(Intervention $intervention): ?array
+    public function compare(Intervention $intervention): array
     {
-        $riskResult = $intervention->riskResult;
+        if (!$intervention->risk_result_id) {
+            return $this->statusOnly('not_applicable');
+        }
 
-        if (!$intervention->subject_id || !$riskResult) {
-            return null;
+        if (!$intervention->subject_id) {
+            return $this->statusOnly('unavailable');
+        }
+
+        $riskResult = $intervention->riskResult;
+        if (!$riskResult) {
+            return $this->statusOnly('unavailable');
         }
 
         $student    = $intervention->student;
@@ -60,36 +94,46 @@ class ProgressMonitoringService
         $schoolYear = $riskResult->school_year;
 
         if (!$section) {
-            return null;
+            return $this->statusOnly('unavailable');
         }
 
         $before = $this->performanceAnalysis->analyzeStudent($student, $subject, $section, $beforeTerm, $schoolYear);
         $componentKey = $before['weakest_component'];
 
         if (!$componentKey) {
-            return null;
+            return $this->statusOnly('unavailable');
         }
 
         $beforePercentage = $before['components'][$componentKey]['percentage'];
         $afterTerm = $beforeTerm + 1;
 
-        if ($afterTerm > 3) {
-            return $this->result($componentKey, $beforeTerm, $beforePercentage, null, null);
+        if ($afterTerm > self::LAST_TERM) {
+            return $this->result('no_later_term', $componentKey, $beforeTerm, $beforePercentage, null, null);
         }
 
         $after = $this->performanceAnalysis->analyzeStudent($student, $subject, $section, $afterTerm, $schoolYear);
         $afterPercentage = $after['components'][$componentKey]['percentage'] ?? null;
 
         if ($afterPercentage === null) {
-            return $this->result($componentKey, $beforeTerm, $beforePercentage, $afterTerm, null);
+            return $this->result('awaiting_evidence', $componentKey, $beforeTerm, $beforePercentage, $afterTerm, null);
         }
 
-        return $this->result($componentKey, $beforeTerm, $beforePercentage, $afterTerm, $afterPercentage);
+        return $this->result('available', $componentKey, $beforeTerm, $beforePercentage, $afterTerm, $afterPercentage);
     }
 
-    private function result(string $component, int $beforeTerm, float $beforePct, ?int $afterTerm, ?float $afterPct): array
+    private function statusOnly(string $status): array
     {
         return [
+            'status' => $status, 'component' => null,
+            'before_period' => null, 'before_percentage' => null,
+            'after_period' => null, 'after_percentage' => null, 'change' => null,
+        ];
+    }
+
+    private function result(string $status, string $component, int $beforeTerm, float $beforePct, ?int $afterTerm, ?float $afterPct): array
+    {
+        return [
+            'status'            => $status,
             'component'         => $component,
             'before_period'     => $beforeTerm,
             'before_percentage' => $beforePct,
