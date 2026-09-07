@@ -9,19 +9,14 @@
     $componentLabels = ['written_work' => 'Written Work', 'performance_task' => 'Performance Task', 'examination' => 'Examination'];
 @endphp
 
-<div class="bg-white rounded-xl shadow-sm overflow-x-auto">
-    <div class="px-6 py-4 border-b">
-        <h3 class="font-semibold text-gray-800 text-sm">Subject Analysis</h3>
-        <p class="text-xs text-gray-500 mt-1">
-            Average score per assessment component, across every student with evidence this school year.
-            A subject can look fine overall while one component quietly needs attention.
-        </p>
-    </div>
+<x-panel title="Subject Analysis"
+    subtitle="Average score per assessment component, across every student with evidence this school year. A subject can look fine overall while one component quietly needs attention."
+    class="overflow-x-auto">
 
     {{-- TASK 7c of "clarity, progress, and visual design pass" — sticky
          header on the scrollable table, same pattern as every other
          table in this app. --}}
-    <div class="tbl-scroll">
+    <div class="tbl-scroll -m-4">
     <table class="tbl tbl-sticky">
         <thead>
             <tr>
@@ -78,6 +73,6 @@
         </tbody>
     </table>
     </div>
-</div>
+</x-panel>
 
 @endsection

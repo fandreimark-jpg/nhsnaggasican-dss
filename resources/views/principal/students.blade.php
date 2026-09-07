@@ -21,18 +21,16 @@
     };
 @endphp
 
-<div class="bg-white rounded-xl shadow-sm overflow-x-auto">
-
-    {{-- Term Selector — same pattern as the Adviser Assessments screen.
-         "Correctness and interface pass" TASK 5a — clearer spacing between
-         the term pills, and a visible divider from the filters (a bottom
-         border when stacked on narrow screens, a right border once they
-         sit side by side) instead of the two groups reading as one run-on
-         row. --}}
-    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 px-6 py-4 border-b">
+{{-- WORK ORDER Part 6a item 4 — the one consistent filter-bar shape,
+     standalone above the results panel rather than nested as its header
+     row. Same field names/IDs throughout, so the cascading-select JS
+     binding is untouched. --}}
+<div class="bg-white rounded-lg shadow-sm p-3 mb-4">
+    <div class="flex flex-col md:flex-row md:items-center gap-3">
+        {{-- Term Selector — same pattern as the Adviser Assessments screen. --}}
         <div class="flex items-center gap-3 pb-3 border-b border-gray-100 md:pb-0 md:border-b-0 md:border-r md:pr-5 md:mr-1">
             <span class="text-sm font-semibold text-gray-700">Term:</span>
-            <div class="flex gap-2.5">
+            <div class="flex gap-2">
                 @foreach([1, 2, 3] as $t)
                 <a href="{{ route('principal.students', array_merge(request()->except('page'), ['period' => $t])) }}"
                     class="px-4 py-1.5 rounded-full text-sm font-medium border transition
@@ -45,7 +43,7 @@
             </div>
         </div>
 
-        <form method="GET" id="psFilterForm" class="flex flex-wrap items-end gap-3">
+        <form method="GET" id="psFilterForm" class="flex flex-wrap gap-2 items-end">
             <input type="hidden" name="period" value="{{ $gradingPeriod }}">
             @if($focus)<input type="hidden" name="focus" value="{{ $focus }}">@endif
 
@@ -131,6 +129,9 @@
             @endif
         </form>
     </div>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm overflow-x-auto">
 
     {{-- TASK 4 of "close the intervention loop": reduce the clicks, never
          the decision — every row is still reviewed and confirmed in the
