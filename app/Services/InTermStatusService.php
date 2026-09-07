@@ -8,6 +8,7 @@ use App\Models\Intervention;
 use App\Models\Section;
 use App\Models\Student;
 use App\Models\Subject;
+use Illuminate\Support\Collection;
 
 /**
  * A second, LIGHTER signal alongside the classifier's risk_results — see
@@ -36,6 +37,14 @@ use App\Models\Subject;
 class InTermStatusService
 {
     public const STATUSES = ['On Track', 'Needs Attention', 'At Risk'];
+
+    /**
+     * Worst-first severity ordering for the "Overall In-Term Status"
+     * worst-of reduction below — the single source other copies of this
+     * ordering (formerly duplicated in Adviser\DashboardController and
+     * DashboardAnalyticsService) must read from instead of re-declaring.
+     */
+    public const SEVERITY = ['At Risk' => 0, 'Needs Attention' => 1, 'On Track' => 2];
 
     public function __construct(private PerformanceAnalysisService $analysis = new PerformanceAnalysisService())
     {
@@ -92,6 +101,84 @@ class InTermStatusService
             'components_below_target' => $componentsBelowTarget,
             'item_count'              => $itemCount,
         ];
+    }
+
+    /**
+     * "In-Term Status reconciliation" work order, PART 2 — the single,
+     * canonical "Overall In-Term Status" computation for a roster of
+     * students against a section's subject list, for one term. Both
+     * Adviser\DashboardController (per-section, full detail for its
+     * drill-down) and DashboardAnalyticsService (whole-school, rolled up
+     * into counts) call this; neither keeps its own copy.
+     *
+     * This was previously duplicated: Adviser's copy called this class's
+     * fromAnalysis() (and so GradingEngine, and so respected the DO 015
+     * exam-role weighting and excluded no-role additional-support items
+     * from the Examination component, per GradingEngine::
+     * examinationPercentage()'s documented rule) while the Principal
+     * dashboard's copy summed assessment_scores directly in SQL, bypassing
+     * GradingEngine entirely and getting the Examination component wrong
+     * for any subject using exam roles. See CLAUDE.md's numbered design
+     * decision on the missing-evidence rule this method implements.
+     *
+     * For each student: every subject with zero scored items so far this
+     * term is EXCLUDED from the worst-case reduction — no evidence is not
+     * a claim of On Track. `subjects_evaluated` vs `subjects_total` lets a
+     * caller show that a status is based on fewer subjects than the full
+     * load, rather than silently treating an unevaluated subject as fine.
+     * Among the subjects that DO have evidence, the WORST status wins.
+     *
+     * @param Collection<int, Student> $students
+     * @param Collection<int, Subject> $subjects
+     * @return Collection<int, array{
+     *     student: Student,
+     *     in_term_status: ?array,
+     *     focus_subject: ?Subject,
+     *     transmuted_grade: float|null,
+     *     subjects_evaluated: int,
+     *     subjects_total: int,
+     *     by_subject: array<int, array{subject: Subject, status: array, complete: bool}>,
+     * }>
+     */
+    public function overallStatusForSection(Section $section, Collection $students, Collection $subjects, int $gradingPeriod): Collection
+    {
+        return $students->map(function (Student $student) use ($section, $subjects, $gradingPeriod) {
+            $worst = null;
+            $worstSubject = null;
+            $worstTransmuted = null;
+            $bySubject = [];
+            $evaluated = 0;
+
+            foreach ($subjects as $subject) {
+                $analysis = $this->analysis->analyzeStudent($student, $subject, $section, $gradingPeriod, $section->school_year);
+                $status = $this->fromAnalysis($analysis, $student, $subject, $section, $gradingPeriod, $section->school_year);
+
+                // Every subject goes into the drill-down, evidence or not
+                // — "no evidence yet" is itself useful information there.
+                $bySubject[] = ['subject' => $subject, 'status' => $status, 'complete' => $analysis['complete']];
+
+                if ($status['item_count'] === 0) {
+                    continue; // no evidence yet for this subject — no claim either way
+                }
+                $evaluated++;
+
+                if ($worst === null || self::SEVERITY[$status['status']] < self::SEVERITY[$worst['status']]) {
+                    $worst = $status;
+                    $worstSubject = $subject;
+                    $worstTransmuted = $analysis['transmuted_grade'];
+                }
+            }
+
+            return [
+                'student'            => $student,
+                'in_term_status'     => $worst, // null when no subject has any evidence yet
+                'focus_subject'      => $worstSubject,
+                'transmuted_grade'   => $worstTransmuted,
+                'subjects_evaluated' => $evaluated,
+                'subjects_total'     => $subjects->count(),
+                'by_subject'         => $bySubject,
+            ];
+        });
     }
 
     /**

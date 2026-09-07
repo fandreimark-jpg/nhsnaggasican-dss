@@ -632,6 +632,59 @@ A feature is complete only when:
 
 ---
 
+# DESIGN DECISIONS
+
+Decisions made deliberately, recorded here so a future change doesn't
+silently reverse them without someone noticing.
+
+## 1. A subject with no evidence yet is excluded, never On Track
+
+"In-Term Status reconciliation" work order — In-Term Status's worst-of
+reduction (`InTermStatusService::overallStatusForSection()`) skips any
+subject with zero scored items this term entirely. It does NOT count
+toward the student's status in either direction.
+
+The alternative — treating an unassessed subject as On Track — was
+considered and rejected. A learner would then read On Track on a
+dashboard purely because nobody has entered their scores yet, which is
+the opposite of an early warning system. "Missing means incomplete, not
+zero" is the same principle GradingEngine already applies to a single
+component with no items; this decision applies it one level up, to a
+whole subject with no evidence at all.
+
+The honest treatment is: exclude the subject from the reduction, and let
+the caller show the resulting status is based on fewer subjects than the
+learner's full load (`overallStatusForSection()` returns both
+`subjects_evaluated` and `subjects_total` for exactly this).
+
+## 2. Overall In-Term Status is computed in one place
+
+Both the Adviser dashboard and the Principal dashboard show the same
+figure — the worst-of status across every subject a section takes, for
+one term. Before this decision, each had its own implementation:
+Adviser's called `GradingEngine` (respecting DO 015 exam-role weighting
+and excluding no-role additional-support items from the Examination
+component, per `GradingEngine::examinationPercentage()`'s own rule);
+Principal's ran a hand-written SQL aggregate that agreed for
+Written Work and Performance Task (both are a flat `SUM(earned)/
+SUM(max_score)`) but silently disagreed for Examination once a subject
+used exam roles — it neither weighted by role nor excluded the no-role
+items. A real learner's Term 3 status read differently on the two
+dashboards as a direct result (Molave, Vince Oribello, General
+Mathematics — Adviser correctly showed Needs Attention at 72.78%
+role-weighted; Principal wrongly showed On Track at 76.11% flat-summed,
+including an additional-support item that should not have counted).
+
+`InTermStatusService::overallStatusForSection()` is now the only place
+this computation exists. Both dashboards call it. A change to the rule —
+including a future change to decision 1 above — happens once, not twice.
+Do not add a second implementation to make a page "faster"; the
+Principal dashboard's whole-school aggregate used to exist for exactly
+that reason, and it was wrong the whole time no one was measuring it
+against the truth.
+
+---
+
 # KNOWN LIMITATIONS
 
 ## Formal DepEd remediation (SRC / RCM / RFG) is not implemented

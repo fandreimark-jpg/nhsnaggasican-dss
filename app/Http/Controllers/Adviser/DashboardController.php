@@ -11,7 +11,6 @@ use App\Models\Grade;
 use App\Models\Section;
 use App\Models\ReportSubmission;
 use App\Services\InTermStatusService;
-use App\Services\PerformanceAnalysisService;
 use App\Services\TransmutationService;
 use Illuminate\Support\Collection;
 
@@ -24,11 +23,7 @@ use Illuminate\Support\Collection;
  */
 class DashboardController extends Controller
 {
-    /** Worst first — same convention as Principal\StudentController::IN_TERM_STATUS_SEVERITY. */
-    private const IN_TERM_STATUS_SEVERITY = ['At Risk' => 0, 'Needs Attention' => 1, 'On Track' => 2];
-
     public function __construct(
-        private PerformanceAnalysisService $analysis = new PerformanceAnalysisService(),
         private InTermStatusService $inTermStatus = new InTermStatusService()
     ) {
     }
@@ -47,7 +42,7 @@ class DashboardController extends Controller
 
         // Get subjects for this section (core + elective filtered by track/spec)
         $subjects = $section
-            ? $this->getSectionSubjects($section)
+            ? Subject::forSection($section)->get()
             : collect();
 
         // Total grades expected per term = students × subjects
@@ -238,8 +233,8 @@ class DashboardController extends Controller
      *   incomplete, not zero" principle as everywhere else in this app).
      *   Among the REMAINING subjects, take the WORST status
      *   (At Risk > Needs Attention > On Track, in that order of
-     *   severity — see IN_TERM_STATUS_SEVERITY). That single worst status
-     *   is the student's "Overall In-Term Status" shown on this
+     *   severity — see InTermStatusService::SEVERITY). That single worst
+     *   status is the student's "Overall In-Term Status" shown on this
      *   dashboard.
      *
      * WHY worst-of, not an average or a majority vote: this is a
@@ -263,63 +258,30 @@ class DashboardController extends Controller
      * existing per-subject loop, just widened to every subject this
      * section takes instead of one selected subject.
      *
+     * "In-Term Status reconciliation" work order, PART 2 — the actual
+     * per-student computation now lives in InTermStatusService::
+     * overallStatusForSection(), the single copy the Principal dashboard
+     * also calls. This method only adds risk_level (a different data
+     * source, RiskResult, not part of the In-Term Status computation
+     * itself) and this page's own sort order on top.
+     *
      * @return Collection<int, array{student: Student, in_term_status: array, focus_subject: ?Subject, risk_level: ?string, by_subject: array}>
      */
     private function buildInTermRows(Section $section, Collection $students, Collection $subjects, int $openTerm): Collection
     {
-        $rows = $students->map(function (Student $student) use ($section, $subjects, $openTerm) {
-            $worst = null;
-            $worstSubject = null;
-            // TASK 1 of "status clarity and progress consistency" — the
-            // worst subject's OWN transmuted grade, tracked alongside its
-            // status so the badge can show "passing on paper" here too,
-            // same as the Adviser Assessments / Principal Students pages.
-            $worstTransmuted = null;
-            $bySubject = [];
-
-            foreach ($subjects as $subject) {
-                $analysis = $this->analysis->analyzeStudent($student, $subject, $section, $openTerm, $section->school_year);
-                $status = $this->inTermStatus->fromAnalysis($analysis, $student, $subject, $section, $openTerm, $section->school_year);
-
-                // Every subject goes into the drill-down, evidence or not —
-                // "no evidence yet" is itself useful information there.
-                // "Decision flow, report scoping, and dashboard pass"
-                // TASK 5b — 'complete' (whether all 3 components are
-                // scored, from GradingEngine via analyzeStudent()) rides
-                // along so the "what needs your attention now" block can
-                // report incomplete evidence / unverified grades without
-                // a second pass over every student x subject.
-                $bySubject[] = ['subject' => $subject, 'status' => $status, 'complete' => $analysis['complete']];
-
-                if ($status['item_count'] === 0) {
-                    continue; // no evidence yet for this subject — no claim either way
-                }
-
-                if ($worst === null || self::IN_TERM_STATUS_SEVERITY[$status['status']] < self::IN_TERM_STATUS_SEVERITY[$worst['status']]) {
-                    $worst = $status;
-                    $worstSubject = $subject;
-                    $worstTransmuted = $analysis['transmuted_grade'];
-                }
-            }
-
-            $riskResult = $student->riskResults->firstWhere('grading_period', $openTerm);
-
-            return [
-                'student'          => $student,
-                'in_term_status'   => $worst, // null when no subject has any evidence yet
-                'focus_subject'    => $worstSubject,
-                'transmuted_grade' => $worstTransmuted,
-                'risk_level'       => $riskResult?->risk_level,
-                'by_subject'       => $bySubject,
-            ];
-        });
+        $rows = $this->inTermStatus->overallStatusForSection($section, $students, $subjects, $openTerm)
+            ->map(function (array $row) use ($openTerm) {
+                $riskResult = $row['student']->riskResults->firstWhere('grading_period', $openTerm);
+                $row['risk_level'] = $riskResult?->risk_level;
+                return $row;
+            });
 
         // At Risk first; rows with no evidence at all sort last regardless
         // of direction — same "missing is unknown, not worse" rule as
         // Principal\StudentController::sortRows().
         [$withStatus, $withoutStatus] = $rows->partition(fn($row) => $row['in_term_status'] !== null);
 
-        $sorted = $withStatus->sortBy(fn($row) => self::IN_TERM_STATUS_SEVERITY[$row['in_term_status']['status']]);
+        $sorted = $withStatus->sortBy(fn($row) => InTermStatusService::SEVERITY[$row['in_term_status']['status']]);
 
         return $sorted->concat($withoutStatus->sortBy(fn($row) => $row['student']->last_name))->values();
     }
@@ -347,24 +309,4 @@ class DashboardController extends Controller
         return 'stable';
     }
 
-    /**
-     * Get subjects for a section filtered by grade level, track, and specialization.
-     * Core subjects apply to all sections. Elective subjects are track/spec specific.
-     */
-    private function getSectionSubjects(Section $section)
-    {
-        return Subject::where('grade_level', $section->grade_level)
-            ->where(function ($query) use ($section) {
-                $query->where('type', 'core')
-                    ->orWhere(function ($q) use ($section) {
-                        $q->where('type', 'elective')
-                          ->where('track_id', $section->track_id)
-                          ->where(function ($q2) use ($section) {
-                              $q2->whereNull('specialization_id')
-                                 ->orWhere('specialization_id', $section->specialization_id);
-                          });
-                    });
-            })
-            ->get();
-    }
 }

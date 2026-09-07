@@ -417,29 +417,27 @@ class DashboardAnalyticsService
     }
 
     /**
-     * Worst-first severity, same convention as
-     * Principal\StudentController::IN_TERM_STATUS_SEVERITY.
-     */
-    private const IN_TERM_STATUS_SEVERITY = ['At Risk' => 0, 'Needs Attention' => 1, 'On Track' => 2];
-
-    /**
      * TASK 3 of "close the intervention loop": whole-school In-Term
      * Status counts (On Track / Needs Attention / At Risk) for the
      * Principal dashboard, populated the instant assessment evidence
      * exists — unlike the Risk cards above them, which stay at zero
      * until a term report is submitted.
      *
-     * Deliberately NOT built by looping
-     * InTermStatusService::statusFor()/PerformanceAnalysisService::analyzeStudent()
-     * per student per subject — DashboardScalePerformanceTest exists
-     * specifically because that N+1 shape doesn't scale to a whole
-     * school (see getAtRiskStudentsData()'s docblock). Instead this runs
-     * ONE aggregate query computing the exact same
-     * SUM(earned)/SUM(max_score) per (student, subject, component) that
-     * GradingEngine::componentPercentage() computes per-call, then
-     * applies InTermStatusService::classify() — the same public
-     * threshold rule the per-row pages use — so the two can never
-     * silently disagree.
+     * "In-Term Status reconciliation" work order, PART 2 — this used to
+     * run its OWN aggregate SQL query, a second copy of
+     * InTermStatusService::fromAnalysis()'s "components below target"
+     * rule that bypassed GradingEngine entirely. It agreed with the
+     * per-row pages for written_work/performance_task (both are a flat
+     * SUM(earned)/SUM(max_score)) but silently disagreed for examination
+     * once a subject used exam roles — GradingEngine::
+     * examinationPercentage() weights each role by exam_role_shares and
+     * excludes no-role additional-support items, and the duplicate SQL
+     * here did neither. That drift produced a real learner whose Term 3
+     * status read differently on this dashboard than on the Adviser's —
+     * see CLAUDE.md's account of the incident. Now calls the same
+     * InTermStatusService::overallStatusForSection() the Adviser
+     * dashboard calls, once per section, so the two can never diverge
+     * again.
      *
      * A student contributes to these counts only if at least one
      * subject has actual scored evidence this term (never fabricated as
@@ -464,55 +462,52 @@ class DashboardAnalyticsService
     }
 
     /**
-     * The per-term aggregate query getInTermStatusSummary() used to run
+     * The per-term computation getInTermStatusSummary() used to run
      * inline, factored out so "correctness and interface pass" TASK 6b's
      * getInTermStatusTrend() below can call it once per term without
      * duplicating the query/classification logic (and so the two can
      * never silently disagree on what "the count for term N" means).
      *
+     * Whole-school, so it loops every section active this school year —
+     * bounded by (number of sections) x (roster x subject list) calls
+     * into overallStatusForSection(), the same cost shape the Adviser
+     * dashboard already carries for its one section. With the school's
+     * current single-section pilot this is the same query volume as
+     * before; a school running many sections would see this scale
+     * linearly with total enrollment, which a future optimisation could
+     * revisit if it becomes a real cost — correctness came first here
+     * because the alternative was two dashboards that disagree.
+     *
      * @return array{On Track: int, Needs Attention: int, At Risk: int, total: int}
      */
     private function computeInTermStatusCounts(string $schoolYear, int $term): array
     {
-        $componentRows = DB::table('assessment_scores')
-            ->join('assessments', 'assessments.id', '=', 'assessment_scores.assessment_id')
-            ->where('assessments.school_year', $schoolYear)
-            ->where('assessments.grading_period', $term)
-            ->selectRaw('assessment_scores.student_id, assessments.subject_id, assessments.component, SUM(assessment_scores.score) as earned, SUM(assessments.max_score) as max_score')
-            ->groupBy('assessment_scores.student_id', 'assessments.subject_id', 'assessments.component')
-            ->get();
+        $counts = ['On Track' => 0, 'Needs Attention' => 0, 'At Risk' => 0];
+        $total = 0;
 
-        // [student_id][subject_id] => how many of that subject's SCORED
-        // components are below target — matches
-        // InTermStatusService::fromAnalysis()'s componentsBelowTarget,
-        // just computed for the whole school in one query instead of one
-        // analyzeStudent() call per student per subject.
-        $belowTargetBySubject = [];
-        foreach ($componentRows as $row) {
-            if ((float) $row->max_score <= 0) {
+        $sections = Section::where('school_year', $schoolYear)->get();
+        foreach ($sections as $section) {
+            $subjects = Subject::forSection($section)->get();
+            if ($subjects->isEmpty()) {
                 continue;
             }
-            $percentage = round(((float) $row->earned / (float) $row->max_score) * 100, 2);
 
-            $belowTargetBySubject[$row->student_id][$row->subject_id] ??= 0;
-            if ($percentage < PerformanceAnalysisService::DEFAULT_TARGET) {
-                $belowTargetBySubject[$row->student_id][$row->subject_id]++;
+            $students = Student::where('section_id', $section->id)->get();
+            if ($students->isEmpty()) {
+                continue;
             }
-        }
 
-        $counts = ['On Track' => 0, 'Needs Attention' => 0, 'At Risk' => 0];
-        foreach ($belowTargetBySubject as $subjects) {
-            $worst = 'On Track';
-            foreach ($subjects as $componentsBelowTarget) {
-                $status = InTermStatusService::classify($componentsBelowTarget);
-                if (self::IN_TERM_STATUS_SEVERITY[$status] < self::IN_TERM_STATUS_SEVERITY[$worst]) {
-                    $worst = $status;
+            $rows = $this->inTermStatus->overallStatusForSection($section, $students, $subjects, $term);
+            foreach ($rows as $row) {
+                if ($row['in_term_status'] === null) {
+                    continue; // no evidence in any subject yet — not counted
                 }
+                $counts[$row['in_term_status']['status']]++;
+                $total++;
             }
-            $counts[$worst]++;
         }
 
-        $counts['total'] = count($belowTargetBySubject);
+        $counts['total'] = $total;
 
         return $counts;
     }
