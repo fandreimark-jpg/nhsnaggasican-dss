@@ -1,21 +1,13 @@
-{{-- This partial is shared by BOTH the Admin and Principal dashboards (each
-     read-only over the same risk data — see DashboardAnalyticsService), and
-     within each role it's rendered TWICE:
-     1. Included directly inside {admin,principal}/dashboard.blade.php on a
-        normal page load.
-     2. Returned standalone by each role's DashboardController::index() when
-        the request is AJAX (see the filter form's fetch() call in the
-        dashboard scripts).
-     Keeping it as one file means all these code paths can never drift apart
-     from each other. $reportRoute is optional — the Admin dashboard passes
-     route('admin.reports'); Principal has no reports route yet, so it's
-     omitted there and the link simply doesn't render. --}}
+{{-- "UI work order" PART 4 — moved from admin/partials; the Admin
+     dashboard never actually included this (Admin has no DSS analytics —
+     see CLAUDE.md). Principal\DashboardController::index() renders it
+     TWICE: directly inside principal/dashboard.blade.php on a normal page
+     load, and returned standalone when the request is AJAX (see the
+     filter form's fetch() call in the dashboard scripts). Keeping it as
+     one file means those two code paths can never drift apart. --}}
 
 <p class="text-xs text-gray-500 px-5 pt-3">
     {{ $atRiskStudentsTotal }} moderate/high risk student{{ $atRiskStudentsTotal === 1 ? '' : 's' }}, sorted by urgency
-    @isset($reportRoute)
-        — <a href="{{ $reportRoute }}" class="text-green-700 font-medium hover:underline">Full section report &rarr;</a>
-    @endisset
 </p>
 {{-- Standing property of the output, not a notification — never dismissible.
      See the "honest model evaluation" prompt: a 99% confidence reads as

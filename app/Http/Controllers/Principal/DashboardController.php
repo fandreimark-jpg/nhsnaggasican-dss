@@ -28,10 +28,12 @@ class DashboardController extends Controller
 
     public function index()
     {
-        // Shared with the Admin dashboard — see the note at the top of
-        // admin/partials/at-risk-results.blade.php.
+        // "UI work order" PART 4 — moved from admin/partials in this pass:
+        // this DSS analytics partial was never actually used by the Admin
+        // dashboard (Admin has no DSS analytics — see CLAUDE.md), only by
+        // this controller and principal/dashboard.blade.php.
         if (request()->ajax()) {
-            return view('admin.partials.at-risk-results', $this->analytics->getAtRiskStudentsData());
+            return view('principal.partials.at-risk-results', $this->analytics->getAtRiskStudentsData());
         }
 
         $inTermStatusSummary = $this->analytics->getInTermStatusSummary();

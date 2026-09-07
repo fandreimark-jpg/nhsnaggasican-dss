@@ -512,7 +512,7 @@
         </div>
     </div>
     <div id="atRiskResultsContainer">
-        @include('admin.partials.at-risk-results')
+        @include('principal.partials.at-risk-results')
     </div>
 </div>
 @endif
