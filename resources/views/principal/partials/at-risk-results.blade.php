@@ -62,7 +62,7 @@
                 @if(!empty($student['failing_subjects']))
                     <div class="text-xs">
                         @foreach($student['failing_subjects'] as $fs)
-                            <div class="text-red-600">
+                            <div class="text-status-failing">
                                 {{ $fs['name'] }}
                                 <span class="text-gray-400">({{ number_format($fs['grade'], 2) }})</span>
                             </div>
@@ -83,7 +83,7 @@
                         <i class="bi bi-clipboard-data"></i>
                         {{ $wcLabels[$wc['key']] ?? $wc['key'] }}:
                         {{ number_format($wc['percentage'], 1) }}%
-                        <span class="{{ $wc['status'] === 'Needs Attention' ? 'text-red-500' : 'text-green-600' }}">
+                        <span class="{{ $wc['status'] === 'Needs Attention' ? 'text-status-attention' : 'text-status-ontrack' }}">
                             ({{ $wc['gap'] >= 0 ? '+' : '' }}{{ number_format($wc['gap'], 1) }})
                         </span>
                     </div>

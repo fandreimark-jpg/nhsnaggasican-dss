@@ -50,9 +50,26 @@ export default {
                     risk:      '#b91c1c', // red-700
                     failing:   '#7f1d1d', // red-900 — an outcome, graver than At Risk
                 },
+                // COUNT — cool family, deliberately disjoint from the warm
+                // status.* hues above so a plain master-data count can never
+                // be mistaken for a DSS status at a glance. Eight hues so
+                // eight cards (the Admin dashboard's master-data grid) stay
+                // visually distinguishable from each other.
+                count: {
+                    1: '#0284c7', 2: '#2563eb', 3: '#4f46e5', 4: '#7c3aed',
+                    5: '#9333ea', 6: '#0891b2', 7: '#0d9488', 8: '#475569',
+                },
             },
         },
     },
+
+    // <x-stat-card>'s accent prop builds its border-{accent} class at
+    // runtime (resources/views/components/stat-card.blade.php), so
+    // Tailwind's static content scanner never sees the literal class name
+    // and would otherwise purge it.
+    safelist: [
+        { pattern: /border-(count|status)-(1|2|3|4|5|6|7|8|ontrack|attention|risk|failing)/ },
+    ],
 
     plugins: [forms],
 };

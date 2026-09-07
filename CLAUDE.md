@@ -893,3 +893,61 @@ inside rather than read as one thing with it.
 Adding a table without this component set is how the app previously ended
 up with eight different `thead` variants that drifted apart from each
 other one Blade file at a time — reach for `.tbl` first.
+
+## COMPLETE WORK ORDER, PART 4 — count colour, shared components, scale
+
+### Warm colour is status, cool colour is a count
+
+`tailwind.config.js` also defines a `count` colour scale —
+`count-1` through `count-8`, all cool hues (blue/indigo/violet/purple/
+cyan/teal/slate) — deliberately disjoint from the warm `status.*` family
+above. Warm colour means DSS status and nothing else. Cool colour means a
+count. Grey means structure. A plain number never takes a status colour,
+and a status is never shown by colour alone — it always carries its word.
+
+`<x-stat-card accent="count-N">` (Admin's eight master-data cards) and
+`<x-stat-card accent="status-*">` (a genuine status figure) are the two
+places `count.*`/`status.*` reach a border colour. Because the accent
+class is built at runtime (`'border-'.$accent`), Tailwind's static
+scanner cannot see it — `tailwind.config.js`'s `safelist` pattern
+(`border-(count|status)-(1..8|ontrack|attention|risk|failing)`) exists
+for exactly this, and is the first thing to check if a card border ever
+renders grey instead of its accent after a build.
+
+**The Part 4a colour audit and what it deliberately left alone.** A pass
+over every `red-`/`amber-`/`yellow-`/`orange-`/`rose-` in
+`resources/views` confirmed the exemption list above (validation errors,
+danger buttons, workflow-stage badges, account tags, trend arrows,
+data-quality caveats) is still the right call — recolouring a delete
+button or an error banner to a cool or grey tone would read as less
+urgent than it is, for no benefit. Two genuine misses were fixed: the
+failing-subject list and the weakest-component gap indicator in
+`principal/partials/at-risk-results.blade.php` were raw `red-600` /
+`red-500`/`green-600` even though they render real DSS signals (a
+subject-level Failing outcome, and an In-Term Status gap) — now
+`status-failing` and `status-attention`/`status-ontrack` respectively.
+
+### Two shared component shells
+
+`resources/views/components/stat-card.blade.php` and `panel.blade.php`
+are the two building blocks every dashboard card and section reads from
+going forward, instead of each page hand-rolling its own `bg-white
+rounded-lg shadow-sm ...` string:
+
+- `<x-stat-card :label :value :accent :icon :href :note>` — one number
+  with a label, an accent-coloured top border, and an optional icon and
+  link. `accent` is `count-1`..`count-8` for a neutral figure, or
+  `status-ontrack`/`attention`/`risk`/`failing` for a genuine status
+  figure.
+- `<x-panel :title :subtitle :action>` — the card shell for anything that
+  is not a single stat: a table, a list, a chart. `$slot` is the body;
+  `title`/`subtitle` render a header only when given.
+
+### Type and spacing scale
+
+Four sizes, and a page that invents a fifth is wrong: page title
+(`text-xl font-bold text-gray-800`), section heading (`text-sm
+font-semibold text-gray-800`), card label/table header (`text-xs
+text-gray-500`), card number (`text-2xl font-bold text-gray-800`).
+Spacing: `gap-3` between cards, `mb-4` between sections, `p-4` inside
+cards.
