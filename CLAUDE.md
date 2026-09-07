@@ -825,3 +825,71 @@ nothing sets it today. The interface must not claim the DSS decided something
 a person decided. The DSS produces the recommendation text, the focus area,
 and the risk classification that inform the Principal's judgment. It does not
 create, approve, or close intervention records.
+
+---
+
+# UI DESIGN SYSTEM
+
+## Status colour is reserved for the four DSS states
+
+`tailwind.config.js` defines a `status` colour scale — `status-ontrack`,
+`status-attention`, `status-risk`, `status-failing` — used ONLY for On Track,
+Needs Attention, At Risk, and Failing (and Risk Level's Low/Moderate/High,
+which is the same green/amber/red gradient by design). Every genuine
+DSS-state badge, stacked-bar segment, and card border across all three
+roles reads from these four tokens instead of a literal `green-500` /
+`yellow-400` / `red-600`, so "what colour is At Risk" is answered in one
+place.
+
+Do NOT reach for `status-*` outside these four states. Validation errors,
+delete/danger buttons, workflow-stage badges (recommended/approved/
+delivered), account active/inactive tags, trend arrows (improving/
+declining), and data-quality caveats (Provisional/Not available) are
+deliberately literal Tailwind classes — they are not one of the four DSS
+states, and using a status token for them would blur the one thing this
+token set exists to keep unambiguous. When in doubt, ask whether the
+colour is describing a *student's or subject's* On Track/Needs Attention/
+At Risk/Failing status — if not, it isn't a `status-*` case.
+
+Card *identity* (which master-data type a card is — Users, Students,
+Sections, and so on, on the Admin dashboard) uses its own literal colour
+per card and must never resolve to one of the four status values; identity
+and status are different questions and must stay visually distinguishable.
+
+## One table component for every table in the app
+
+`resources/css/app.css` defines `.tbl` / `.tbl-wrap` / `.tbl-scroll` /
+`.tbl-sticky` / `.tbl-num` in a `@layer components` block. Every real data
+table in the app (as of the "UI work order" pass) uses this set instead of
+its own `thead`/`th`/`td` class string:
+
+- `.tbl-wrap` — the table's own visual card (`bg-white rounded-lg shadow-sm
+  overflow-hidden`), for a table with no other ancestor already providing
+  that chrome.
+- `.tbl-scroll` — `max-h-[32rem] overflow-y-auto`, the shared scroll
+  container height. Put it on whichever div directly wraps the table.
+- `.tbl` — on the `<table>` itself: base typography and the shared
+  `thead`/`tbody tr`/`tbody td` styling.
+- `.tbl-sticky` — add alongside `.tbl` on the `<table>` only when the
+  header should pin on scroll (matches the file's PRE-EXISTING behaviour;
+  don't add sticky where a table never had it).
+- `.tbl-num` — on both the `th` and `td` of a numeric column (grades,
+  percentages, counts, scores) so digits align down the column.
+
+Plain `<th>`/`<td>` need no class at all — `.tbl` sets `text-align: left`
+at the table level, so left alignment is the default. Only alignment
+(`text-right`, `text-center`, or `tbl-num` for numeric), a genuine
+emphasis (`font-medium`, `text-gray-500` for a de-emphasised field), or a
+content-specific detail (a fixed `w-*`, `whitespace-nowrap`, a status
+colour) should ever appear on a `th`/`td` beyond that.
+
+**Three tables are deliberately NOT on `.tbl`**: the Adviser Interventions
+page's two "awaiting decision" callout tables and the assessment
+edit-summary table are themed (amber/blue) mini-tables embedded inside a
+matching coloured notification banner, not ordinary data tables — forcing
+them onto `.tbl`'s neutral grey chrome would fight the banner they live
+inside rather than read as one thing with it.
+
+Adding a table without this component set is how the app previously ended
+up with eight different `thead` variants that drifted apart from each
+other one Blade file at a time — reach for `.tbl` first.
