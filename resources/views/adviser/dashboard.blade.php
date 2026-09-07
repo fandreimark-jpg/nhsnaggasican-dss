@@ -60,7 +60,7 @@
 @endphp
 <div class="bg-white rounded-xl shadow-sm mb-4">
     <div class="px-6 py-4 border-b">
-        <h3 class="font-semibold text-gray-800">What Needs Your Attention Now</h3>
+        <h3 class="text-sm font-semibold text-gray-800">What Needs Your Attention Now</h3>
     </div>
     @if($attentionItems->isEmpty())
         <div class="px-6 py-5 text-sm text-gray-500">
@@ -91,7 +91,7 @@
 <div class="bg-white rounded-xl shadow-sm mb-6">
     <div class="px-6 py-4 border-b flex justify-between items-center">
         <div>
-            <h3 class="font-semibold text-gray-800">Interventions Needing Your Attention</h3>
+            <h3 class="text-sm font-semibold text-gray-800">Interventions Needing Your Attention</h3>
             <p class="text-sm text-gray-500">Decisions the Principal has recorded for your students that you haven't acknowledged yet</p>
         </div>
         <a href="{{ route('adviser.interventions') }}" class="text-sm text-brand-600 hover:underline whitespace-nowrap">
@@ -134,37 +134,37 @@
      pass": none of these four is a status (At Risk/Needs Attention/On
      Track/Failing), so none carries a status colour — a quiet, neutral
      group instead of a rainbow of unrelated counts. --}}
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-    <div class="bg-white rounded-xl p-5 shadow-sm border-t-4 border-gray-300">
-        <p class="text-sm text-gray-500">Total Students</p>
-        <p class="text-3xl font-bold text-gray-800 mt-1">{{ $totalStudents }}</p>
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-gray-300">
+        <p class="text-xs text-gray-500">Total Students</p>
+        <p class="text-2xl font-bold text-gray-800 mt-1">{{ $totalStudents }}</p>
     </div>
-    <div class="bg-white rounded-xl p-5 shadow-sm border-t-4 border-gray-300">
-        <p class="text-sm text-gray-500">Grades Encoded</p>
-        <p class="text-3xl font-bold text-gray-800 mt-1">{{ $totalGradesEncoded }}</p>
+    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-gray-300">
+        <p class="text-xs text-gray-500">Grades Encoded</p>
+        <p class="text-2xl font-bold text-gray-800 mt-1">{{ $totalGradesEncoded }}</p>
         {{-- "Decision flow, report scoping, and dashboard pass" TASK 6a —
              this is the count across ALL 3 terms, not one term; a reader
              could otherwise mistake it for "this term's" count. --}}
         <p class="text-xs text-gray-400 mt-0.5">of {{ $totalExpectedPerTerm * 3 }} across 3 terms</p>
     </div>
-    <div class="bg-white rounded-xl p-5 shadow-sm border-t-4 border-gray-300">
-        <p class="text-sm text-gray-500">Pending Submission</p>
-        <p class="text-3xl font-bold text-gray-800 mt-1">{{ $pendingCount }}</p>
+    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-gray-300">
+        <p class="text-xs text-gray-500">Pending Submission</p>
+        <p class="text-2xl font-bold text-gray-800 mt-1">{{ $pendingCount }}</p>
     </div>
-    <div class="bg-white rounded-xl p-5 shadow-sm border-t-4 border-gray-300">
-        <p class="text-sm text-gray-500">Terms Submitted</p>
-        <p class="text-3xl font-bold text-gray-800 mt-1">{{ $submissions->count() }}</p>
+    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-gray-300">
+        <p class="text-xs text-gray-500">Terms Submitted</p>
+        <p class="text-2xl font-bold text-gray-800 mt-1">{{ $submissions->count() }}</p>
     </div>
 </div>
 
 {{-- Term Submission Status — "correctness and interface pass" TASK 6f:
-     "the most useful element on this screen," given more room (p-6 instead
-     of p-5) and the same three facts shown consistently across all three
-     cards regardless of state — grades encoded, submission status, and a
-     submission date (or an explicit "Not yet submitted" in its place, so
-     the three cards read as one consistent set rather than each showing a
-     different subset of information). --}}
-<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+     "the most useful element on this screen" — the same three facts shown
+     consistently across all three cards regardless of state — grades
+     encoded, submission status, and a submission date (or an explicit
+     "Not yet submitted" in its place, so the three cards read as one
+     consistent set rather than each showing a different subset of
+     information). --}}
+<div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
     @foreach([1, 2, 3] as $term)
     @php
         $submission  = $submissions[$term] ?? null;
@@ -176,10 +176,10 @@
         $isComplete  = $totalExpectedPerTerm > 0 && $termCount >= $totalExpectedPerTerm;
         $isSubmitted = $submission !== null;
     @endphp
-    <div class="bg-white rounded-xl shadow-sm p-6 border-t-4
+    <div class="bg-white rounded-lg shadow-sm p-4 border-t-4
         {{ $isSubmitted ? 'border-green-500' : ($isComplete ? 'border-brand-500' : 'border-gray-200') }}">
         <div class="flex justify-between items-start mb-3">
-            <p class="text-sm font-semibold text-gray-700">Term {{ $term }}</p>
+            <p class="text-sm font-semibold text-gray-800">Term {{ $term }}</p>
             @if($isSubmitted)
                 <span class="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700 font-medium">
                     Submitted
@@ -226,7 +226,7 @@
 <div class="bg-white rounded-xl shadow-sm">
     <div class="px-6 py-4 border-b flex justify-between items-center">
         <div>
-            <h3 class="font-semibold text-gray-800">My Students</h3>
+            <h3 class="text-sm font-semibold text-gray-800">My Students</h3>
             <p class="text-sm text-gray-500">Overall In-Term Status — Term {{ $openTerm }}, combining every subject this section takes into one worst-case status per student</p>
             {{-- TASK 5c of "clarity, progress, and visual design pass" —
                  the whole picture without scrolling, since the table

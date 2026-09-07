@@ -80,7 +80,7 @@
      subject at once," which no single list on this system currently
      shows). --}}
 <div class="mb-1">
-    <h3 class="text-sm font-semibold text-gray-700">In-Term Status — Term {{ $inTermTerm }}</h3>
+    <h3 class="text-sm font-semibold text-gray-800">In-Term Status — Term {{ $inTermTerm }}</h3>
     <p class="text-xs text-gray-400">From assessment evidence already on file, across every subject — available before any term report is submitted.</p>
 </div>
 @if($inTermTotal > 0)
@@ -131,7 +131,7 @@
      the current term. A term with no evidence yet renders as an empty
      (all-grey) bar, not a hidden one — absence is itself informative here. --}}
 <div class="bg-white rounded-lg shadow-sm p-4 mb-4">
-    <h3 class="font-semibold text-gray-700 text-sm mb-1">Term-over-Term Trend</h3>
+    <h3 class="font-semibold text-gray-800 text-sm mb-1">Term-over-Term Trend</h3>
     <p class="text-xs text-gray-400 mb-3">On Track / Needs Attention / At Risk, across every subject, per term.</p>
     <div class="grid grid-cols-3 gap-4">
         @foreach($inTermStatusTrend as $t)
@@ -263,7 +263,7 @@
      etc.: Risk Level comes from the submitted term report + classifier,
      never from assessment evidence alone. --}}
 <div class="mb-1">
-    <h3 class="text-sm font-semibold text-gray-700">Risk Level — submitted term reports</h3>
+    <h3 class="text-sm font-semibold text-gray-800">Risk Level — submitted term reports</h3>
 </div>
 @if($hasRiskData)
 {{-- TASK 6d of "correctness and interface pass" — Moderate/High link to
@@ -328,7 +328,7 @@
      genuinely need risk_results. --}}
 <div class="grid grid-cols-1 mb-4">
     <div class="bg-white rounded-lg shadow-sm p-4">
-        <h3 class="font-semibold text-gray-700 text-sm mb-1">Performance Trend</h3>
+        <h3 class="font-semibold text-gray-800 text-sm mb-1">Performance Trend</h3>
         <p class="text-xs text-gray-400 mb-2">Average COMPUTED grade per term, from assessment evidence — not the official/transmuted grade, and not gated on a submitted term report.</p>
         <div style="height:180px;" class="{{ $hasTrendData ? '' : 'flex items-center justify-center' }}">
             @if($hasTrendData)
@@ -348,14 +348,14 @@
 @if($hasRiskData)
 <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
     <div class="bg-white rounded-lg shadow-sm p-4">
-        <h3 class="font-semibold text-gray-700 text-sm mb-1">Risk Distribution</h3>
+        <h3 class="font-semibold text-gray-800 text-sm mb-1">Risk Distribution</h3>
         <p class="text-xs text-gray-400 mb-2">Overall student risk levels</p>
         <div style="height:180px;">
             <canvas id="riskDonutChart"></canvas>
         </div>
     </div>
     <div class="bg-white rounded-lg shadow-sm p-4">
-        <h3 class="font-semibold text-gray-700 text-sm mb-1">At-Risk per Section</h3>
+        <h3 class="font-semibold text-gray-800 text-sm mb-1">At-Risk per Section</h3>
         <p class="text-xs text-gray-400 mb-2">Moderate + High risk per section</p>
         <div style="height:180px;" class="{{ $hasSectionRiskData ? '' : 'flex items-center justify-center' }}">
             @if($hasSectionRiskData)
