@@ -137,6 +137,33 @@ class Intervention extends Model
     }
 
     /**
+     * "Progress column honesty and the last duplicate rule" work order,
+     * PART 2 — the query-level twin of awaitingDecision() above, so a
+     * COUNT can be taken without loading every row. Before this, the
+     * Principal dashboard's "Awaiting Your Decision" card counted
+     * `status IN ('recommended', 'in_review')` while the Interventions
+     * page's banner counted `status = 'recommended' OR decided_by IS
+     * NULL` — two different rules that agreed only because no
+     * 'in_review' row has ever existed. `in_review` is actually listed
+     * in DECIDED_STATUSES (a status the Principal has already acted on),
+     * so the dashboard's version was the wrong one, not a harmless
+     * variant — see CLAUDE.md Design Decision #3. Both callers now use
+     * this scope exclusively; do not add a third copy of this WHERE
+     * clause anywhere.
+     *
+     * Named `undecided`, not `awaitingDecision` — Eloquent resolves
+     * `Intervention::awaitingDecision()` to the real INSTANCE method of
+     * that exact name above before it ever considers a
+     * `scopeAwaitingDecision` magic method, so a same-named scope fails
+     * at call time ("Non-static method... cannot be called statically")
+     * rather than at definition time.
+     */
+    public function scopeUndecided(\Illuminate\Database\Eloquent\Builder $query): \Illuminate\Database\Eloquent\Builder
+    {
+        return $query->where(fn($q) => $q->where('status', self::STATUS_RECOMMENDED)->orWhereNull('decided_by'));
+    }
+
+    /**
      * "Master pass" PART 1 — true only for a value no code path in this
      * application sets today (see ORIGINS' docblock). Exists so the
      * interface can tell the truth if such a source is ever added,

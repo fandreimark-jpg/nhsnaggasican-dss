@@ -54,9 +54,9 @@ class InterventionController extends Controller
     {
         // "Correctness and interface pass" TASK 2c — the dashboard's
         // "Awaiting Your Decision" count must link straight to exactly
-        // the rows it counted (status in recommended/in_review — see
-        // DashboardAnalyticsService::getPrincipalSummary()), not to the
-        // unfiltered list.
+        // the rows it counted (Intervention::scopeUndecided() — see
+        // DashboardAnalyticsService::getPrincipalSummary() and CLAUDE.md
+        // Design Decision #3), not to the unfiltered list.
         $awaitingDecisionOnly = $request->boolean('awaiting_decision');
         // "Decision flow, report scoping, and dashboard pass" TASK 1e —
         // a standing count of interventions still sitting at their
@@ -65,7 +65,7 @@ class InterventionController extends Controller
         // awaitingDecision()), surfaced regardless of the current filter
         // so the Principal always knows whether anything is blocking an
         // adviser, not only when they happen to be viewing that filter.
-        $undecidedCount = Intervention::where(fn($q) => $q->where('status', Intervention::STATUS_RECOMMENDED)->orWhereNull('decided_by'))->count();
+        $undecidedCount = Intervention::undecided()->count();
         $readyOnly   = $request->boolean('ready_for_review');
         $subjectId   = $request->input('subject_id');
         $gradingPeriod = $this->resolveGradingPeriod($request);
@@ -81,7 +81,7 @@ class InterventionController extends Controller
                 'acknowledgedBy',
                 'deliveredBy',
             ])
-            ->when($awaitingDecisionOnly, fn($q) => $q->whereIn('status', ['recommended', 'in_review']));
+            ->when($awaitingDecisionOnly, fn($q) => $q->undecided());
 
         // TASK 3 of "terminology, transmutation, and interface cleanup" —
         // Subject options are whatever actually appears in the CURRENT
@@ -568,7 +568,7 @@ class InterventionController extends Controller
         $interventions = $this->buildFilteredQuery($request)
             ->with('student')
             ->whereIn('id', $request->input('ids'))
-            ->where(fn($q) => $q->where('status', Intervention::STATUS_RECOMMENDED)->orWhereNull('decided_by'))
+            ->undecided()
             ->get();
 
         \DB::transaction(function () use ($interventions) {

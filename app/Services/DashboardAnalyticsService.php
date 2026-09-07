@@ -383,7 +383,14 @@ class DashboardAnalyticsService
             ->pluck('count', 'status');
 
         $underIntervention = $interventionCounts->only(['approved', 'in_progress', 'monitoring'])->sum();
-        $awaitingDecision   = $interventionCounts->only(['recommended', 'in_review'])->sum();
+        // "Progress column honesty and the last duplicate rule" work
+        // order, PART 2 — was `only(['recommended', 'in_review'])->sum()`,
+        // a second copy of Intervention::scopeUndecided() that
+        // disagreed with it: 'in_review' is a DECIDED status (see
+        // DECIDED_STATUSES), so counting it here as still-awaiting was
+        // the bug. Now the same query-level scope the Interventions page
+        // banner uses — see CLAUDE.md Design Decision #3.
+        $awaitingDecision   = Intervention::undecided()->count();
         $completedCount     = $interventionCounts->get('completed', 0);
 
         // Expected = one score per (assessment item, student in that item's

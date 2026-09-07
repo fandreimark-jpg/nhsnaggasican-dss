@@ -683,6 +683,37 @@ Principal dashboard's whole-school aggregate used to exist for exactly
 that reason, and it was wrong the whole time no one was measuring it
 against the truth.
 
+## 3. "Awaiting Your Decision" means `status = 'recommended'` OR `decided_by IS NULL`, not `status IN ('recommended', 'in_review')`
+
+"Progress column honesty and the last duplicate rule" work order, PART
+2 — the Part 3 sweep of the previous pass found this pair (dashboard
+card vs. Interventions page banner) agreeing today only because no
+`in_review` row has ever existed. On inspection the two rules weren't
+equally valid variants — they actually disagreed on what `in_review`
+means:
+
+- The dashboard's rule (`only(['recommended', 'in_review'])->sum()`)
+  treated `in_review` as still awaiting the Principal's decision.
+- The Interventions banner's rule, and `Intervention::awaitingDecision()`
+  — already load-bearing elsewhere, as the actual guard blocking an
+  adviser from acknowledging an intervention before the Principal has
+  decided — treats `in_review` as already decided, consistent with
+  `Intervention::DECIDED_STATUSES`, which lists it as "a status that
+  means the Principal has actually reviewed and decided this."
+
+The dashboard's rule was the wrong one, not a harmless variant: `in_review`
+is the Principal actively working the case, not an untouched
+recommendation. `Intervention::scopeUndecided()` (query-level; named
+differently from the existing `awaitingDecision()` instance method
+because Eloquent resolves a same-named real method before it ever tries
+the `scopeX` magic name, so `scopeAwaitingDecision` silently breaks
+static calls) is now the only place this query exists. The dashboard
+card, the Interventions banner, the "awaiting_decision=1" list filter,
+the "Approve All Pending" bulk action, and `dss:report-undecided-
+deliveries` all call it — five call sites that had each grown their own
+copy or near-copy of this same WHERE clause. Do
+not add a sixth.
+
 ## Part 3 sweep — other figures shown on more than one screen
 
 Same work order, Part 3: every other figure that appears on more than one

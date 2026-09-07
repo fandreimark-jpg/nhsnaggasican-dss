@@ -27,10 +27,7 @@ class ReportUndecidedDeliveriesCommand extends Command
     public function handle(): int
     {
         $rows = Intervention::with(['student', 'subject'])
-            ->where(function ($q) {
-                $q->where('status', Intervention::STATUS_RECOMMENDED)
-                  ->orWhereNull('decided_by');
-            })
+            ->undecided()
             ->where(function ($q) {
                 $q->whereNotNull('acknowledged_at')
                   ->orWhereNotNull('delivered_at');

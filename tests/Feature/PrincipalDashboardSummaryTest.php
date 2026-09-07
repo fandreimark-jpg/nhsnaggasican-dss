@@ -26,16 +26,24 @@ class PrincipalDashboardSummaryTest extends TestCase
     public function test_intervention_counts_are_grouped_by_status_bucket(): void
     {
         Intervention::factory()->create(['status' => 'recommended']);
-        Intervention::factory()->create(['status' => 'in_review']);
-        Intervention::factory()->create(['status' => 'approved']);
-        Intervention::factory()->create(['status' => 'in_progress']);
-        Intervention::factory()->create(['status' => 'monitoring']);
-        Intervention::factory()->create(['status' => 'completed']);
+        // "Progress column honesty and the last duplicate rule" work
+        // order, PART 2 — every status other than 'recommended' only
+        // exists in real data via Principal\InterventionController::
+        // update(), which always stamps decided_by — so ->decided($status)
+        // is the realistic shape here, not a bare status override. A
+        // genuinely-decided 'in_review' row must NOT count as awaiting
+        // decision: in_review is in Intervention::DECIDED_STATUSES; only
+        // the old, now-deleted duplicate rule miscounted it.
+        Intervention::factory()->decided('in_review')->create();
+        Intervention::factory()->decided('approved')->create();
+        Intervention::factory()->decided('in_progress')->create();
+        Intervention::factory()->decided('monitoring')->create();
+        Intervention::factory()->decided('completed')->create();
 
         $summary = (new DashboardAnalyticsService())->getPrincipalSummary();
 
         $this->assertSame(3, $summary['under_intervention']); // approved + in_progress + monitoring
-        $this->assertSame(2, $summary['awaiting_decision']);  // recommended + in_review
+        $this->assertSame(1, $summary['awaiting_decision']);  // recommended only — the decided in_review row does not count
         $this->assertSame(1, $summary['completed_interventions']);
     }
 
@@ -134,6 +142,31 @@ class PrincipalDashboardSummaryTest extends TestCase
 
         $after = $this->actingAs($principal)->get('/principal/dashboard');
         $after->assertViewHas('awaiting_decision', 0);
+    }
+
+    /**
+     * "Progress column honesty and the last duplicate rule" work order,
+     * PART 2 — the dashboard's "Awaiting Your Decision" card and the
+     * Interventions page's banner must agree, on a scenario that actually
+     * distinguishes the two rules that used to exist (a decided
+     * 'in_review' row, which the old dashboard rule wrongly counted as
+     * awaiting decision and the banner rule correctly did not). Both now
+     * read Intervention::scopeAwaitingDecision() — this fails if a third
+     * copy of the WHERE clause reappears on either page.
+     */
+    public function test_dashboard_card_and_interventions_banner_agree_on_awaiting_decision(): void
+    {
+        $principal = User::factory()->principal()->create();
+        Intervention::factory()->create(['status' => 'recommended']);
+        Intervention::factory()->decided('in_review')->create();
+        Intervention::factory()->decided('approved')->create();
+
+        $dashboard = $this->actingAs($principal)->get('/principal/dashboard');
+        $dashboard->assertViewHas('awaiting_decision', 1);
+
+        $interventions = $this->actingAs($principal)->get('/principal/interventions');
+        $interventions->assertOk();
+        $interventions->assertSee('1 intervention is recorded but not yet approved');
     }
 
     public function test_admin_dashboard_does_not_show_principal_only_cards(): void
