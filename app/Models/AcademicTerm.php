@@ -90,4 +90,81 @@ class AcademicTerm extends Model
             'incomplete_sections' => $incomplete,
         ];
     }
+
+    /**
+     * TASK 4 of "dashboard structure and upload safeguards" — the exact
+     * same students x subjects arithmetic completionStatus() uses to
+     * decide whether a term CAN open, but for EVERY section (not just the
+     * incomplete ones) and returned as data rather than a boolean, so the
+     * gap is visible on the Admin Sections and Academic Terms pages
+     * BEFORE anyone clicks "Open Term N" and gets refused. Display only —
+     * completionStatus() itself, and the guard in
+     * Admin\AcademicTermController::open(), are both untouched; this must
+     * always compute the identical expected/actual numbers so the two
+     * can be checked against each other by hand.
+     *
+     * @return array<int, array{section: Section, subject_count: int, student_count: int, expected: int, encoded: int}>
+     */
+    public static function sectionCapacityBreakdown(string $schoolYear, int $term): array
+    {
+        $sections = Section::where('school_year', $schoolYear)
+            ->orderBy('grade_level')
+            ->orderBy('name')
+            ->get();
+
+        return $sections->map(function (Section $section) use ($term, $schoolYear) {
+            $studentCount = Student::where('section_id', $section->id)->count();
+            $subjectCount = Subject::forSection($section)->count();
+
+            $encoded = Grade::where('section_id', $section->id)
+                ->where('grading_period', $term)
+                ->where('school_year', $schoolYear)
+                ->count();
+
+            return [
+                'section'       => $section,
+                'subject_count' => $subjectCount,
+                'student_count' => $studentCount,
+                'expected'      => $studentCount * $subjectCount,
+                'encoded'       => $encoded,
+            ];
+        })->all();
+    }
+
+    /**
+     * Terms (within a school year) whose risk_results exist but whose
+     * underlying grades do not — see the "live in-term risk + stale data
+     * guard" prompt. This happens when grades/assessments are wiped
+     * (e.g. a partial hand-written truncate) without also clearing the
+     * risk_results and report_submissions that were computed from them.
+     * A risk level with no surviving evidence behind it must never be
+     * displayed as if nothing were wrong — every place a risk level
+     * appears checks this first.
+     *
+     * @return array<int, int> term numbers (1-3) with this problem, empty if none
+     */
+    public static function staleRiskTerms(string $schoolYear): array
+    {
+        $stale = [];
+
+        foreach ([1, 2, 3] as $term) {
+            $hasRiskResults = RiskResult::where('school_year', $schoolYear)
+                ->where('grading_period', $term)
+                ->exists();
+
+            if (!$hasRiskResults) {
+                continue;
+            }
+
+            $hasGrades = Grade::where('school_year', $schoolYear)
+                ->where('grading_period', $term)
+                ->exists();
+
+            if (!$hasGrades) {
+                $stale[] = $term;
+            }
+        }
+
+        return $stale;
+    }
 }

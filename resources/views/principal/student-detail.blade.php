@@ -25,6 +25,11 @@
             <span class="block text-xs text-gray-400 mt-1" title="Plain-language status: On Track / Needs Monitoring / Needs Attention / At Risk">
                 DSS Status: <span class="font-medium text-gray-600">{{ $dssStatus }}</span>
             </span>
+            {{-- Standing property of the output, not a notification —
+                 never dismissible. See the "honest model evaluation" prompt. --}}
+            <span class="block text-xs text-gray-400 mt-1">
+                Risk level is derived from grade thresholds, not predictive certainty about this student.
+            </span>
         @else
             <p class="text-sm text-gray-400 mt-1">No risk classification yet.</p>
         @endif
@@ -75,11 +80,22 @@
         @if($row['evidence']->isNotEmpty())
         <div class="border-t px-5 py-3">
             <p class="text-xs font-medium text-gray-500 mb-2">Evidence</p>
-            <table class="w-full text-xs">
+            <div class="overflow-x-auto">
+            <table class="w-full min-w-full text-xs">
                 <tbody class="divide-y divide-gray-50">
                     @foreach($row['evidence'] as $item)
                     <tr>
-                        <td class="py-1.5 text-gray-700">{{ $item['name'] }}</td>
+                        <td class="py-1.5 text-gray-700">
+                            {{ $item['name'] }}
+                            @if($item['is_additional_support'])
+                                {{-- "Workflow completion pass" TASK 3c — lists
+                                     exactly which items were additional so the
+                                     Principal can see exactly what contributed. --}}
+                                <span class="ml-1 text-[10px] text-gray-400" title="Within-term additional support, marked by the Adviser.">
+                                    <i class="bi bi-info-circle"></i> additional
+                                </span>
+                            @endif
+                        </td>
                         <td class="py-1.5 text-gray-400">{{ $componentLabels[$item['component']] ?? $item['component'] }}</td>
                         <td class="py-1.5 text-right font-medium">
                             @if($item['score'] !== null)
@@ -92,22 +108,33 @@
                     @endforeach
                 </tbody>
             </table>
+            </div>
         </div>
         @else
         <div class="border-t px-5 py-3 text-xs text-gray-400">No assessment evidence uploaded yet for this subject/term.</div>
         @endif
     </div>
     @empty
-    <div class="bg-white rounded-xl shadow-sm p-8 text-center text-gray-400">No subjects found for this student's section.</div>
+    <div class="bg-white rounded-xl shadow-sm">
+        <x-empty-state message="No subjects found for this student's section." hint="Subjects are assigned to a section by an Admin — this student's section may not have any yet." />
+    </div>
     @endforelse
 </div>
 
 {{-- Intervention history --}}
+@php
+    // TASK 1 of "terminology, transmutation, and interface cleanup" —
+    // 'remediation' is a within-term action here (an additional
+    // assessment item), not DepEd's formal post-term remediation — see
+    // CLAUDE.md's Known limitations. Every other type still title-cases
+    // fine from its raw enum value, so only this one needs a real label.
+    $ivTypeLabels = ['remediation' => 'Additional Practice and Re-teaching'];
+@endphp
 <div class="bg-white rounded-xl shadow-sm p-5">
     <h3 class="font-semibold text-gray-800 text-sm mb-3">Intervention History</h3>
     @forelse($interventions as $iv)
         <div class="text-xs text-gray-600 py-1.5 border-b last:border-0">
-            <span class="font-medium">{{ ucfirst(str_replace('_', ' ', $iv->recommended_type)) }}</span>
+            <span class="font-medium">{{ $ivTypeLabels[$iv->recommended_type] ?? ucfirst(str_replace('_', ' ', $iv->recommended_type)) }}</span>
             — {{ ucfirst(str_replace('_', ' ', $iv->status)) }}
             <span class="text-gray-400">({{ $iv->created_at->format('M d, Y') }})</span>
         </div>

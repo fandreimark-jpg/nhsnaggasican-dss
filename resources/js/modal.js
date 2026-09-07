@@ -476,6 +476,7 @@ document.addEventListener("DOMContentLoaded", function () {
             document.getElementById("subjectName").value = "";
             document.getElementById("subjectType").value = "";
             document.getElementById("subjectGrade").value = "";
+            document.getElementById("subjectGroupField").value = "core_academic";
             document.getElementById("subjectTrack").value = "";
             document.getElementById("subjectSpec").innerHTML =
                 '<option value="">— All specializations in track —</option>';
@@ -490,6 +491,7 @@ document.addEventListener("DOMContentLoaded", function () {
             document.getElementById("subjectName").value = subject.name;
             document.getElementById("subjectType").value = subject.type;
             document.getElementById("subjectGrade").value = subject.grade_level;
+            document.getElementById("subjectGroupField").value = subject.subject_group || "core_academic";
 
             if (subject.type === "elective") {
                 document.getElementById("trackFields").classList.remove("hidden");
@@ -520,5 +522,14 @@ document.addEventListener("DOMContentLoaded", function () {
         window.openImportSubjectsModal = () => window.showModal("importSubjectsModal");
         window.closeImportSubjectsModal = () => window.hideModal("importSubjectsModal");
         window.bindModalOverlayClose("importSubjectsModal");
+    }
+
+    // =============================================
+    // ADMIN — IMPORT SECTIONS MODAL
+    // =============================================
+    if (document.getElementById("importSectionsModal")) {
+        window.openImportSectionsModal = () => window.showModal("importSectionsModal");
+        window.closeImportSectionsModal = () => window.hideModal("importSectionsModal");
+        window.bindModalOverlayClose("importSectionsModal");
     }
 });

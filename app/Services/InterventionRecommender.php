@@ -59,7 +59,7 @@ class InterventionRecommender
 
             return [
                 'type'   => 'remediation',
-                'reason' => "Currently failing: {$names}. Remediation is recommended to address the specific subject(s) before the term ends.",
+                'reason' => "Currently failing: {$names}. Additional practice and re-teaching, within the term, is recommended to address the specific subject(s) before the term ends.",
             ];
         }
 

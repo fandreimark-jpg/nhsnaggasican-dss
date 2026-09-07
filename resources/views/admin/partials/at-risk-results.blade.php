@@ -17,16 +17,23 @@
         — <a href="{{ $reportRoute }}" class="text-green-700 font-medium hover:underline">Full section report &rarr;</a>
     @endisset
 </p>
-<div class="max-h-[480px] overflow-y-auto mt-2">
-<table class="w-full text-sm">
+{{-- Standing property of the output, not a notification — never dismissible.
+     See the "honest model evaluation" prompt: a 99% confidence reads as
+     near-certainty about the student, when it actually only describes how
+     much the model's own trees agreed with each other. --}}
+<p class="text-xs text-gray-400 px-5 pt-1">
+    Risk levels are derived from grade thresholds; confidence reflects how much the model's decision trees agreed with each other, not predictive certainty about any individual student.
+</p>
+<div class="max-h-[480px] overflow-auto mt-2">
+<table class="w-full min-w-full text-sm">
     <thead class="bg-gray-50 text-gray-500 sticky top-0 z-10">
         <tr>
-            <th class="text-left px-5 py-2 text-xs">Student</th>
-            <th class="text-left px-3 py-2 text-xs">Section</th>
-            <th class="text-center px-3 py-2 text-xs">Average Grade</th>
-            <th class="text-center px-3 py-2 text-xs">Risk Level</th>
-            <th class="text-center px-3 py-2 text-xs">Focus Area</th>
-            <th class="text-center px-3 py-2 text-xs">Trend</th>
+            <th scope="col" class="text-left px-5 py-2 text-xs">Student</th>
+            <th scope="col" class="text-left px-3 py-2 text-xs">Section</th>
+            <th scope="col" class="text-center px-3 py-2 text-xs">Average Grade</th>
+            <th scope="col" class="text-center px-3 py-2 text-xs">Risk Level</th>
+            <th scope="col" class="text-center px-3 py-2 text-xs">Focus Area</th>
+            <th scope="col" class="text-center px-3 py-2 text-xs">Trend</th>
         </tr>
     </thead>
     <tbody class="divide-y divide-gray-50">
@@ -113,7 +120,7 @@
                     <span class="text-gray-300">—</span>
                 @endif
                 @if($student['consecutive_decline'])
-                    <div class="mt-1" title="Average has dropped for 2 grading periods in a row">
+                    <div class="mt-1" title="Average has dropped for 2 terms in a row">
                         <span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-50 text-red-700 border border-red-200">
                             &#9888; Watch — 2 terms declining
                         </span>
@@ -123,11 +130,30 @@
         </tr>
         @empty
         <tr>
-            <td colspan="6" class="px-5 py-6 text-center text-gray-400 text-sm">
-                No students match the current filter.
+            <td colspan="6">
+                <x-empty-state message="No students match the current filter." hint="Try widening the filters above." class="py-6 text-sm" />
             </td>
         </tr>
         @endforelse
     </tbody>
 </table>
 </div>
+
+@if($atRiskStudents->hasPages())
+<div class="px-5 py-3 border-t flex flex-col items-center gap-2 text-sm text-gray-500">
+    <div class="flex items-center gap-1">
+        @if($atRiskStudents->onFirstPage())
+            <span class="px-3 py-1 rounded border text-gray-300 cursor-not-allowed">← Prev</span>
+        @else
+            <a href="{{ $atRiskStudents->previousPageUrl() }}" class="px-3 py-1 rounded border hover:bg-gray-50 text-gray-600">← Prev</a>
+        @endif
+        <span class="px-3 py-1 rounded border bg-brand-700 text-white font-medium">{{ $atRiskStudents->currentPage() }}</span>
+        @if($atRiskStudents->hasMorePages())
+            <a href="{{ $atRiskStudents->nextPageUrl() }}" class="px-3 py-1 rounded border hover:bg-gray-50 text-gray-600">Next →</a>
+        @else
+            <span class="px-3 py-1 rounded border text-gray-300 cursor-not-allowed">Next →</span>
+        @endif
+    </div>
+    <span class="text-xs">Showing {{ $atRiskStudents->firstItem() }}–{{ $atRiskStudents->lastItem() }} of <x-count-label :count="$atRiskStudents->total()" noun="student" /></span>
+</div>
+@endif

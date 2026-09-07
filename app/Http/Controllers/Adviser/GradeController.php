@@ -12,6 +12,8 @@ use App\Imports\GradesImport;
 use App\Helpers\LogActivity;
 use App\Services\GradingEngine;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Maatwebsite\Excel\Facades\Excel;
 
 /**
@@ -234,27 +236,96 @@ class GradeController extends Controller
 
         $subject = Subject::forSection($section)->where('id', $request->subject_id)->first();
         if (!$subject) {
-            return back()->with('error', 'That subject is not offered to your section.');
+            return $this->verifyFailureResponse($request, 'That subject is not offered to your section.');
         }
 
         $student = Student::where('id', $request->student_id)->where('section_id', $section->id)->first();
         if (!$student) {
-            return back()->with('error', 'That student is not in your section.');
+            return $this->verifyFailureResponse($request, 'That student is not in your section.');
         }
 
         if (!AcademicTerm::isOpen($section->school_year, $gradingPeriod)) {
-            return back()->with('error', 'Term ' . $gradingPeriod . ' is currently closed for encoding. Contact the admin.');
+            return $this->verifyFailureResponse($request, 'Term ' . $gradingPeriod . ' is currently closed for encoding. Contact the admin.');
         }
 
+        $outcome = $this->verifyOneGrade($student, $subject, $section, $gradingPeriod);
+
+        if (!$outcome['success']) {
+            return $this->verifyFailureResponse($request, $outcome['message']);
+        }
+
+        // TASK 3 of "UI cleanup and correctness pass" — a JS-driven
+        // caller (the row's own fetch() submit) asks for JSON via the
+        // Accept header and updates just that row in place, instead of
+        // the full-page redirect a non-JS submit still gets below. Same
+        // business logic either way — this only branches on response
+        // shape, never recomputes or re-validates anything differently.
+        if ($request->expectsJson()) {
+            return response()->json([
+                'student_id'     => $student->id,
+                'official_grade' => $outcome['result']['transmuted_grade'],
+                'computed_grade' => $outcome['result']['computed_grade'],
+                'provisional'    => $outcome['is_provisional'],
+                'is_failing'     => \App\Services\InTermStatusService::isFailing($outcome['grade']),
+                'message'        => $outcome['message'],
+            ]);
+        }
+
+        return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
+            ->with('success', $outcome['message']);
+    }
+
+    /**
+     * TASK 1 of "workflow completion pass" — the same mechanical
+     * transformation as verifyComputedGrade() (computed grade -> official
+     * grade via the subject's real transmutation table), extracted so
+     * verifyAllRemaining() below can reuse it verbatim rather than
+     * duplicating the computation/transmutation/write logic. Writes
+     * exactly one Grade row and exactly one LogActivity entry per call —
+     * callers that verify many students must call this once per student,
+     * never batch the logging.
+     *
+     * Does NOT check whether an official grade already exists — that
+     * exclusion is the CALLER's responsibility (see
+     * classifyForVerifyAll()'s "already encoded" bucket), since
+     * overwriting an existing official grade must stay an individual,
+     * deliberate act reached only through this same method via the
+     * single-student endpoint above, never through the batch path.
+     *
+     * @return array{success: bool, message: string, result?: array, is_provisional?: bool, grade?: Grade}
+     */
+    private function verifyOneGrade(Student $student, Subject $subject, Section $section, int $gradingPeriod): array
+    {
         $result = $this->gradingEngine->computeGrade($student, $subject, $section, $gradingPeriod, $section->school_year);
 
         if (!$result['complete']) {
-            return back()->with('error',
-                'Cannot verify — assessment evidence for ' . $subject->name . ' is not complete yet (a component has no scores).'
-            );
+            return [
+                'success' => false,
+                'message' => 'Cannot verify — assessment evidence for ' . $subject->name . ' is not complete yet (a component has no scores).',
+            ];
         }
 
-        Grade::updateOrCreate(
+        // TASK 2 of "terminology, transmutation, and interface cleanup" —
+        // grades.grade must hold the TRANSMUTED grade (see the comment
+        // below); when the section's scheme has no band data for this
+        // computed grade yet (see TransmutationRangesSeeder's TODO),
+        // there is nothing correct to write, so verification is blocked
+        // rather than writing a fabricated or wrong value.
+        if (!$result['transmutation_available']) {
+            return [
+                'success' => false,
+                'message' => 'Cannot verify — no transmuted grade is available yet for the ' . $result['transmutation_scheme'] .
+                    ' scheme at a computed grade of ' . $result['computed_grade'] . '. The transmutation table for this ' .
+                    'curriculum has not been entered by the system administrator yet.',
+            ];
+        }
+
+        // TASK 1 of "unblock verification" — a fallback-produced transmuted
+        // grade (see config('dss.transmutation_fallback_scheme')) must be
+        // stored as findable, never indistinguishable from a real one.
+        $isProvisional = $result['transmutation_provisional'];
+
+        $grade = Grade::updateOrCreate(
             [
                 'student_id'     => $student->id,
                 'subject_id'     => $subject->id,
@@ -263,23 +334,223 @@ class GradeController extends Controller
                 'school_year'    => $section->school_year,
             ],
             [
-                'grade'          => $result['computed_grade'],
-                'computed_grade' => $result['computed_grade'],
-                'is_verified'    => true,
-                'verified_at'    => now(),
-                'encoded_by'     => auth()->id(),
+                // The TRANSMUTED grade is the reported grade — grade.grade
+                // must never hold the raw weighted percentage. computed_grade
+                // keeps the raw value unchanged, since that's what the
+                // component analysis / risk classifier read (see
+                // TransmutationService and GradingEngine).
+                'grade'               => $result['transmuted_grade'],
+                'computed_grade'      => $result['computed_grade'],
+                'is_verified'         => true,
+                'verified_at'         => now(),
+                'encoded_by'          => auth()->id(),
+                'is_provisional'      => $isProvisional,
+                'provisional_scheme'  => $isProvisional ? $result['transmutation_fallback_scheme'] : null,
             ]
         );
 
         LogActivity::log(
             'verify_computed_grade',
-            'Verified computed grade (' . $result['computed_grade'] . ') as official for ' .
+            'Verified computed grade (' . $result['computed_grade'] . ' -> transmuted ' . $result['transmuted_grade'] . ($isProvisional ? ', PROVISIONAL' : '') . ') as official for ' .
                 $student->last_name . ', ' . $student->first_name . ' — ' . $subject->name,
             'grades',
             null
         );
 
-        return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
-            ->with('success', 'Official grade for ' . $student->last_name . ', ' . $student->first_name . ' set to ' . $result['computed_grade'] . '.');
+        $message = 'Official grade for ' . $student->last_name . ', ' . $student->first_name . ' set to ' . $result['transmuted_grade'] . ' (transmuted from a computed grade of ' . $result['computed_grade'] . ').';
+
+        if ($isProvisional) {
+            $message .= ' PROVISIONAL — computed using the ' . \App\Services\TransmutationService::schemeLabel($result['transmutation_fallback_scheme']) .
+                ' table because the ' . \App\Services\TransmutationService::schemeLabel($result['transmutation_scheme']) .
+                ' bands are not yet entered. Recompute once the real table is seeded (php artisan dss:recompute-grades).';
+        }
+
+        return ['success' => true, 'message' => $message, 'result' => $result, 'is_provisional' => $isProvisional, 'grade' => $grade];
+    }
+
+    /**
+     * TASK 1 of "workflow completion pass" — read-only classification of
+     * every student in $section for $subject/$gradingPeriod into exactly
+     * one bucket: eligible for Verify All Remaining, or excluded under
+     * exactly one of three named reasons. Shared by the preview endpoint
+     * (verifyAllRemainingPreview(), which only ever reads) and the actual
+     * batch (verifyAllRemaining()), so the two can never disagree about
+     * who is eligible between the confirmation dialog and the write.
+     *
+     * "Already has an official grade" is checked FIRST and is exclusive
+     * with the other two reasons — an already-verified student is never
+     * also reported as incomplete or missing a transmutation band, since
+     * that distinction doesn't matter once the row is excluded for good.
+     *
+     * @return array{eligible: Collection, excludedAlreadyEncoded: Collection, excludedIncomplete: Collection, excludedNoTransmutation: Collection}
+     */
+    private function classifyForVerifyAll(Section $section, Subject $subject, int $gradingPeriod): array
+    {
+        $students = Student::where('section_id', $section->id)->orderBy('last_name')->get();
+
+        $existingGrades = Grade::where('subject_id', $subject->id)
+            ->where('grading_period', $gradingPeriod)
+            ->where('school_year', $section->school_year)
+            ->whereIn('student_id', $students->pluck('id'))
+            ->get()
+            ->keyBy('student_id');
+
+        $eligible = collect();
+        $excludedAlreadyEncoded = collect();
+        $excludedIncomplete = collect();
+        $excludedNoTransmutation = collect();
+
+        foreach ($students as $student) {
+            $existing = $existingGrades->get($student->id);
+            if ($existing && $existing->is_verified) {
+                $excludedAlreadyEncoded->push($student);
+                continue;
+            }
+
+            $result = $this->gradingEngine->computeGrade($student, $subject, $section, $gradingPeriod, $section->school_year);
+
+            if (!$result['complete']) {
+                $excludedIncomplete->push($student);
+                continue;
+            }
+
+            // 1b: a transmuted grade must be available AND not provisional
+            // — a fallback-scheme value is not the subject's real official
+            // grade, so it is excluded here exactly like "not available".
+            if (!$result['transmutation_available'] || $result['transmutation_provisional']) {
+                $excludedNoTransmutation->push($student);
+                continue;
+            }
+
+            $eligible->push($student);
+        }
+
+        return compact('eligible', 'excludedAlreadyEncoded', 'excludedIncomplete', 'excludedNoTransmutation');
+    }
+
+    /** Student names, last name first — the shape every excluded-reason list in the dialog uses. */
+    private function namesOf(Collection $students): array
+    {
+        return $students->map(fn(Student $s) => $s->last_name . ', ' . $s->first_name)->values()->all();
+    }
+
+    /**
+     * TASK 1d of "workflow completion pass" — read-only preview for the
+     * confirmation dialog: the exact eligible count and every excluded
+     * student grouped by reason, computed but NEVER written. The dialog
+     * must be able to show this before the Adviser commits to anything.
+     */
+    public function verifyAllRemainingPreview(Request $request)
+    {
+        $section = Section::where('adviser_id', auth()->id())->firstOrFail();
+        $gradingPeriod = (int) $request->input('grading_period', 1);
+
+        $request->validate(['subject_id' => 'required|exists:subjects,id']);
+
+        // TASK 1f — scoped to THIS adviser's own section via
+        // Subject::forSection($section): a subject_id for a subject not
+        // offered to this section (including one belonging entirely to
+        // another section's track/grade level) never resolves, so a
+        // crafted request naming a foreign subject_id gets exactly the
+        // same 403 a foreign section_id would.
+        $subject = Subject::forSection($section)->where('id', $request->subject_id)->first();
+        abort_if(!$subject, 403);
+
+        $classification = $this->classifyForVerifyAll($section, $subject, $gradingPeriod);
+
+        return response()->json([
+            'eligible_count'   => $classification['eligible']->count(),
+            'subject_name'     => $subject->name,
+            'section_name'     => $section->name,
+            'grading_period'   => $gradingPeriod,
+            'term_open'        => AcademicTerm::isOpen($section->school_year, $gradingPeriod),
+            'excluded'         => [
+                'already_encoded'     => $this->namesOf($classification['excludedAlreadyEncoded']),
+                'incomplete_evidence' => $this->namesOf($classification['excludedIncomplete']),
+                'no_transmutation'    => $this->namesOf($classification['excludedNoTransmutation']),
+            ],
+        ]);
+    }
+
+    /**
+     * TASK 1e/1f of "workflow completion pass" — the actual batch write.
+     * Re-classifies fresh (never trusts a client-submitted eligible list
+     * — state could have changed since the preview was shown) inside a
+     * single transaction; verifyOneGrade() is called once per eligible
+     * student, so one Grade row and one LogActivity entry are written per
+     * student, never one entry for the whole batch. Any failure among
+     * the eligible rows (verifyOneGrade() reporting !success — should not
+     * happen given they were JUST classified as eligible, but the
+     * transaction exists precisely so a race never leaves a half-verified
+     * section behind) rolls back every write from this request.
+     */
+    public function verifyAllRemaining(Request $request)
+    {
+        $section = Section::where('adviser_id', auth()->id())->firstOrFail();
+        $gradingPeriod = (int) $request->input('grading_period', 1);
+
+        $request->validate(['subject_id' => 'required|exists:subjects,id']);
+
+        $subject = Subject::forSection($section)->where('id', $request->subject_id)->first();
+        abort_if(!$subject, 403);
+
+        if (!AcademicTerm::isOpen($section->school_year, $gradingPeriod)) {
+            return response()->json(['message' => 'Term ' . $gradingPeriod . ' is currently closed for encoding. Contact the admin.'], 422);
+        }
+
+        $classification = $this->classifyForVerifyAll($section, $subject, $gradingPeriod);
+        $eligible = $classification['eligible'];
+
+        if ($eligible->isEmpty()) {
+            return response()->json(['message' => 'No students are currently eligible to verify.'], 422);
+        }
+
+        $verifiedRows = [];
+
+        try {
+            DB::transaction(function () use ($eligible, $subject, $section, $gradingPeriod, &$verifiedRows) {
+                foreach ($eligible as $student) {
+                    $outcome = $this->verifyOneGrade($student, $subject, $section, $gradingPeriod);
+
+                    if (!$outcome['success']) {
+                        throw new \RuntimeException($student->last_name . ', ' . $student->first_name . ' — ' . $outcome['message']);
+                    }
+
+                    $verifiedRows[] = [
+                        'student_id'     => $student->id,
+                        'official_grade' => $outcome['result']['transmuted_grade'],
+                        'computed_grade' => $outcome['result']['computed_grade'],
+                        'provisional'    => $outcome['is_provisional'],
+                        // "The Failing layer" — computed via the single
+                        // shared rule (InTermStatusService::isFailing()),
+                        // never re-derived from a "<= 74" comparison here.
+                        'is_failing'     => \App\Services\InTermStatusService::isFailing($outcome['grade']),
+                    ];
+                }
+            });
+        } catch (\RuntimeException $e) {
+            // 1e: a half-verified section is worse than an unverified one
+            // — the transaction above already rolled back every write
+            // this request made, so nothing partial survives.
+            return response()->json([
+                'message' => 'Verification stopped and nothing was saved — ' . $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'verified_count' => count($verifiedRows),
+            'verified'       => $verifiedRows,
+            'message'        => 'Verified ' . count($verifiedRows) . ' student' . (count($verifiedRows) === 1 ? '' : 's') . '.',
+        ]);
+    }
+
+    /** JSON error for a fetch()-driven verify submit; redirect-with-error for a normal form submit — see verifyComputedGrade(). */
+    private function verifyFailureResponse(Request $request, string $message)
+    {
+        if ($request->expectsJson()) {
+            return response()->json(['message' => $message], 422);
+        }
+
+        return back()->with('error', $message);
     }
 }

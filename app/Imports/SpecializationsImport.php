@@ -9,6 +9,8 @@ use Maatwebsite\Excel\Concerns\SkipsOnFailure;
 use Maatwebsite\Excel\Concerns\ToModel;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Maatwebsite\Excel\Concerns\WithValidation;
+use Maatwebsite\Excel\Concerns\WithChunkReading;
+use Maatwebsite\Excel\Concerns\WithBatchInserts;
 
 /**
  * Bulk specialization import.
@@ -18,12 +20,36 @@ use Maatwebsite\Excel\Concerns\WithValidation;
  * specializations.track_id is NOT NULL in the schema (every specialization
  * belongs to exactly one track), so a track that doesn't resolve is a
  * validation failure, not silently left null.
+ *
+ * WithChunkReading/WithBatchInserts (200 rows at a time) — see
+ * StudentsImport's class docblock for why $seenNameByTrack/$seenCodes
+ * below live on $this rather than as closure-locals in withValidator():
+ * once chunking is active, that closure only ever sees the current
+ * chunk's rows.
  */
-class SpecializationsImport implements ToModel, WithHeadingRow, WithValidation, SkipsOnFailure
+class SpecializationsImport implements ToModel, WithHeadingRow, WithValidation, SkipsOnFailure, WithChunkReading, WithBatchInserts
 {
     use SkipsFailures;
 
+    private const CHUNK_SIZE = 200;
+
     public int $importedCount = 0;
+
+    /** "track_id|name" pairs already seen during this import run, across every chunk. */
+    private array $seenNameByTrack = [];
+
+    /** Specialization codes already seen during this import run, across every chunk. */
+    private array $seenCodes = [];
+
+    public function chunkSize(): int
+    {
+        return self::CHUNK_SIZE;
+    }
+
+    public function batchSize(): int
+    {
+        return self::CHUNK_SIZE;
+    }
 
     public function model(array $row)
     {
@@ -69,9 +95,6 @@ class SpecializationsImport implements ToModel, WithHeadingRow, WithValidation, 
     public function withValidator($validator)
     {
         $validator->after(function ($validator) {
-            $seenNameByTrack = [];
-            $seenCodes = [];
-
             foreach ($validator->getData() as $index => $row) {
                 $name = strtolower(trim($row['name'] ?? ''));
                 $code = strtolower(trim($row['code'] ?? ''));
@@ -89,19 +112,19 @@ class SpecializationsImport implements ToModel, WithHeadingRow, WithValidation, 
 
                 $nameKey = $track->id . '|' . $name;
 
-                if (isset($seenNameByTrack[$nameKey])) {
+                if (isset($this->seenNameByTrack[$nameKey])) {
                     $validator->errors()->add("{$index}.name", 'This specialization name appears more than once for this track in the uploaded file.');
                 } else {
-                    $seenNameByTrack[$nameKey] = true;
+                    $this->seenNameByTrack[$nameKey] = true;
                     if (Specialization::where('track_id', $track->id)->whereRaw('LOWER(name) = ?', [$name])->exists()) {
                         $validator->errors()->add("{$index}.name", 'A specialization with this name already exists under this track.');
                     }
                 }
 
-                if (isset($seenCodes[$code])) {
+                if (isset($this->seenCodes[$code])) {
                     $validator->errors()->add("{$index}.code", 'This specialization code appears more than once in the uploaded file.');
                 } else {
-                    $seenCodes[$code] = true;
+                    $this->seenCodes[$code] = true;
                     if (Specialization::whereRaw('LOWER(code) = ?', [$code])->exists()) {
                         $validator->errors()->add("{$index}.code", 'A specialization with this code already exists.');
                     }

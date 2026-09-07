@@ -7,6 +7,7 @@ use App\Models\AssessmentScore;
 use App\Models\Intervention;
 use App\Models\Section;
 use App\Models\Student;
+use App\Models\Subject;
 use App\Models\User;
 use App\Services\DashboardAnalyticsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -77,6 +78,62 @@ class PrincipalDashboardSummaryTest extends TestCase
         $response->assertSee('Under Intervention');
         $response->assertSee('Assessment Completion');
         $response->assertViewHas('under_intervention', 1);
+    }
+
+    /**
+     * TASK 7 of "terminology, transmutation, and interface cleanup" — the
+     * "refresh, not real-time" approach only works if a plain reload
+     * actually shows fresh numbers. Every dashboard number is recomputed
+     * from the database on each GET (no cache layer anywhere in
+     * DashboardAnalyticsService), so recording an intervention and then
+     * loading the dashboard again — no websocket, no polling — must show
+     * the updated count.
+     */
+    public function test_recording_an_intervention_as_a_recommendation_only_updates_the_dashboard_count_on_the_next_load(): void
+    {
+        $principal = User::factory()->principal()->create();
+        $student = Student::factory()->create();
+        $subject = Subject::factory()->create();
+
+        $before = $this->actingAs($principal)->get('/principal/dashboard');
+        $before->assertViewHas('awaiting_decision', 0);
+
+        // "Decision flow, report scoping, and dashboard pass" TASK 1a —
+        // recording an intervention now IS the decision by default, so
+        // the awaiting-decision count only grows via the explicit
+        // deferred-decision checkbox.
+        $this->actingAs($principal)->post('/principal/interventions', [
+            'student_id'           => $student->id,
+            'subject_id'           => $subject->id,
+            'grading_period'       => 1,
+            'recommended_type'     => Intervention::TYPES[0],
+            'recommendation_only'  => '1',
+        ])->assertRedirect();
+
+        $after = $this->actingAs($principal)->get('/principal/dashboard');
+        $after->assertViewHas('awaiting_decision', 1);
+    }
+
+    /**
+     * "Decision flow, report scoping, and dashboard pass" TASK 1a — the
+     * normal path (no checkbox ticked) decides on creation, so it must
+     * NOT show up as awaiting a decision.
+     */
+    public function test_recording_an_intervention_normally_does_not_increase_the_awaiting_decision_count(): void
+    {
+        $principal = User::factory()->principal()->create();
+        $student = Student::factory()->create();
+        $subject = Subject::factory()->create();
+
+        $this->actingAs($principal)->post('/principal/interventions', [
+            'student_id'       => $student->id,
+            'subject_id'       => $subject->id,
+            'grading_period'   => 1,
+            'recommended_type' => Intervention::TYPES[0],
+        ])->assertRedirect();
+
+        $after = $this->actingAs($principal)->get('/principal/dashboard');
+        $after->assertViewHas('awaiting_decision', 0);
     }
 
     public function test_admin_dashboard_does_not_show_principal_only_cards(): void

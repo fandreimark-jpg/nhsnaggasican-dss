@@ -30,7 +30,14 @@ class GradingEngineTest extends TestCase
     {
         parent::setUp();
         $this->engine  = new GradingEngine();
-        $this->section = Section::factory()->create(['school_year' => '2026-2027']);
+        // grade_level pinned to 12 (not the factory's random 11/12) —
+        // TASK 2 of "terminology, transmutation, and interface cleanup"
+        // wired scheme selection to grade level + school year, and this
+        // suite's `do8_2015` assertions must stay deterministic rather
+        // than flipping to `do015_2026` on a random Grade 11 roll. Grade
+        // 12 in SY 2026-2027 correctly stays on do8_2015 either way — see
+        // TransmutationServiceSchemeTest for Grade 11's do015_2026 wiring.
+        $this->section = Section::factory()->create(['school_year' => '2026-2027', 'grade_level' => 12]);
         $this->subject = Subject::factory()->create();
         $this->student = Student::factory()->create(['section_id' => $this->section->id]);
     }
@@ -169,6 +176,111 @@ class GradingEngineTest extends TestCase
         $result = $this->compute();
 
         $this->assertEquals(80.0, $result['components']['written_work']);
+    }
+
+    /**
+     * Task 2 in the "remaining system issues" prompt: wiring
+     * TransmutationService into GradingEngine must never change
+     * computed_grade — the risk classifier and the component analysis
+     * both read it, and their inputs must not shift. transmuted_grade
+     * is a genuinely NEW, additional field alongside it, not a
+     * replacement.
+     */
+    public function test_computed_grade_is_unchanged_and_transmuted_grade_is_the_do8_2015_value(): void
+    {
+        $this->seed(\Database\Seeders\TransmutationRangesSeeder::class);
+
+        $this->score('written_work', 84, 100);
+        $this->score('performance_task', 60, 100);
+        $this->score('examination', 70, 100);
+
+        $result = $this->compute();
+
+        $this->assertEquals(68.5, $result['computed_grade'], 'computed_grade must be exactly what it was before transmutation was wired in.');
+        $this->assertEquals(80.0, $result['transmuted_grade'], '68.5 falls in the DO 8, s. 2015 band 68.00-69.59, which transmutes to 80.');
+    }
+
+    /**
+     * TASK 2 of "terminology, transmutation, and interface cleanup" —
+     * Grade 11 in SY 2026-2027 resolves to the do015_2026 scheme, which
+     * is now fully seeded 0.00-100.00 (Do015TransmutationSeeder). A
+     * computed grade of exactly 70.00 lands on its passing anchor band
+     * (70.00-71.17 -> 75).
+     */
+    public function test_grade_11_sy_2026_2027_resolves_to_do015_2026_and_transmutes_its_seeded_anchor(): void
+    {
+        $this->seed(\Database\Seeders\TransmutationRangesSeeder::class);
+        $this->seed(\Database\Seeders\Do015TransmutationSeeder::class);
+
+        $grade11Section = Section::factory()->create(['school_year' => '2026-2027', 'grade_level' => 11]);
+        $student = Student::factory()->create(['section_id' => $grade11Section->id]);
+
+        // WW=70 (17.5) + PT=70 (35) + Exam=70 (17.5) = 70.00 exactly —
+        // the one seeded do015_2026 anchor.
+        foreach (['written_work', 'performance_task', 'examination'] as $component) {
+            $assessment = Assessment::factory()->create([
+                'subject_id' => $this->subject->id, 'section_id' => $grade11Section->id,
+                'grading_period' => 1, 'school_year' => '2026-2027',
+                'name' => $component . '-' . uniqid(), 'component' => $component, 'max_score' => 100,
+            ]);
+            AssessmentScore::factory()->create(['assessment_id' => $assessment->id, 'student_id' => $student->id, 'score' => 70]);
+        }
+
+        $result = $this->engine->computeGrade($student, $this->subject, $grade11Section, 1, '2026-2027');
+
+        $this->assertSame('do015_2026', $result['transmutation_scheme']);
+        $this->assertEquals(70.0, $result['computed_grade']);
+        $this->assertTrue($result['transmutation_available']);
+        $this->assertEquals(75.0, $result['transmuted_grade']);
+    }
+
+    /**
+     * The do015_2026 scheme has only one seeded band (see above) — any
+     * OTHER computed grade under it must come back with NO transmuted
+     * grade, never a silently-wrong fallback value.
+     */
+    public function test_grade_11_sy_2026_2027_off_the_seeded_anchor_has_no_transmuted_grade(): void
+    {
+        $this->seed(\Database\Seeders\TransmutationRangesSeeder::class);
+
+        $grade11Section = Section::factory()->create(['school_year' => '2026-2027', 'grade_level' => 11]);
+        $student = Student::factory()->create(['section_id' => $grade11Section->id]);
+
+        // WW=84 + PT=60 + Exam=70 -> under do015_2026's core_academic
+        // weights (20/50/30 — this->subject has no subject_group
+        // override, defaulting to 'core_academic'): 84*.20 + 60*.50 +
+        // 70*.30 = 16.8 + 30 + 21 = 67.8, which does not match
+        // do015_2026's single seeded band (70.00-70.00 only).
+        foreach ([['written_work', 84], ['performance_task', 60], ['examination', 70]] as [$component, $score]) {
+            $assessment = Assessment::factory()->create([
+                'subject_id' => $this->subject->id, 'section_id' => $grade11Section->id,
+                'grading_period' => 1, 'school_year' => '2026-2027',
+                'name' => $component . '-' . uniqid(), 'component' => $component, 'max_score' => 100,
+            ]);
+            AssessmentScore::factory()->create(['assessment_id' => $assessment->id, 'student_id' => $student->id, 'score' => $score]);
+        }
+
+        $result = $this->engine->computeGrade($student, $this->subject, $grade11Section, 1, '2026-2027');
+
+        $this->assertSame('do015_2026', $result['transmutation_scheme']);
+        $this->assertEquals(67.8, $result['computed_grade'], 'computed_grade must still be populated even when transmutation is unavailable.');
+        $this->assertFalse($result['transmutation_available']);
+        $this->assertNull($result['transmuted_grade'], 'A wrong transmuted grade is worse than a missing one — must be null, never a fabricated fallback.');
+    }
+
+    public function test_grade_12_sy_2026_2027_stays_on_do8_2015(): void
+    {
+        $this->seed(\Database\Seeders\TransmutationRangesSeeder::class);
+
+        $this->score('written_work', 84, 100);
+        $this->score('performance_task', 60, 100);
+        $this->score('examination', 70, 100);
+
+        $result = $this->compute();
+
+        $this->assertSame('do8_2015', $result['transmutation_scheme']);
+        $this->assertTrue($result['transmutation_available']);
+        $this->assertEquals(80.0, $result['transmuted_grade']);
     }
 
     public function test_decimal_rounding_to_two_places(): void

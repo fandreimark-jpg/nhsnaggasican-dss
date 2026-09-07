@@ -156,6 +156,37 @@ class StudentsImportTest extends TestCase
         $this->assertSame(1, Student::where('lrn', '100000000008')->count());
     }
 
+    /**
+     * StudentsImport::CHUNK_SIZE is 200 — Maatwebsite validates each
+     * chunk as its own batch once WithChunkReading is active, so a
+     * duplicate LRN whose two occurrences land in DIFFERENT chunks is
+     * exactly the case that would slip past validation if duplicate
+     * detection relied on Laravel's 'distinct' rule (which only ever
+     * sees the current chunk) instead of the $seenLrns instance state
+     * withValidator() accumulates across the whole file. This file has
+     * 250 rows — comfortably past one chunk boundary.
+     */
+    public function test_duplicate_lrn_across_a_chunk_boundary_is_still_caught(): void
+    {
+        $adviser = User::factory()->create();
+        $section = Section::factory()->create(['adviser_id' => $adviser->id]);
+
+        $rows = [];
+        for ($i = 1; $i <= 250; $i++) {
+            $lrn = str_pad((string) (800000000000 + $i), 12, '0', STR_PAD_LEFT);
+            $rows[] = [$lrn, "Last{$i}", "First{$i}", '', 'male', '2008-01-01'];
+        }
+        // Row 220 (chunk 2, since chunk size is 200) reuses row 1's LRN
+        // (chunk 1) — a genuine cross-chunk duplicate.
+        $rows[219][0] = $rows[0][0];
+
+        $import = $this->importCsv($section, $rows);
+
+        $this->assertCount(1, $import->failures(), 'The cross-chunk duplicate must still be caught as exactly one failure.');
+        $this->assertSame(249, Student::where('section_id', $section->id)->count());
+        $this->assertSame(1, Student::where('lrn', $rows[0][0])->count());
+    }
+
     public function test_students_are_always_assigned_to_the_importing_advisers_section(): void
     {
         // Security measure documented on StudentsImport::model() — the

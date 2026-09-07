@@ -78,7 +78,7 @@ class PrincipalStudentDrilldownTest extends TestCase
         $response = $this->actingAs($principal)->get('/principal/students/' . $student->id);
 
         $response->assertOk();
-        $response->assertSee('Remediation');
+        $response->assertSee('Additional Practice and Re-teaching');
         $response->assertSee('Approved');
     }
 

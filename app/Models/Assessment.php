@@ -16,8 +16,23 @@ use Illuminate\Database\Eloquent\Model;
  * nothing here writes to it.
  *
  * `component` (written_work/performance_task/examination) is the
- * VERIFIED classification — see AssessmentComponent for where each
- * component's weight toward the final grade is configured.
+ * VERIFIED classification — see AssessmentComponent for the fixed list
+ * of components, and SubjectGroupWeight for where each component's
+ * weight toward the final grade is actually configured (it varies by
+ * scheme and by the subject's subject_group, not a single flat default).
+ *
+ * `exam_role` (st1/st2/term_exam, nullable) applies only when `component`
+ * is 'examination' — see ExamRoleShare and GradingEngine's
+ * examinationPercentage() for how it's weighted within the component.
+ *
+ * `is_additional_support` (default false) — "Workflow completion pass"
+ * TASK 3: whether this item is within-term additional support (a
+ * re-teach quiz, an extra activity) rather than a regular planned item.
+ * Set explicitly by the Adviser on the Verify screen or the Add
+ * Assessment Item form — never inferred from the item's name. Display
+ * only: it still contributes its full points to the term total exactly
+ * like any other item — see CLAUDE.md's "Known limitations" open policy
+ * question this column exists to make visible, not resolve.
  */
 class Assessment extends Model
 {
@@ -31,6 +46,8 @@ class Assessment extends Model
         'name',
         'assessment_type',
         'component',
+        'exam_role',
+        'is_additional_support',
         'max_score',
         'import_batch_id',
         'uploaded_by',
@@ -38,6 +55,7 @@ class Assessment extends Model
 
     protected $casts = [
         'max_score' => 'decimal:2',
+        'is_additional_support' => 'boolean',
     ];
 
     // =============================================
@@ -63,17 +81,5 @@ class Assessment extends Model
     public function scores()
     {
         return $this->hasMany(AssessmentScore::class);
-    }
-
-    // =============================================
-    // HELPERS
-    // =============================================
-
-    /** This item's configured weight toward the final grade (looked up by its component key) */
-    public function componentWeight(): ?float
-    {
-        $component = AssessmentComponent::where('key', $this->component)->first();
-
-        return $component ? (float) $component->weight : null;
     }
 }

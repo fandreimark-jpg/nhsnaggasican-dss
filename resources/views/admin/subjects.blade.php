@@ -5,22 +5,29 @@
 
 @section('content')
 
-@if(session('import_errors'))
-<div class="bg-yellow-100 text-yellow-800 text-sm p-4 rounded-lg mb-4">
-    <p class="font-medium mb-1">{{ session('warning') }}</p>
-    <ul class="list-disc list-inside">
-        @foreach(session('import_errors') as $error)
-            <li>{{ $error }}</li>
-        @endforeach
-    </ul>
-</div>
-@endif
+@php
+    // DO 015, s. 2026's subject group names — purely a display label for
+    // the slug stored in subject_group_weights/subjects.subject_group,
+    // never a weight or share itself. A group not in this map (a future
+    // scheme's addition) still renders a readable fallback.
+    $subjectGroupLabels = [
+        'core_academic'        => 'Core Academic',
+        'field_exposure'       => 'Field Exposure',
+        'arts_sports_wellness' => 'Arts, Sports & Wellness',
+        'research_innovation'  => 'Research/Innovation',
+        'techpro'              => 'Tech-Pro',
+        'work_immersion'       => 'Work Immersion',
+    ];
+    $subjectGroupLabel = fn($group) => $subjectGroupLabels[$group] ?? ucwords(str_replace('_', ' ', $group ?? ''));
+@endphp
+
+@include('partials.import-result')
 
 <div class="bg-white rounded-xl shadow-sm mb-0">
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 px-6 py-4 border-b">
         <div>
             <h2 class="text-sm font-semibold text-gray-800">All Subjects</h2>
-            <p class="text-xs text-gray-400">{{ $subjects->count() }} total subjects</p>
+            <p class="text-xs text-gray-400"><x-count-label :count="$subjects->count()" noun="subject" total /></p>
         </div>
         <div class="flex items-center gap-3 flex-wrap">
             <div class="flex gap-2">
@@ -48,15 +55,17 @@
         </div>
     </div>
 
-    <table class="w-full text-sm" id="subjectTable">
+    <div class="overflow-x-auto">
+    <table class="w-full min-w-full text-sm" id="subjectTable">
         <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
             <tr>
-                <th class="text-left px-6 py-3">Subject Name</th>
-                <th class="text-left px-6 py-3">Type</th>
-                <th class="text-left px-6 py-3">Grade Level</th>
-                <th class="text-left px-6 py-3">Track</th>
-                <th class="text-left px-6 py-3">Specialization</th>
-                <th class="px-6 py-3 text-right">Actions</th>
+                <th scope="col" class="text-left px-6 py-3">Subject Name</th>
+                <th scope="col" class="text-left px-6 py-3">Type</th>
+                <th scope="col" class="text-left px-6 py-3">Grade Level</th>
+                <th scope="col" class="text-left px-6 py-3">Subject Group</th>
+                <th scope="col" class="text-left px-6 py-3">Track</th>
+                <th scope="col" class="text-left px-6 py-3">Specialization</th>
+                <th scope="col" class="px-6 py-3 text-right">Actions</th>
             </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
@@ -71,37 +80,41 @@
                     @endif
                 </td>
                 <td class="px-6 py-3 text-gray-600">Grade {{ $subject->grade_level }}</td>
+                <td class="px-6 py-3 text-gray-600">{{ $subjectGroupLabel($subject->subject_group) }}</td>
                 <td class="px-6 py-3 text-gray-600">{{ $subject->track->name ?? '—' }}</td>
                 <td class="px-6 py-3 text-gray-600">{{ $subject->specialization->name ?? '—' }}</td>
-                <td class="px-6 py-3 text-right space-x-2">
-                    <button type="button"
-                        onclick='openEditSubjectModal(@json($subject))'
-                        class="inline-flex items-center gap-1 text-brand-600 hover:text-brand-800 text-xs font-medium border border-brand-200 rounded px-2 py-1 hover:bg-brand-50">
-                        <i class="bi bi-pencil-square"></i> Edit
-                    </button>
-                    <form method="POST"
-                          action="{{ route('admin.subjects.destroy', $subject->id) }}"
-                          class="inline"
-                          data-confirm="Delete subject {{ $subject->name }}?">
-                        @csrf
-                        @method('DELETE')
-                        <button type="submit"
-                            class="inline-flex items-center gap-1 text-red-600 hover:text-red-800 text-xs font-medium border border-red-200 rounded px-2 py-1 hover:bg-red-50">
-                            <i class="bi bi-trash"></i> Delete
+                <td class="px-6 py-3 text-right">
+                    <div class="flex items-center justify-end gap-2">
+                        <button type="button"
+                            onclick='openEditSubjectModal(@json($subject))'
+                            class="inline-flex items-center gap-1 text-brand-600 hover:text-brand-800 text-xs font-medium border border-brand-200 rounded px-2 py-1 hover:bg-brand-50 whitespace-nowrap">
+                            <i class="bi bi-pencil-square"></i> Edit
                         </button>
-                    </form>
+                        <form method="POST"
+                              action="{{ route('admin.subjects.destroy', $subject->id) }}"
+                              class="inline"
+                              data-confirm="Delete subject {{ $subject->name }}?">
+                            @csrf
+                            @method('DELETE')
+                            <button type="submit"
+                                class="inline-flex items-center gap-1 text-red-600 hover:text-red-800 text-xs font-medium border border-red-200 rounded px-2 py-1 hover:bg-red-50 whitespace-nowrap">
+                                <i class="bi bi-trash"></i> Delete
+                            </button>
+                        </form>
+                    </div>
                 </td>
             </tr>
             @empty
             <tr>
-                <td colspan="6" class="px-6 py-8 text-center text-gray-400">
-                    <i class="bi bi-book text-2xl block mb-2"></i>
-                    No subjects yet.
+                <td colspan="7">
+                    <x-empty-state message="No subjects yet." icon="bi-book"
+                        hint="Use &quot;Add Subject&quot; or &quot;Import Subjects&quot; above to get started." />
                 </td>
             </tr>
             @endforelse
         </tbody>
     </table>
+    </div>
 
     <div id="noSubjectResults" class="hidden px-6 py-8 text-center text-gray-400">
         <i class="bi bi-search text-2xl block mb-2"></i>
@@ -116,7 +129,7 @@
         <div class="flex justify-between items-center mb-4">
             <h3 id="modalTitle" class="text-lg font-semibold text-gray-800">Add Subject</h3>
             <button type="button" onclick="closeSubjectModal()"
-                    class="text-gray-400 hover:text-gray-600">✕</button>
+                    aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         <form id="subjectForm" method="POST" class="space-y-4"
@@ -151,6 +164,19 @@
                         <option value="12">Grade 12</option>
                     </select>
                 </div>
+            </div>
+
+            <div>
+                <label class="block text-sm text-gray-600 mb-1">
+                    Subject Group
+                    <span class="text-gray-400 text-xs">(DO 015, s. 2026 grading weight group)</span>
+                </label>
+                <select name="subject_group" id="subjectGroupField" required
+                        class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                    @foreach($subjectGroups as $group)
+                        <option value="{{ $group }}">{{ $subjectGroupLabel($group) }}</option>
+                    @endforeach
+                </select>
             </div>
 
             <div id="trackFields" class="hidden space-y-4">
@@ -197,7 +223,7 @@
 
         <div class="flex justify-between items-center mb-4">
             <h3 class="text-lg font-semibold text-gray-800">Import Subjects</h3>
-            <button type="button" onclick="closeImportSubjectsModal()" class="text-gray-400 hover:text-gray-600">✕</button>
+            <button type="button" onclick="closeImportSubjectsModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         @if($errors->import->any())
@@ -213,7 +239,10 @@
         <p class="text-sm text-gray-500 mb-4">
             Upload an Excel (.xlsx) or CSV file. Required columns:
             <strong>name, type, grade_level</strong>.
-            Optional: <strong>track, specialization</strong> (by name or code —
+            Optional: <strong>subject_group</strong> (defaults to
+            <strong>core_academic</strong> when omitted — the DO 015, s. 2026
+            grading weight group; see the Subject Group column above for the
+            full list), <strong>track, specialization</strong> (by name or code —
             for elective subjects). Type must be <strong>core</strong> or
             <strong>elective</strong>; grade_level must be <strong>11</strong> or <strong>12</strong>.
         </p>

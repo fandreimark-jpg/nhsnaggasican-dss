@@ -8,9 +8,8 @@
 @section('content')
 
 @if(!$section)
-    <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-6 text-center">
-        <p class="text-yellow-700 font-medium">No section assigned yet.</p>
-        <p class="text-yellow-600 text-sm mt-1">Please contact the admin to assign you a section.</p>
+    <div class="bg-yellow-50 border border-yellow-200 rounded-xl">
+        <x-empty-state message="No section assigned yet." hint="An Admin assigns sections to advisers — contact the admin to get one assigned to your account." />
     </div>
 @else
 
@@ -130,15 +129,22 @@
                     <td class="px-6 py-3 font-medium text-gray-800">
                         {{ $row['student']->last_name }}, {{ $row['student']->first_name }}
                     </td>
-                    <td class="px-4 py-3 text-center {{ $row['term1'] && $row['term1'] < 75 ? 'text-red-600 font-semibold' : 'text-gray-700' }}">
-                        {{ $row['term1'] ? number_format($row['term1'], 2) : '—' }}
+                    {{-- "Decision flow, report scoping, and dashboard
+                         pass" TASK 2e — same marking treatment as the
+                         Reports page: a term's grades stay visible once
+                         verified, but a term that hasn't been SUBMITTED
+                         yet is marked, not presented identically to one
+                         that has. --}}
+                    @foreach([1, 2, 3] as $period)
+                    @php
+                        $termValue = $row['term' . $period];
+                        $termSubmitted = $termStatus[$period]['submitted'] ?? false;
+                    @endphp
+                    <td class="px-4 py-3 text-center {{ !$termSubmitted ? 'text-gray-400 italic' : ($termValue && $termValue < 75 ? 'text-red-600 font-semibold' : 'text-gray-700') }}"
+                        @unless($termSubmitted) title="Verified but Term {{ $period }} has not been submitted yet." @endunless>
+                        {{ $termValue ? number_format($termValue, 2) : '—' }}
                     </td>
-                    <td class="px-4 py-3 text-center {{ $row['term2'] && $row['term2'] < 75 ? 'text-red-600 font-semibold' : 'text-gray-700' }}">
-                        {{ $row['term2'] ? number_format($row['term2'], 2) : '—' }}
-                    </td>
-                    <td class="px-4 py-3 text-center {{ $row['term3'] && $row['term3'] < 75 ? 'text-red-600 font-semibold' : 'text-gray-700' }}">
-                        {{ $row['term3'] ? number_format($row['term3'], 2) : '—' }}
-                    </td>
+                    @endforeach
                     <td class="px-4 py-3 text-center">
                         @if($row['term1'] && $row['term2'] && $row['term3'])
                             <span class="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700">Complete</span>
@@ -149,7 +155,9 @@
                 </tr>
                 @empty
                 <tr>
-                    <td colspan="5" class="px-6 py-6 text-center text-gray-400">No students found.</td>
+                    <td colspan="5">
+                        <x-empty-state message="No students in this section yet." hint="An Admin adds students and assigns them to your section." />
+                    </td>
                 </tr>
                 @endforelse
             </tbody>

@@ -1,0 +1,13 @@
+track_name,track_code,specialization_name,specialization_code
+Academic Track,ACAD,Science Technology Engineering and Mathematics,STEM
+Academic Track,ACAD,Humanities and Social Sciences,HUMSS
+Academic Track,ACAD,Accountancy Business and Management,ABM
+Academic Track,ACAD,General Academic Strand,GAS
+Technical-Vocational-Livelihood Track,TVL,Information and Communications Technology,ICT
+Technical-Vocational-Livelihood Track,TVL,Home Economics,HE
+Technical-Vocational-Livelihood Track,TVL,Industrial Arts,IA
+Technical-Vocational-Livelihood Track,TVL,Agri-Fishery Arts,AFA
+Arts and Design Track,ARTS,Dance,DANCE
+Arts and Design Track,ARTS,Media Arts,MEDIA
+Arts and Design Track,ARTS,Theater Arts,THEATER
+Arts and Design Track,ARTS,Visual Arts,VISUAL

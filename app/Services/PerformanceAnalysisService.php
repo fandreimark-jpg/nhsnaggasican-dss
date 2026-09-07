@@ -33,6 +33,11 @@ class PerformanceAnalysisService
      * @return array{
      *     complete: bool,
      *     computed_grade: float|null,
+     *     transmuted_grade: float|null,
+     *     transmutation_scheme: string,
+     *     transmutation_available: bool,
+     *     transmutation_provisional: bool,
+     *     transmutation_fallback_scheme: ?string,
      *     target: float,
      *     components: array<string, array{percentage: float|null, gap: float|null, status: ?string}>,
      *     weakest_component: ?string,
@@ -58,8 +63,22 @@ class PerformanceAnalysisService
         }
 
         return [
-            'complete'          => $grade['complete'],
-            'computed_grade'    => $grade['computed_grade'],
+            'complete'                => $grade['complete'],
+            'computed_grade'          => $grade['computed_grade'],
+            'transmuted_grade'        => $grade['transmuted_grade'],
+            // TASK 2 of "terminology, transmutation, and interface
+            // cleanup" — passed through so the Adviser Assessments and
+            // Principal Students screens can show an explicit "not
+            // available yet" note instead of silently rendering a blank
+            // or fabricated Transmuted cell.
+            'transmutation_scheme'    => $grade['transmutation_scheme'] ?? \App\Services\TransmutationService::DEFAULT_SCHEME,
+            'transmutation_available' => $grade['transmutation_available'] ?? ($grade['transmuted_grade'] !== null),
+            // TASK 1 of "unblock verification" — passed through so the
+            // Adviser Assessments and Principal Students screens can mark
+            // a transmuted grade PROVISIONAL rather than showing it as an
+            // ordinary number. See config('dss.transmutation_fallback_scheme').
+            'transmutation_provisional'     => $grade['transmutation_provisional'] ?? false,
+            'transmutation_fallback_scheme' => $grade['transmutation_fallback_scheme'] ?? null,
             'target'            => $target,
             'components'        => $components,
             'weakest_component' => $this->weakestComponent($components),

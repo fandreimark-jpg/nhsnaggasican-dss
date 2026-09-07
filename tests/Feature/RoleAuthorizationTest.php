@@ -249,4 +249,96 @@ class RoleAuthorizationTest extends TestCase
 
         $this->actingAs($adviser)->get('/adviser/assessments')->assertOk();
     }
+
+    public function test_principal_students_index_renders(): void
+    {
+        $principal = User::factory()->principal()->create();
+
+        $this->actingAs($principal)->get('/principal/students')->assertOk();
+    }
+
+    public function test_adviser_cannot_access_principal_students_index(): void
+    {
+        $adviser = User::factory()->create();
+
+        $this->actingAs($adviser)->get('/principal/students')->assertForbidden();
+    }
+
+    public function test_admin_cannot_access_principal_students_index(): void
+    {
+        $admin = User::factory()->admin()->create();
+
+        $this->actingAs($admin)->get('/principal/students')->assertForbidden();
+    }
+
+    public function test_guest_is_redirected_to_login_from_principal_students_index(): void
+    {
+        $this->get('/principal/students')->assertRedirect(route('login'));
+    }
+
+    public function test_principal_cannot_access_assessment_upload_detect_route(): void
+    {
+        $principal = User::factory()->principal()->create();
+
+        $this->actingAs($principal)->post('/adviser/assessments/detect', [])->assertForbidden();
+    }
+
+    /**
+     * Task 5 of "close the intervention loop" — the adviser gained
+     * read + acknowledge access to interventions in that task; these
+     * confirm the boundary still holds everywhere else. Only the
+     * Principal role has 'interventions.store' / '.update' / '.bulk-store'
+     * routes at all (see routes/web.php's principal group comment: "the
+     * one WRITE surface the Principal role has") — an adviser hitting them
+     * is blocked by 'role:principal' middleware before the controller
+     * ever runs, same as every other principal.* route.
+     */
+    public function test_adviser_cannot_create_an_intervention(): void
+    {
+        $adviser = User::factory()->create();
+
+        $this->actingAs($adviser)->post('/principal/interventions', [
+            'student_id' => 1, 'subject_id' => 1, 'grading_period' => 1, 'recommended_type' => 'remediation',
+        ])->assertForbidden();
+    }
+
+    public function test_adviser_cannot_update_an_interventions_status(): void
+    {
+        $adviser = User::factory()->create();
+        $intervention = \App\Models\Intervention::factory()->create();
+
+        $this->actingAs($adviser)->put('/principal/interventions/' . $intervention->id, [
+            'status' => 'approved',
+        ])->assertForbidden();
+    }
+
+    public function test_adviser_cannot_access_the_bulk_intervention_route(): void
+    {
+        $adviser = User::factory()->create();
+
+        $this->actingAs($adviser)->post('/principal/interventions/bulk', [])->assertForbidden();
+    }
+
+    /** There is no delete route for interventions anywhere — nobody, adviser or Principal, can delete one; this locks that in. */
+    public function test_no_intervention_delete_route_exists_for_any_role(): void
+    {
+        $this->assertFalse(\Illuminate\Support\Facades\Route::has('principal.interventions.destroy'));
+        $this->assertFalse(\Illuminate\Support\Facades\Route::has('adviser.interventions.destroy'));
+    }
+
+    public function test_adviser_cannot_see_interventions_from_another_section(): void
+    {
+        $adviser = \App\Models\User::factory()->create();
+        \App\Models\Section::factory()->create(['adviser_id' => $adviser->id]);
+
+        $otherSection = \App\Models\Section::factory()->create();
+        $otherStudent = \App\Models\Student::factory()->create(['section_id' => $otherSection->id, 'last_name' => 'OtherSectionOnly']);
+        $subject = \App\Models\Subject::factory()->create();
+        \App\Models\Intervention::factory()->create(['student_id' => $otherStudent->id, 'subject_id' => $subject->id]);
+
+        $response = $this->actingAs($adviser)->get('/adviser/interventions');
+
+        $response->assertOk();
+        $response->assertDontSee('OtherSectionOnly');
+    }
 }

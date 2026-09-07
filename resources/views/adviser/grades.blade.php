@@ -10,9 +10,9 @@
 @section('content')
 
 @if(!$section)
-    <div class="bg-white rounded-xl shadow-sm p-8 text-center text-gray-400">
-        <i class="bi bi-exclamation-circle text-2xl block mb-2"></i>
-        No section assigned to your account.
+    <div class="bg-white rounded-xl shadow-sm">
+        <x-empty-state icon="bi-exclamation-circle" message="No section assigned to your account."
+            hint="An Admin assigns sections to advisers — contact the admin to get one assigned." />
     </div>
 @else
 
@@ -26,16 +26,7 @@
 </div>
 @endif
 
-@if(session('warning'))
-<div class="bg-yellow-100 text-yellow-800 text-sm p-4 rounded-lg mb-4">
-    <p class="font-medium mb-1">{{ session('warning') }}</p>
-    <ul class="list-disc list-inside">
-        @foreach(session('import_errors', []) as $error)
-            <li>{{ $error }}</li>
-        @endforeach
-    </ul>
-</div>
-@endif
+@include('partials.import-result')
 
 <div class="bg-white rounded-xl shadow-sm overflow-x-auto">
 
@@ -132,15 +123,19 @@
                                        {{ $isTermOpen ? '' : 'bg-gray-50 text-gray-400 cursor-not-allowed' }}"
                                 placeholder="—"
                             >
+                            @if($existing && $existing->is_provisional)
+                                <span class="block text-[10px] text-amber-600 mt-0.5" title="Computed using the {{ \App\Services\TransmutationService::schemeLabel($existing->provisional_scheme) }} table because the real scheme's bands are not yet entered.">
+                                    <i class="bi bi-exclamation-triangle-fill"></i> Provisional
+                                </span>
+                            @endif
                         </td>
                     @endforeach
                 </tr>
                 @empty
                 <tr>
-                    <td colspan="{{ $subjects->count() + 1 }}"
-                        class="px-6 py-8 text-center text-gray-400">
-                        <i class="bi bi-people text-2xl block mb-2"></i>
-                        No students found in this section.
+                    <td colspan="{{ $subjects->count() + 1 }}">
+                        <x-empty-state icon="bi-people" message="No students in this section yet."
+                            hint="An Admin adds students and assigns them to your section." />
                     </td>
                 </tr>
                 @endforelse
@@ -165,7 +160,7 @@
 
         <div class="flex justify-between items-center mb-4">
             <h3 class="text-lg font-semibold text-gray-800">Import Grades — Term {{ $selectedPeriod }}</h3>
-            <button type="button" onclick="closeGradeImportModal()" class="text-gray-400 hover:text-gray-600">✕</button>
+            <button type="button" onclick="closeGradeImportModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         @if($errors->gradeImport->any())

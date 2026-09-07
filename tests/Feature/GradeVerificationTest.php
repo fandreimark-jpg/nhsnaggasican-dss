@@ -24,6 +24,25 @@ class GradeVerificationTest extends TestCase
 {
     use RefreshDatabase;
 
+    /**
+     * TASK 2 of "terminology, transmutation, and interface cleanup" —
+     * verify() now blocks (rather than silently passing computed_grade
+     * through unchanged) when a scheme has no transmutation_ranges rows
+     * at all, matching real production, where DatabaseSeeder always
+     * seeds do8_2015. Every test below that expects verify() to SUCCEED
+     * needs that real table present, same as production — an unseeded
+     * table was only ever a test-setup gap, not a state that happens
+     * outside tests. grade_level is pinned to 12 on every Section here
+     * (rather than the factory's random 11/12) so these do8_2015
+     * assertions never flip to do015_2026 — see GradingEngineTest for
+     * that scheme's own coverage.
+     */
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->seed(\Database\Seeders\TransmutationRangesSeeder::class);
+    }
+
     private function fullyScore(Section $section, Subject $subject, Student $student, int $term = 1): void
     {
         foreach (['written_work' => 84, 'performance_task' => 60, 'examination' => 70] as $component => $earned) {
@@ -39,7 +58,7 @@ class GradeVerificationTest extends TestCase
     public function test_adviser_can_verify_a_complete_computed_grade_as_official(): void
     {
         $adviser = User::factory()->create();
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027']);
+        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
         $student = Student::factory()->create(['section_id' => $section->id]);
 
@@ -51,17 +70,43 @@ class GradeVerificationTest extends TestCase
         ]);
 
         $response->assertSessionHas('success');
+        // grade holds the TRANSMUTED value (68.5 falls in do8_2015's
+        // 68.00-69.59 band -> 80), never the raw computed_grade — see
+        // test_verify_writes_the_transmuted_grade_not_the_raw_computed_grade
+        // for the dedicated test of that distinction.
         $this->assertDatabaseHas('grades', [
             'student_id' => $student->id, 'subject_id' => $subject->id,
-            'grade' => 68.5, 'computed_grade' => 68.5, 'is_verified' => 1,
+            'grade' => 80.0, 'computed_grade' => 68.5, 'is_verified' => 1,
         ]);
         $this->assertNotNull(Grade::first()->verified_at);
+    }
+
+    /** The real DO 8, s. 2015 lookup Task 2c required — the real transmuted grade differs from computed_grade. */
+    public function test_verify_writes_the_transmuted_grade_not_the_raw_computed_grade(): void
+    {
+        $adviser = User::factory()->create();
+        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
+        $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
+        $student = Student::factory()->create(['section_id' => $section->id]);
+
+        AcademicTerm::ensureExistFor('2026-2027');
+        $this->fullyScore($section, $subject, $student); // WW=84, PT=60, Exam=70 -> computed_grade 68.5
+
+        $this->actingAs($adviser)->post('/adviser/grades/verify', [
+            'student_id' => $student->id, 'subject_id' => $subject->id, 'grading_period' => 1,
+        ]);
+
+        // 68.5 falls in the DO 8, s. 2015 band 68.00-69.59 -> transmuted 80.
+        $this->assertDatabaseHas('grades', [
+            'student_id' => $student->id, 'subject_id' => $subject->id,
+            'grade' => 80.0, 'computed_grade' => 68.5, 'is_verified' => 1,
+        ]);
     }
 
     public function test_verifying_overwrites_an_existing_manually_encoded_grade(): void
     {
         $adviser = User::factory()->create();
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027']);
+        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
         $student = Student::factory()->create(['section_id' => $section->id]);
 
@@ -76,7 +121,7 @@ class GradeVerificationTest extends TestCase
             'student_id' => $student->id, 'subject_id' => $subject->id, 'grading_period' => 1,
         ]);
 
-        $this->assertDatabaseHas('grades', ['student_id' => $student->id, 'grade' => 68.5]);
+        $this->assertDatabaseHas('grades', ['student_id' => $student->id, 'grade' => 80.0]);
         $this->assertDatabaseMissing('grades', ['student_id' => $student->id, 'grade' => 95]);
     }
 
@@ -97,6 +142,34 @@ class GradeVerificationTest extends TestCase
             ]);
             AssessmentScore::factory()->create(['assessment_id' => $assessment->id, 'student_id' => $student->id, 'score' => $earned]);
         }
+
+        $response = $this->actingAs($adviser)->post('/adviser/grades/verify', [
+            'student_id' => $student->id, 'subject_id' => $subject->id, 'grading_period' => 1,
+        ]);
+
+        $response->assertSessionHas('error');
+        $this->assertDatabaseMissing('grades', ['student_id' => $student->id]);
+    }
+
+    /**
+     * TASK 2 of "terminology, transmutation, and interface cleanup" — a
+     * Grade 11 section in SY 2026-2027 resolves to do015_2026. This
+     * suite's setUp() only seeds do8_2015 (TransmutationRangesSeeder) —
+     * do015_2026 is owned entirely by Do015TransmutationSeeder (see its
+     * class docblock) and is deliberately NOT seeded here, so any
+     * do015_2026 lookup must block verification with an explicit error
+     * rather than writing a wrong or unchanged value as the official
+     * grade.
+     */
+    public function test_cannot_verify_when_the_transmuted_grade_is_not_available_for_the_scheme(): void
+    {
+        $adviser = User::factory()->create();
+        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 11]);
+        $subject = Subject::factory()->create(['grade_level' => 11, 'type' => 'core']);
+        $student = Student::factory()->create(['section_id' => $section->id]);
+
+        AcademicTerm::ensureExistFor('2026-2027');
+        $this->fullyScore($section, $subject, $student); // computed_grade 68.5 — do015_2026 has zero rows in this test
 
         $response = $this->actingAs($adviser)->post('/adviser/grades/verify', [
             'student_id' => $student->id, 'subject_id' => $subject->id, 'grading_period' => 1,
@@ -160,7 +233,7 @@ class GradeVerificationTest extends TestCase
     public function test_verification_is_logged(): void
     {
         $adviser = User::factory()->create();
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027']);
+        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
         $student = Student::factory()->create(['section_id' => $section->id]);
 

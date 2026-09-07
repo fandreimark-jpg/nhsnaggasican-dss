@@ -2,11 +2,11 @@
 
 namespace App\Services;
 
-use App\Models\Assessment;
 use App\Models\AssessmentScore;
 use App\Models\RiskResult;
 use App\Models\Section;
 use App\Models\Student;
+use Illuminate\Support\Facades\DB;
 
 /**
  * P-12 (ML integration), the safe half: computes the expanded feature
@@ -43,6 +43,19 @@ class RiskFeatureExtractor
     private const TARGET = 75.0;
 
     /**
+     * Per (section_id, grading_period, school_year) cache of every
+     * student's earned/max sums per component, built once via a single
+     * grouped query — see componentSumsFor(). ReportController::
+     * buildPythonPayload() reuses ONE RiskFeatureExtractor instance
+     * across every student in a section (array_map over $gradesData),
+     * so this survives for the whole Submit Report request but never
+     * crosses requests (a fresh instance is constructed per request).
+     *
+     * @var array<string, array<string, array<int, array{earned: float, max: float}>>>
+     */
+    private array $componentSumsCache = [];
+
+    /**
      * @return array{
      *     ww_mean: float|null,
      *     pt_mean: float|null,
@@ -75,37 +88,68 @@ class RiskFeatureExtractor
      */
     private function componentMeans(Student $student, Section $section, int $gradingPeriod, string $schoolYear): array
     {
+        $sums = $this->componentSumsFor($section, $gradingPeriod, $schoolYear);
+
         $means = [];
-
         foreach (['written_work', 'performance_task', 'examination'] as $key) {
-            $assessmentIds = Assessment::where('section_id', $section->id)
-                ->where('grading_period', $gradingPeriod)
-                ->where('school_year', $schoolYear)
-                ->where('component', $key)
-                ->pluck('id');
-
-            if ($assessmentIds->isEmpty()) {
-                $means[$key] = null;
-                continue;
-            }
-
-            $scores = AssessmentScore::where('student_id', $student->id)
-                ->whereIn('assessment_id', $assessmentIds)
-                ->with('assessment')
-                ->get();
-
-            if ($scores->isEmpty()) {
-                $means[$key] = null;
-                continue;
-            }
-
-            $earned = $scores->sum(fn($s) => (float) $s->score);
-            $max    = $scores->sum(fn($s) => (float) $s->assessment->max_score);
-
-            $means[$key] = $max > 0 ? round(($earned / $max) * 100, 2) : null;
+            $studentSum = $sums[$key][$student->id] ?? null;
+            $means[$key] = ($studentSum !== null && $studentSum['max'] > 0)
+                ? round(($studentSum['earned'] / $studentSum['max']) * 100, 2)
+                : null;
         }
 
         return $means;
+    }
+
+    /**
+     * Used to run 3 identical Assessment::where('section_id', ...)
+     * ->pluck('id') queries PER STUDENT — section_id/grading_period/
+     * school_year don't vary across students in the same section, so
+     * every student re-ran the exact same lookup. This runs ONCE per
+     * (section, period, school year) via a single grouped join query
+     * covering all 3 components at once, cached on $this so every
+     * subsequent student in the same batch reads from memory instead of
+     * re-querying (see the class docblock).
+     *
+     * A student with no rows for a component (either no assessment
+     * items exist for it at all, or items exist but this student has
+     * no scores yet) simply doesn't appear in that component's array —
+     * componentMeans() above treats that as null, matching the original
+     * per-student implementation's "not enough evidence" behavior.
+     *
+     * @return array<string, array<int, array{earned: float, max: float}>>
+     */
+    private function componentSumsFor(Section $section, int $gradingPeriod, string $schoolYear): array
+    {
+        $cacheKey = $section->id . '|' . $gradingPeriod . '|' . $schoolYear;
+
+        if (isset($this->componentSumsCache[$cacheKey])) {
+            return $this->componentSumsCache[$cacheKey];
+        }
+
+        $rows = AssessmentScore::query()
+            ->join('assessments', 'assessments.id', '=', 'assessment_scores.assessment_id')
+            ->where('assessments.section_id', $section->id)
+            ->where('assessments.grading_period', $gradingPeriod)
+            ->where('assessments.school_year', $schoolYear)
+            ->select(
+                'assessments.component',
+                'assessment_scores.student_id',
+                DB::raw('SUM(assessment_scores.score) as earned'),
+                DB::raw('SUM(assessments.max_score) as max_total')
+            )
+            ->groupBy('assessments.component', 'assessment_scores.student_id')
+            ->get();
+
+        $sums = ['written_work' => [], 'performance_task' => [], 'examination' => []];
+        foreach ($rows as $row) {
+            $sums[$row->component][$row->student_id] = [
+                'earned' => (float) $row->earned,
+                'max'    => (float) $row->max_total,
+            ];
+        }
+
+        return $this->componentSumsCache[$cacheKey] = $sums;
     }
 
     private function weakComponentCount(array $componentMeans): ?int

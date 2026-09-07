@@ -19,7 +19,7 @@
         <div class="flex justify-between items-center mb-4">
             <h3 class="text-lg font-semibold text-gray-800">My Profile</h3>
             <button type="button" onclick="closeProfileModal()"
-                    class="text-gray-400 hover:text-gray-600">✕</button>
+                    aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         {{-- ===================== NAME FORM ===================== --}}

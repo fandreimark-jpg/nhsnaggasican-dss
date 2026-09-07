@@ -37,7 +37,11 @@ class AssessmentPerformancePageTest extends TestCase
     public function test_performance_section_shows_weakest_component_once_items_and_scores_exist(): void
     {
         $adviser = User::factory()->create();
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027']);
+        // grade_level pinned to 12 (not the factory's random 11/12) — see
+        // TASK 1 of "DO 015 grading weights": Grade 11 in SY 2026-2027
+        // now uses different (subject-group-dependent) weights, so this
+        // test's hardcoded do8_2015 25/50/25 value must stay deterministic.
+        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
         $student = Student::factory()->create(['section_id' => $section->id, 'last_name' => 'Reyes', 'first_name' => 'Ana']);
 

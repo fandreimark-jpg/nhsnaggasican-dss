@@ -27,6 +27,7 @@ class Subject extends Model
         'name',               // e.g. 'General Mathematics'
         'type',               // 'core' or 'elective'
         'grade_level',        // 11 or 12
+        'subject_group',      // which subject_group_weights row applies — see that table's migration
         'track_id',           // null for core, required for elective
         'specialization_id',  // null if applies to whole track, specific if specialization-only
     ];

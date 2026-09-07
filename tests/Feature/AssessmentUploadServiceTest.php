@@ -252,6 +252,163 @@ class AssessmentUploadServiceTest extends TestCase
         @unlink($path);
     }
 
+    /**
+     * suspicious_max — AssessmentUploadService::SUSPICIOUS_MAX_RATIO/MIN_SAMPLES.
+     * Catches a declared max that's an order of magnitude too high (e.g. 100
+     * typed instead of 30), without rejecting anything — the adviser still
+     * decides. See CLAUDE.md's "Group Project uploaded with max 100 while
+     * scores range 15-29" incident.
+     */
+    private function makeSectionWithStudents(int $count): array
+    {
+        $adviser = User::factory()->create();
+        $section = Section::factory()->create(['adviser_id' => $adviser->id]);
+        $students = [];
+        for ($i = 0; $i < $count; $i++) {
+            $students[] = Student::factory()->create([
+                'section_id' => $section->id,
+                'lrn'        => (string) (100000000100 + $i),
+            ]);
+        }
+        return [$section, $students];
+    }
+
+    public function test_suspicious_max_is_flagged_when_scores_15_to_29_are_declared_against_a_max_of_100(): void
+    {
+        [$section, $students] = $this->makeSectionWithStudents(3);
+        $scores = [15, 22, 29];
+
+        $csv = "lrn,last_name,first_name,Group Project\n";
+        foreach ($students as $i => $student) {
+            $csv .= "{$student->lrn},Doe,Jane,{$scores[$i]}\n";
+        }
+
+        $preview = $this->service->previewRows(
+            $this->csvPath($csv),
+            ['Group Project' => ['component' => 'performance_task', 'max_score' => 100]],
+            $section
+        );
+
+        $this->assertTrue($preview['column_stats']['Group Project']['suspicious_max']);
+        $this->assertSame(29.0, $preview['column_stats']['Group Project']['highest']);
+    }
+
+    /**
+     * The suspicious-max warning must fire the same way regardless of
+     * where the confirmed max_score came from — a teacher can mistype the
+     * MAX row in the file just as easily as the Verify form (see the
+     * "carry max scores in the upload file" prompt: this isn't about
+     * where the number is typed, it's that nothing checks it in this
+     * direction). previewRows() only ever sees the adviser-CONFIRMED
+     * mapping either way, so this proves the whole pipeline — detect()
+     * parsing file_max_score, then that value flowing through as the
+     * confirmed max_score — produces the same flag as a hand-typed one.
+     */
+    public function test_suspicious_max_still_fires_when_the_max_came_from_a_file_max_row(): void
+    {
+        [$section, $students] = $this->makeSectionWithStudents(3);
+        $scores = [15, 22, 29];
+
+        $csv = "lrn,last_name,first_name,Group Project\n";
+        $csv .= "MAX,,,100\n";
+        foreach ($students as $i => $student) {
+            $csv .= "{$student->lrn},Doe,Jane,{$scores[$i]}\n";
+        }
+        $path = $this->csvPath($csv);
+
+        $detected = $this->service->detectColumns($path);
+        $this->assertSame(100.0, $detected['columns'][0]['file_max_score']);
+
+        // The Verify screen prefilled the field with 100, the adviser
+        // confirmed it unchanged — exactly what reaches previewRows().
+        $preview = $this->service->previewRows(
+            $path,
+            ['Group Project' => ['component' => 'performance_task', 'max_score' => $detected['columns'][0]['file_max_score']]],
+            $section
+        );
+
+        $this->assertTrue($preview['column_stats']['Group Project']['suspicious_max']);
+        $this->assertSame(3, $preview['matched_rows'], 'The MAX row itself must never be counted as a student row.');
+    }
+
+    public function test_suspicious_max_is_not_flagged_when_the_max_is_actually_correct(): void
+    {
+        [$section, $students] = $this->makeSectionWithStudents(3);
+        $scores = [15, 22, 29];
+
+        $csv = "lrn,last_name,first_name,Group Project\n";
+        foreach ($students as $i => $student) {
+            $csv .= "{$student->lrn},Doe,Jane,{$scores[$i]}\n";
+        }
+
+        $preview = $this->service->previewRows(
+            $this->csvPath($csv),
+            ['Group Project' => ['component' => 'performance_task', 'max_score' => 30]],
+            $section
+        );
+
+        $this->assertFalse($preview['column_stats']['Group Project']['suspicious_max']);
+    }
+
+    public function test_suspicious_max_is_not_flagged_below_the_evidence_floor(): void
+    {
+        [$section, $students] = $this->makeSectionWithStudents(2);
+        $scores = [2, 10];
+
+        $csv = "lrn,last_name,first_name,Group Project\n";
+        foreach ($students as $i => $student) {
+            $csv .= "{$student->lrn},Doe,Jane,{$scores[$i]}\n";
+        }
+
+        $preview = $this->service->previewRows(
+            $this->csvPath($csv),
+            ['Group Project' => ['component' => 'performance_task', 'max_score' => 100]],
+            $section
+        );
+
+        $this->assertFalse($preview['column_stats']['Group Project']['suspicious_max']);
+    }
+
+    public function test_suspicious_max_is_not_flagged_when_a_score_was_already_rejected_for_exceeding_the_max(): void
+    {
+        [$section, $students] = $this->makeSectionWithStudents(4);
+        $scores = [15, 22, 29, 45]; // last one exceeds the declared max of 30
+
+        $csv = "lrn,last_name,first_name,Group Project\n";
+        foreach ($students as $i => $student) {
+            $csv .= "{$student->lrn},Doe,Jane,{$scores[$i]}\n";
+        }
+
+        $preview = $this->service->previewRows(
+            $this->csvPath($csv),
+            ['Group Project' => ['component' => 'performance_task', 'max_score' => 30]],
+            $section
+        );
+
+        // The exceeds-max rejection is already surfaced as its own invalid
+        // cell — a second warning about the same column would be noise.
+        $this->assertFalse($preview['column_stats']['Group Project']['suspicious_max']);
+    }
+
+    public function test_suspicious_max_is_not_flagged_for_an_all_blank_column(): void
+    {
+        [$section, $students] = $this->makeSectionWithStudents(3);
+
+        $csv = "lrn,last_name,first_name,Group Project\n";
+        foreach ($students as $student) {
+            $csv .= "{$student->lrn},Doe,Jane,\n";
+        }
+
+        $preview = $this->service->previewRows(
+            $this->csvPath($csv),
+            ['Group Project' => ['component' => 'performance_task', 'max_score' => 100]],
+            $section
+        );
+
+        $this->assertFalse($preview['column_stats']['Group Project']['suspicious_max']);
+        $this->assertNull($preview['column_stats']['Group Project']['highest']);
+    }
+
     public function test_re_importing_the_same_column_updates_rather_than_duplicates(): void
     {
         $adviser = User::factory()->create();

@@ -10,7 +10,7 @@
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 px-6 py-4 border-b">
         <div>
             <h2 class="text-sm font-semibold text-gray-800">All Users</h2>
-            <p class="text-xs text-gray-400">{{ $users->total() }} total accounts</p>
+            <p class="text-xs text-gray-400"><x-count-label :count="$users->total()" noun="account" total /></p>
         </div>
         <div class="flex items-center gap-3">
             <div class="relative">
@@ -26,16 +26,17 @@
         </div>
     </div>
 
-    <table class="w-full text-sm" id="userTable">
+    <div class="overflow-x-auto">
+    <table class="w-full min-w-full text-sm" id="userTable">
         <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
             <tr>
-                <th class="text-left px-6 py-3">Last Name</th>
-                <th class="text-left px-6 py-3">First Name</th>
-                <th class="text-left px-6 py-3">Middle Name</th>
-                <th class="text-left px-6 py-3">Email</th>
-                <th class="text-left px-6 py-3">Role</th>
-                <th class="text-left px-6 py-3">Status</th>
-                <th class="px-6 py-3 text-right">Actions</th>
+                <th scope="col" class="text-left px-6 py-3">Last Name</th>
+                <th scope="col" class="text-left px-6 py-3">First Name</th>
+                <th scope="col" class="text-left px-6 py-3">Middle Name</th>
+                <th scope="col" class="text-left px-6 py-3">Email</th>
+                <th scope="col" class="text-left px-6 py-3">Role</th>
+                <th scope="col" class="text-left px-6 py-3">Status</th>
+                <th scope="col" class="px-6 py-3 text-right">Actions</th>
             </tr>
         </thead>
         <tbody class="divide-y divide-gray-100" id="userTableBody">
@@ -71,61 +72,64 @@
                         </span>
                     @endif
                 </td>
-                <td class="px-6 py-3 text-right space-x-2">
-                    <button type="button"
-                        onclick='openUserEditModal(@json($user))'
-                        class="inline-flex items-center gap-1 text-brand-600 hover:text-brand-800 text-xs font-medium border border-brand-200 rounded px-2 py-1 hover:bg-brand-50">
-                        <i class="bi bi-pencil-square"></i> Edit
-                    </button>
+                <td class="px-6 py-3 text-right">
+                    <div class="flex items-center justify-end gap-2 flex-wrap">
+                        <button type="button"
+                            onclick='openUserEditModal(@json($user))'
+                            class="inline-flex items-center gap-1 text-brand-600 hover:text-brand-800 text-xs font-medium border border-brand-200 rounded px-2 py-1 hover:bg-brand-50 whitespace-nowrap">
+                            <i class="bi bi-pencil-square"></i> Edit
+                        </button>
 
-                    @if($user->id !== auth()->id())
-                        @if($user->is_active)
-                        <form method="POST" action="{{ route('admin.users.disable', $user->id) }}" class="inline"
-                            data-confirm="Disable {{ $user->first_name }} {{ $user->last_name }}? They will no longer be able to log in."
-                            data-confirm-label="Yes, Disable"
-                            data-confirm-icon="bi-slash-circle"
-                            data-confirm-loading-label="Disabling...">
+                        @if($user->id !== auth()->id())
+                            @if($user->is_active)
+                            <form method="POST" action="{{ route('admin.users.disable', $user->id) }}" class="inline"
+                                data-confirm="Disable {{ $user->first_name }} {{ $user->last_name }}? They will no longer be able to log in."
+                                data-confirm-label="Yes, Disable"
+                                data-confirm-icon="bi-slash-circle"
+                                data-confirm-loading-label="Disabling...">
+                                @csrf
+                                @method('POST')
+                                <button type="submit"
+                                    class="inline-flex items-center gap-1 text-orange-600 hover:text-orange-800 text-xs font-medium border border-orange-200 rounded px-2 py-1 hover:bg-orange-50 whitespace-nowrap">
+                                    <i class="bi bi-slash-circle"></i> Disable
+                                </button>
+                            </form>
+                            @else
+                            <form method="POST" action="{{ route('admin.users.activate', $user->id) }}" class="inline">
+                                @csrf
+                                <button type="submit"
+                                    class="inline-flex items-center gap-1 text-green-600 hover:text-green-800 text-xs font-medium border border-green-200 rounded px-2 py-1 hover:bg-green-50 whitespace-nowrap">
+                                    <i class="bi bi-check-circle"></i> Activate
+                                </button>
+                            </form>
+                            @endif
+
+                        <form method="POST"
+                            action="{{ route('admin.users.destroy', $user->id) }}"
+                            class="inline"
+                            data-confirm="Remove user {{ $user->first_name }} {{ $user->last_name }}?">
                             @csrf
-                            @method('POST')
+                            @method('DELETE')
                             <button type="submit"
-                                class="inline-flex items-center gap-1 text-orange-600 hover:text-orange-800 text-xs font-medium border border-orange-200 rounded px-2 py-1 hover:bg-orange-50">
-                                <i class="bi bi-slash-circle"></i> Disable
-                            </button>
-                        </form>
-                        @else
-                        <form method="POST" action="{{ route('admin.users.activate', $user->id) }}" class="inline">
-                            @csrf
-                            <button type="submit"
-                                class="inline-flex items-center gap-1 text-green-600 hover:text-green-800 text-xs font-medium border border-green-200 rounded px-2 py-1 hover:bg-green-50">
-                                <i class="bi bi-check-circle"></i> Activate
+                                class="inline-flex items-center gap-1 text-red-600 hover:text-red-800 text-xs font-medium border border-red-200 rounded px-2 py-1 hover:bg-red-50 whitespace-nowrap">
+                                <i class="bi bi-trash"></i> Delete
                             </button>
                         </form>
                         @endif
-
-                    <form method="POST"
-                        action="{{ route('admin.users.destroy', $user->id) }}"
-                        class="inline"
-                        data-confirm="Remove user {{ $user->first_name }} {{ $user->last_name }}?">
-                        @csrf
-                        @method('DELETE')
-                        <button type="submit"
-                            class="inline-flex items-center gap-1 text-red-600 hover:text-red-800 text-xs font-medium border border-red-200 rounded px-2 py-1 hover:bg-red-50">
-                            <i class="bi bi-trash"></i> Delete
-                        </button>
-                    </form>
-                    @endif
+                    </div>
                 </td>
             </tr>
             @empty
             <tr id="emptyRow">
-                <td colspan="7" class="px-6 py-8 text-center text-gray-400">
-                    <i class="bi bi-people text-2xl block mb-2"></i>
-                    No users yet.
+                <td colspan="7">
+                    <x-empty-state message="No users yet." icon="bi-people"
+                        hint="Use &quot;Add User&quot; above — every account is created here by an Admin; public registration is disabled." />
                 </td>
             </tr>
             @endforelse
         </tbody>
     </table>
+    </div>
 
     <div id="noResults" class="hidden px-6 py-8 text-center text-gray-400">
         <i class="bi bi-search text-2xl block mb-2"></i>
@@ -162,7 +166,7 @@
             <h3 id="modalTitle" class="text-lg font-semibold text-gray-800">
                 <i class="bi bi-plus-lg"></i> Add User
             </h3>
-            <button type="button" onclick="closeUserModal()" class="text-gray-400 hover:text-gray-600">✕</button>
+            <button type="button" onclick="closeUserModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         @if($errors->any())

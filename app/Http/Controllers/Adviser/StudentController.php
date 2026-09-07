@@ -18,16 +18,29 @@ use Illuminate\Http\Request;
  */
 class StudentController extends Controller
 {
+    /** TASK 5d of "clarity, progress, and visual design pass" — real pagination, same page size as every other paginated table in this app. */
+    private const PER_PAGE = 25;
+
     /**
      * Show all students in the adviser's section.
+     *
+     * "Clarity, progress, and visual design pass" TASK 5d — this page
+     * used to render the whole section roster in one unpaginated table
+     * (fine for ~40 students, not for a larger section). ->withQueryString()
+     * carries forward any filter this page gains in the future across
+     * page changes, same convention as every other paginated table here
+     * (Principal\StudentController, Principal\InterventionController).
      */
     public function index()
     {
         // Get only the section assigned to this adviser
         $section  = Section::where('adviser_id', auth()->id())->first();
         $students = $section
-            ? Student::where('section_id', $section->id)->orderBy('last_name')->get()
-            : collect();
+            ? Student::where('section_id', $section->id)->orderBy('last_name')->paginate(self::PER_PAGE)->withQueryString()
+            // No section assigned — an empty paginator (not a plain
+            // Collection) so the view can call ->total()/->hasPages()
+            // unconditionally either way, same shape either branch.
+            : new \Illuminate\Pagination\LengthAwarePaginator([], 0, self::PER_PAGE);
 
         return view('adviser.students', compact('students', 'section'));
     }

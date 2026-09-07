@@ -32,6 +32,11 @@ class AcademicTermController extends Controller
             ->get()
             ->map(function ($term) use ($schoolYear) {
                 $term->completion = AcademicTerm::completionStatus($schoolYear, $term->term);
+                // TASK 4 of "dashboard structure and upload safeguards" —
+                // shown for EVERY section (not just incomplete ones), so
+                // the subjects x students gap is visible before anyone
+                // attempts to open the next term, not just after refusal.
+                $term->capacity = AcademicTerm::sectionCapacityBreakdown($schoolYear, $term->term);
                 return $term;
             });
 

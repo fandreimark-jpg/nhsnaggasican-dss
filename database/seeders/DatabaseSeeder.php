@@ -2,159 +2,122 @@
 
 namespace Database\Seeders;
 
+use App\Models\AcademicTerm;
+use App\Models\Section;
+use App\Models\Specialization;
+use App\Models\Subject;
+use App\Models\Track;
+use App\Models\User;
 use Illuminate\Database\Seeder;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 
+/**
+ * Minimal, current-schema working seed — replaces a junior-high-era
+ * version of this project (Filipino/MAPEH/TLE subjects with grade_level
+ * 7/8 and no `type` value, students born in 2012) that threw under MySQL
+ * strict mode the moment anyone ran `php artisan db:seed`, since
+ * subjects.type is a NOT NULL enum with no default. `migrate:fresh
+ * --seed` — the first command most reviewers run — failed immediately.
+ *
+ * Deliberately seeds NO students and NO grades — those come from the
+ * Admin > Students / Adviser > Assessments import flows, and mixing fake
+ * seeded learners in with real imported ones has already caused
+ * confusion once. Everything here uses firstOrCreate so re-running
+ * `php artisan db:seed` is always a no-op.
+ */
 class DatabaseSeeder extends Seeder
 {
+    private const PASSWORD = 'password';
+
+    private const SCHOOL_YEAR = '2026-2027';
+
     public function run(): void
     {
-        // -------------------------------------------------------
-        // 1. USERS — 1 admin + 2 advisers
-        // -------------------------------------------------------
-        DB::table('users')->insert([
+        $admin     = $this->makeUser('admin@naggasican.edu.ph', 'Admin', 'System', 'admin');
+        $adviser   = $this->makeUser('adviser1@naggasican.edu.ph', 'Dela Cruz', 'Juan', 'adviser');
+        $principal = $this->makeUser('principal1@naggasican.edu.ph', 'Santos', 'Maria', 'principal');
+
+        $this->call(TracksAndSpecializationsSeeder::class);
+        $this->call(TransmutationRangesSeeder::class);
+        $this->call(Do015TransmutationSeeder::class);
+        $this->call(SubjectGroupWeightsSeeder::class);
+        $this->call(ExamRoleSharesSeeder::class);
+
+        // A section with a null track_id/specialization_id renders as an
+        // honest "Not set" everywhere (see Task 3 of the "separate
+        // intervention discovery from tracking" prompt) — but this seeded
+        // demo section is a real Academic Track / STEM section throughout
+        // this codebase's other fixtures and tests, so it must actually
+        // carry those values, not rely on the display's null-handling to
+        // paper over a seeder that forgot to set them.
+        $track = Track::where('code', 'ACAD')->first();
+        $specialization = Specialization::where('code', 'STEM')->where('track_id', $track?->id)->first();
+
+        $section = Section::firstOrCreate(
+            ['name' => 'Narra', 'school_year' => self::SCHOOL_YEAR],
             [
-                'name'       => 'Maria Santos',
-                'email'      => 'admin@naggasican.edu.ph',
-                'password'   => Hash::make('password'),
-                'role'       => 'admin',
-                'created_at' => now(),
-                'updated_at' => now(),
-            ],
-            [
-                'name'       => 'Juan Dela Cruz',
-                'email'      => 'adviser1@naggasican.edu.ph',
-                'password'   => Hash::make('password'),
-                'role'       => 'adviser',
-                'created_at' => now(),
-                'updated_at' => now(),
-            ],
-            [
-                'name'       => 'Ana Reyes',
-                'email'      => 'adviser2@naggasican.edu.ph',
-                'password'   => Hash::make('password'),
-                'role'       => 'adviser',
-                'created_at' => now(),
-                'updated_at' => now(),
-            ],
-        ]);
-
-        // -------------------------------------------------------
-        // 2. SECTIONS
-        // -------------------------------------------------------
-        DB::table('sections')->insert([
-            [
-                'name'        => 'Narra',
-                'grade_level' => 7,
-                'adviser_id'  => 2, // Juan Dela Cruz
-                'school_year' => '2024-2025',
-                'created_at'  => now(),
-                'updated_at'  => now(),
-            ],
-            [
-                'name'        => 'Molave',
-                'grade_level' => 8,
-                'adviser_id'  => 3, // Ana Reyes
-                'school_year' => '2024-2025',
-                'created_at'  => now(),
-                'updated_at'  => now(),
-            ],
-        ]);
-
-        // -------------------------------------------------------
-        // 3. SUBJECTS (DepEd Grade 7 & 8 core subjects)
-        // -------------------------------------------------------
-        DB::table('subjects')->insert([
-            ['name' => 'Filipino',               'grade_level' => 7, 'created_at' => now(), 'updated_at' => now()],
-            ['name' => 'English',                'grade_level' => 7, 'created_at' => now(), 'updated_at' => now()],
-            ['name' => 'Mathematics',            'grade_level' => 7, 'created_at' => now(), 'updated_at' => now()],
-            ['name' => 'Science',                'grade_level' => 7, 'created_at' => now(), 'updated_at' => now()],
-            ['name' => 'Araling Panlipunan',     'grade_level' => 7, 'created_at' => now(), 'updated_at' => now()],
-            ['name' => 'MAPEH',                  'grade_level' => 7, 'created_at' => now(), 'updated_at' => now()],
-            ['name' => 'TLE',                    'grade_level' => 7, 'created_at' => now(), 'updated_at' => now()],
-            ['name' => 'Edukasyon sa Pagpapakatao', 'grade_level' => 7, 'created_at' => now(), 'updated_at' => now()],
-
-            ['name' => 'Filipino',               'grade_level' => 8, 'created_at' => now(), 'updated_at' => now()],
-            ['name' => 'English',                'grade_level' => 8, 'created_at' => now(), 'updated_at' => now()],
-            ['name' => 'Mathematics',            'grade_level' => 8, 'created_at' => now(), 'updated_at' => now()],
-            ['name' => 'Science',                'grade_level' => 8, 'created_at' => now(), 'updated_at' => now()],
-            ['name' => 'Araling Panlipunan',     'grade_level' => 8, 'created_at' => now(), 'updated_at' => now()],
-            ['name' => 'MAPEH',                  'grade_level' => 8, 'created_at' => now(), 'updated_at' => now()],
-            ['name' => 'TLE',                    'grade_level' => 8, 'created_at' => now(), 'updated_at' => now()],
-            ['name' => 'Edukasyon sa Pagpapakatao', 'grade_level' => 8, 'created_at' => now(), 'updated_at' => now()],
-        ]);
-
-        // -------------------------------------------------------
-        // 4. STUDENTS — 3 per section
-        // -------------------------------------------------------
-        DB::table('students')->insert([
-            // Section 1 - Narra (Grade 7)
-            ['lrn' => '100000000001', 'last_name' => 'Flores',  'first_name' => 'Pedro',   'middle_name' => 'M', 'section_id' => 1, 'gender' => 'male',   'birthdate' => '2012-03-15', 'created_at' => now(), 'updated_at' => now()],
-            ['lrn' => '100000000002', 'last_name' => 'Garcia',  'first_name' => 'Maria',   'middle_name' => 'L', 'section_id' => 1, 'gender' => 'female', 'birthdate' => '2012-07-22', 'created_at' => now(), 'updated_at' => now()],
-            ['lrn' => '100000000003', 'last_name' => 'Ramos',   'first_name' => 'Jose',    'middle_name' => 'A', 'section_id' => 1, 'gender' => 'male',   'birthdate' => '2012-11-01', 'created_at' => now(), 'updated_at' => now()],
-
-            // Section 2 - Molave (Grade 8)
-            ['lrn' => '100000000004', 'last_name' => 'Cruz',    'first_name' => 'Anna',    'middle_name' => 'B', 'section_id' => 2, 'gender' => 'female', 'birthdate' => '2011-05-10', 'created_at' => now(), 'updated_at' => now()],
-            ['lrn' => '100000000005', 'last_name' => 'Santos',  'first_name' => 'Carlos',  'middle_name' => 'R', 'section_id' => 2, 'gender' => 'male',   'birthdate' => '2011-09-18', 'created_at' => now(), 'updated_at' => now()],
-            ['lrn' => '100000000006', 'last_name' => 'Lim',     'first_name' => 'Patricia','middle_name' => 'S', 'section_id' => 2, 'gender' => 'female', 'birthdate' => '2011-01-25', 'created_at' => now(), 'updated_at' => now()],
-        ]);
-
-        // -------------------------------------------------------
-        // 5. SAMPLE GRADES (1st grading, Section 1 - Narra)
-        // -------------------------------------------------------
-        $gradeData = [
-            // Student 1 (Pedro) - high performer
-            [1, 1, 1, 2, 92.00], [1, 2, 1, 2, 90.00], [1, 3, 1, 2, 88.50],
-            [1, 4, 1, 2, 91.00], [1, 5, 1, 2, 89.00], [1, 6, 1, 2, 93.00],
-            [1, 7, 1, 2, 87.00], [1, 8, 1, 2, 90.50],
-
-            // Student 2 (Maria) - average
-            [2, 1, 1, 2, 78.00], [2, 2, 1, 2, 75.50], [2, 3, 1, 2, 77.00],
-            [2, 4, 1, 2, 76.00], [2, 5, 1, 2, 79.00], [2, 6, 1, 2, 80.00],
-            [2, 7, 1, 2, 74.00], [2, 8, 1, 2, 76.50],
-
-            // Student 3 (Jose) - at risk
-            [3, 1, 1, 2, 71.00], [3, 2, 1, 2, 68.00], [3, 3, 1, 2, 65.00],
-            [3, 4, 1, 2, 70.00], [3, 5, 1, 2, 69.00], [3, 6, 1, 2, 72.00],
-            [3, 7, 1, 2, 66.00], [3, 8, 1, 2, 67.50],
-        ];
-
-        foreach ($gradeData as $g) {
-            DB::table('grades')->insert([
-                'student_id'      => $g[0],
-                'subject_id'      => $g[1],
-                'section_id'      => $g[2],
-                'grading_period'  => 1,
-                'grade'           => $g[4],
-                'school_year'     => '2024-2025',
-                'encoded_by'      => $g[3],
-                'created_at'      => now(),
-                'updated_at'      => now(),
+                'grade_level'       => 11,
+                'adviser_id'        => $adviser->id,
+                'track_id'          => $track?->id,
+                'specialization_id' => $specialization?->id,
+            ]
+        );
+        if (!$section->adviser_id || !$section->track_id || !$section->specialization_id) {
+            $section->update([
+                'adviser_id'        => $section->adviser_id ?: $adviser->id,
+                'track_id'          => $section->track_id ?: $track?->id,
+                'specialization_id' => $section->specialization_id ?: $specialization?->id,
             ]);
         }
 
-        // -------------------------------------------------------
-        // 6. REPORT SUBMISSION (Section 1 already submitted)
-        // -------------------------------------------------------
-        DB::table('report_submissions')->insert([
-            'section_id'      => 1,
-            'submitted_by'    => 2,
-            'grading_period'  => 1,
-            'status'          => 'submitted',
-            'school_year'     => '2024-2025',
-            'submitted_at'    => now(),
-            'created_at'      => now(),
-            'updated_at'      => now(),
-        ]);
+        // Confirmed Grade 11 core subjects under the Strengthened SHS
+        // curriculum — the only two established anywhere in this
+        // codebase (tests/Fixtures/01_subjects_deped_shs.csv, used
+        // throughout the test suite and prior demo data).
+        //
+        // TODO(curriculum): DepEd's Strengthened SHS core list for
+        // Grade 11 has more entries than these two — not confirmed
+        // anywhere in this repo, so they are deliberately NOT guessed
+        // here. Add them once confirmed. See CLAUDE.md's "Known
+        // limitations" section.
+        foreach (['General Mathematics', 'Oral Communication'] as $name) {
+            Subject::firstOrCreate(
+                ['name' => $name, 'grade_level' => 11],
+                ['type' => 'core']
+            );
+        }
 
-        // -------------------------------------------------------
-        // 7. RISK RESULTS (generated by Python analytics)
-        // -------------------------------------------------------
-        DB::table('risk_results')->insert([
-            ['student_id' => 1, 'grading_period' => 1, 'average_grade' => 90.13, 'risk_level' => 'low',      'school_year' => '2024-2025', 'generated_at' => now(), 'created_at' => now(), 'updated_at' => now()],
-            ['student_id' => 2, 'grading_period' => 1, 'average_grade' => 77.00, 'risk_level' => 'moderate', 'school_year' => '2024-2025', 'generated_at' => now(), 'created_at' => now(), 'updated_at' => now()],
-            ['student_id' => 3, 'grading_period' => 1, 'average_grade' => 68.56, 'risk_level' => 'high',     'school_year' => '2024-2025', 'generated_at' => now(), 'created_at' => now(), 'updated_at' => now()],
+        AcademicTerm::ensureExistFor(self::SCHOOL_YEAR);
+
+        $this->command?->info('');
+        $this->command?->info('Seeded accounts (password for all: "' . self::PASSWORD . '"):');
+        $this->command?->table(['Role', 'Email'], [
+            ['Admin', $admin->email],
+            ['Adviser', $adviser->email],
+            ['Principal', $principal->email],
         ]);
+    }
+
+    /**
+     * 'role' isn't mass-assignable (see User::$fillable's comment) — set
+     * it via direct property assignment, the same pattern UserFactory's
+     * role states and Admin\UserController already use.
+     */
+    private function makeUser(string $email, string $lastName, string $firstName, string $role): User
+    {
+        $user = User::firstOrCreate(
+            ['email' => $email],
+            [
+                'name'       => $firstName . ' ' . $lastName,
+                'last_name'  => $lastName,
+                'first_name' => $firstName,
+                'password'   => Hash::make(self::PASSWORD),
+            ]
+        );
+
+        $user->role = $role;
+        $user->save();
+
+        return $user;
     }
 }

@@ -1,7 +1,7 @@
 @extends('layouts.app')
 
 @section('title', 'Academic Terms')
-@section('subtitle', 'Grading period control — School Year ' . $schoolYear)
+@section('subtitle', 'Term control — School Year ' . $schoolYear)
 
 @section('content')
 
@@ -19,7 +19,7 @@
 
 <div class="bg-white rounded-xl shadow-sm">
     <div class="px-6 py-4 border-b">
-        <h2 class="text-sm font-semibold text-gray-800">Grading Period Control</h2>
+        <h2 class="text-sm font-semibold text-gray-800">Term Control</h2>
         <p class="text-xs text-gray-400">
             Only one term can be open for encoding at a time. A term cannot be opened until the previous term is 100% encoded across every section.
         </p>
@@ -51,6 +51,56 @@
                         @endforeach
                     @endif
                 </p>
+
+                {{-- TASK 4 of "dashboard structure and upload safeguards"
+                     — the subjects x students arithmetic behind the line
+                     above, per section, visible before anyone attempts to
+                     open the NEXT term and gets refused. Open by default
+                     only when this term isn't complete, so the gap that
+                     matters surfaces without a click. --}}
+                <details class="mt-2" {{ $term->completion['complete'] ? '' : 'open' }}>
+                    <summary class="text-xs text-brand-700 cursor-pointer hover:underline">
+                        Section breakdown ({{ count($term->capacity) }} section{{ count($term->capacity) === 1 ? '' : 's' }})
+                    </summary>
+                    <div class="mt-2 overflow-x-auto border rounded-lg">
+                        <table class="w-full text-xs">
+                            <thead class="bg-gray-50 text-gray-500 uppercase tracking-wide">
+                                <tr>
+                                    <th class="text-left px-3 py-2">Section</th>
+                                    <th class="text-center px-3 py-2">Subjects</th>
+                                    <th class="text-center px-3 py-2">Students</th>
+                                    <th class="text-center px-3 py-2">Expected Grades</th>
+                                    <th class="text-center px-3 py-2">Encoded</th>
+                                    <th class="text-center px-3 py-2">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100">
+                                @forelse($term->capacity as $c)
+                                <tr class="{{ $c['expected'] > 0 && $c['encoded'] < $c['expected'] ? 'bg-red-50' : '' }}">
+                                    <td class="px-3 py-2 text-gray-700 whitespace-nowrap">{{ $c['section']->name }} (Grade {{ $c['section']->grade_level }})</td>
+                                    <td class="px-3 py-2 text-center text-gray-600">{{ $c['subject_count'] }}</td>
+                                    <td class="px-3 py-2 text-center text-gray-600">{{ $c['student_count'] }}</td>
+                                    <td class="px-3 py-2 text-center text-gray-600">{{ $c['expected'] }}</td>
+                                    <td class="px-3 py-2 text-center text-gray-600">{{ $c['encoded'] }}</td>
+                                    <td class="px-3 py-2 text-center">
+                                        @if($c['expected'] === 0)
+                                            <span class="text-gray-300">No students/subjects yet</span>
+                                        @elseif($c['encoded'] >= $c['expected'])
+                                            <span class="text-green-600"><i class="bi bi-check-circle"></i> Complete</span>
+                                        @else
+                                            <span class="text-red-600"><i class="bi bi-exclamation-circle"></i> {{ $c['expected'] - $c['encoded'] }} short</span>
+                                        @endif
+                                    </td>
+                                </tr>
+                                @empty
+                                <tr>
+                                    <td colspan="6" class="px-3 py-3 text-center text-gray-400">No sections exist for this school year yet.</td>
+                                </tr>
+                                @endforelse
+                            </tbody>
+                        </table>
+                    </div>
+                </details>
             </div>
 
             <div class="flex gap-2">

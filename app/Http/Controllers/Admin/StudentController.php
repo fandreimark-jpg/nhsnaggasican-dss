@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Student;
 use App\Models\Section;
+use App\Http\Controllers\Concerns\SummarizesImportFailures;
 use App\Imports\StudentsImport;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Helpers\LogActivity;
@@ -19,6 +20,8 @@ use Illuminate\Http\Request;
  */
 class StudentController extends Controller
 {
+    use SummarizesImportFailures;
+
     /**
      * Show all students with optional section filter.
      * Paginated at 10 per page for performance.
@@ -27,8 +30,13 @@ class StudentController extends Controller
     {
         $query = Student::with(['section'])->orderBy('last_name');
 
-        // Filter by section if selected in dropdown
-        if (request('section_id')) {
+        // "Decision flow, report scoping, and dashboard pass" TASK 4b —
+        // the Admin dashboard's "learners not assigned to any section"
+        // data-health figure links here with this sentinel value.
+        if (request('section_id') === 'none') {
+            $query->whereNull('section_id');
+        } elseif (request('section_id')) {
+            // Filter by section if selected in dropdown
             $query->where('section_id', request('section_id'));
         }
 
@@ -93,20 +101,19 @@ class StudentController extends Controller
         $failures = $import->failures();
 
         if ($failures->count() > 0) {
-            $errorMessages = $failures->map(function ($failure) {
-                return 'Row ' . $failure->row() . ': ' . implode(', ', $failure->errors());
-            })->toArray();
+            $result = $this->summarizeImportFailures($failures, $import);
 
             LogActivity::log(
                 action:      'import_students',
-                description: 'Imported students (with ' . $failures->count() . ' skipped rows)',
+                description: 'Imported students (with ' . $result['skippedCount'] . ' skipped rows)',
                 tableName:   'students',
                 recordId:    null
             );
 
             return redirect()->route('admin.students')
-                ->with('warning', 'Valid rows were imported. ' . $failures->count() . ' row(s) were skipped:')
-                ->with('import_errors', $errorMessages);
+                ->with('warning', 'Valid rows were imported. ' . $result['skippedCount'] . ' row(s) were skipped:')
+                ->with('import_errors', $result['rowMessages'])
+                ->with('import_header_hint', $result['headerHint']);
         }
 
         LogActivity::log(

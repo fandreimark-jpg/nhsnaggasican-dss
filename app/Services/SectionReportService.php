@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\AcademicTerm;
 use App\Models\Section;
 
 /**
@@ -41,6 +42,19 @@ class SectionReportService
             ->orderBy('grade_level')
             ->pluck('grade_level');
 
-        return compact('sections', 'gradeLevels');
+        // This page can span more than one school year, unlike the
+        // single-active-year dashboards — keyed per year so the warning
+        // can name exactly which year/term combination is affected. See
+        // AcademicTerm::staleRiskTerms() and the "live in-term risk +
+        // stale data guard" prompt.
+        $staleRiskBySchoolYear = [];
+        foreach ($sections->pluck('school_year')->unique() as $schoolYear) {
+            $stale = AcademicTerm::staleRiskTerms($schoolYear);
+            if (!empty($stale)) {
+                $staleRiskBySchoolYear[$schoolYear] = $stale;
+            }
+        }
+
+        return compact('sections', 'gradeLevels', 'staleRiskBySchoolYear');
     }
 }

@@ -5,6 +5,25 @@
 
 @section('content')
 
+{{-- TASK 3b of "dashboard structure and upload safeguards" — a signal,
+     never a block: zero LRN matches is almost certainly the wrong file
+     or wrong section, but the adviser may have a good reason. Dismissible,
+     and Confirm & Import below stays enabled either way. --}}
+@if($rosterMismatch)
+<div id="rosterMismatchNotice" class="bg-amber-50 border border-amber-200 text-amber-800 text-sm p-4 rounded-lg mb-4 flex items-start justify-between gap-3">
+    <div>
+        <p class="font-medium"><i class="bi bi-exclamation-triangle-fill"></i> None of the LRNs in this file matched a student in your section</p>
+        <p class="mt-1">
+            This file may belong to another section, or the wrong file may have been uploaded. Every row below will
+            be skipped as unmatched unless this is corrected.
+        </p>
+    </div>
+    <button type="button" onclick="document.getElementById('rosterMismatchNotice').remove()" aria-label="Dismiss" class="shrink-0 text-amber-500 hover:text-amber-700">
+        <i class="bi bi-x-lg"></i>
+    </button>
+</div>
+@endif
+
 <div class="bg-white rounded-xl shadow-sm p-6 mb-4">
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <div class="bg-gray-50 rounded-lg p-3">
@@ -31,6 +50,20 @@
             Rows/cells marked below will be skipped and reported after import — nothing invalid gets saved silently.
         </p>
     @endif
+
+    @foreach($preview['column_stats'] ?? [] as $colName => $stat)
+        @if($stat['suspicious_max'])
+        <div class="bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm p-3 rounded-lg mb-2">
+            <i class="bi bi-exclamation-triangle"></i>
+            <strong>{{ $colName }}</strong> — the highest score in this file is
+            {{ rtrim(rtrim(number_format($stat['highest'], 2), '0'), '.') }}
+            out of a declared maximum of
+            {{ rtrim(rtrim(number_format($stat['max_score'], 2), '0'), '.') }}
+            ({{ number_format($stat['highest'] / $stat['max_score'] * 100, 0) }}%).
+            Check that the maximum score is correct before importing.
+        </div>
+        @endif
+    @endforeach
 
     <div class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -94,6 +127,8 @@
     @foreach($columns as $i => $col)
         <input type="hidden" name="columns[{{ $i }}][name]" value="{{ $col['name'] }}">
         <input type="hidden" name="columns[{{ $i }}][component]" value="{{ $col['component'] }}">
+        <input type="hidden" name="columns[{{ $i }}][exam_role]" value="{{ $col['exam_role'] ?? '' }}">
+        <input type="hidden" name="columns[{{ $i }}][is_additional_support]" value="{{ !empty($col['is_additional_support']) ? '1' : '' }}">
         <input type="hidden" name="columns[{{ $i }}][max_score]" value="{{ $col['max_score'] }}">
     @endforeach
 

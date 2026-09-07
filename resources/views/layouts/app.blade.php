@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <title>Naggasican NHS DSS</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
@@ -11,7 +12,7 @@
 
     {{-- Hamburger button — mobile only (hidden on desktop via md:hidden).
          Fixed at top-left so it's always reachable even while scrolling. --}}
-    <button type="button" onclick="toggleSidebar()"
+    <button type="button" onclick="toggleSidebar()" aria-label="Open menu"
             class="md:hidden fixed top-4 left-4 z-50 bg-brand-900 text-white p-2.5 rounded-lg shadow-lg">
         <i class="bi bi-list text-xl"></i>
     </button>
@@ -31,7 +32,7 @@
                 </div>
                 {{-- Close button — mobile only, lets users dismiss the
                      drawer without hunting for the overlay or hamburger. --}}
-                <button type="button" onclick="closeSidebar()" class="md:hidden text-brand-300 hover:text-white">
+                <button type="button" onclick="closeSidebar()" aria-label="Close menu" class="md:hidden text-brand-300 hover:text-white">
                     <i class="bi bi-x-lg text-lg"></i>
                 </button>
             </div>
@@ -83,6 +84,10 @@
                     class="flex items-center gap-3 px-4 py-2 rounded-lg border-l-4 hover:bg-brand-700 {{ request()->routeIs('principal.dashboard') ? 'bg-brand-700 border-gold-500' : 'border-transparent' }}">
                         <i class="bi bi-speedometer2"></i> Dashboard
                     </a>
+                    <a href="{{ route('principal.students') }}"
+                    class="flex items-center gap-3 px-4 py-2 rounded-lg border-l-4 hover:bg-brand-700 {{ request()->routeIs('principal.students*') ? 'bg-brand-700 border-gold-500' : 'border-transparent' }}">
+                        <i class="bi bi-mortarboard"></i> Students
+                    </a>
                     <a href="{{ route('principal.interventions') }}"
                     class="flex items-center gap-3 px-4 py-2 rounded-lg border-l-4 hover:bg-brand-700 {{ request()->routeIs('principal.interventions*') ? 'bg-brand-700 border-gold-500' : 'border-transparent' }}">
                         <i class="bi bi-clipboard2-pulse"></i> Interventions
@@ -112,6 +117,10 @@
                     class="flex items-center gap-3 px-4 py-2 rounded-lg border-l-4 hover:bg-brand-700 {{ request()->routeIs('adviser.assessments*') ? 'bg-brand-700 border-gold-500' : 'border-transparent' }}">
                         <i class="bi bi-clipboard-data"></i> Assessments
                     </a>
+                    <a href="{{ route('adviser.interventions') }}"
+                    class="flex items-center gap-3 px-4 py-2 rounded-lg border-l-4 hover:bg-brand-700 {{ request()->routeIs('adviser.interventions*') ? 'bg-brand-700 border-gold-500' : 'border-transparent' }}">
+                        <i class="bi bi-clipboard2-pulse"></i> Interventions
+                    </a>
                     <a href="{{ route('adviser.submit.report') }}"
                     class="flex items-center gap-3 px-4 py-2 rounded-lg border-l-4 hover:bg-brand-700 {{ request()->routeIs('adviser.submit*') ? 'bg-brand-700 border-gold-500' : 'border-transparent' }}">
                         <i class="bi bi-file-earmark-arrow-up"></i> Submit Report
@@ -126,7 +135,7 @@
                      advisers and admins; each only ever edits their own account. --}}
                 <div class="flex items-center gap-2">
                     <button type="button" onclick="openProfileModal()"
-                            title="My Profile"
+                            title="My Profile" aria-label="My Profile"
                             class="text-brand-200 hover:text-white text-lg leading-none">
                         <i class="bi bi-person-circle"></i>
                     </button>
@@ -190,7 +199,7 @@
                 {{ session('success') ?? session('error') ?? session('warning') }}
             </p>
         </div>
-        <button onclick="dismissToast()" class="shrink-0 text-gray-300 hover:text-gray-500 text-lg leading-none mt-0.5">
+        <button onclick="dismissToast()" aria-label="Dismiss notification" class="shrink-0 text-gray-300 hover:text-gray-500 text-lg leading-none mt-0.5">
             <i class="bi bi-x"></i>
         </button>
         <div id="toastProgress"

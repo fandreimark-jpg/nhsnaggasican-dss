@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Track;
+use App\Http\Controllers\Concerns\SummarizesImportFailures;
 use App\Imports\TracksImport;
 use App\Helpers\LogActivity;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Maatwebsite\Excel\Facades\Excel;
 
 /**
@@ -17,6 +19,8 @@ use Maatwebsite\Excel\Facades\Excel;
  */
 class TrackController extends Controller
 {
+    use SummarizesImportFailures;
+
     /** Show all tracks with their specializations. */
     public function index()
     {
@@ -43,7 +47,7 @@ class TrackController extends Controller
 
          LogActivity::log(
             'create_track',
-            'Created ' . $request->role . ' tracks: ' . $request->name,
+            'Created track: ' . $request->name,
             'tracks',
             null
         );
@@ -53,8 +57,11 @@ class TrackController extends Controller
     }
 
     /**
-     * Bulk-import tracks from an Excel/CSV file. See App\Imports\TracksImport
-     * for the expected column layout and duplicate-detection rules.
+     * Bulk-import tracks + specializations from an Excel/CSV file. See
+     * App\Imports\TracksImport for the expected column layout — the import
+     * is idempotent (re-uploading the same file is a no-op), so it's run
+     * inside a transaction purely so a mid-file failure can't leave a
+     * partially-applied file behind.
      */
     public function import(Request $request)
     {
@@ -63,36 +70,39 @@ class TrackController extends Controller
         ]);
 
         $import = new TracksImport();
-        Excel::import($import, $request->file('file'));
+
+        DB::transaction(function () use ($import, $request) {
+            Excel::import($import, $request->file('file'));
+        });
 
         $failures = $import->failures();
+        $summary  = $import->trackCount . ' track(s) and ' . $import->specializationCount . ' specialization(s)';
 
         if ($failures->count() > 0) {
-            $errorMessages = $failures->map(function ($failure) {
-                return 'Row ' . $failure->row() . ': ' . implode(', ', $failure->errors());
-            })->toArray();
+            $result = $this->summarizeImportFailures($failures, $import);
 
             LogActivity::log(
                 'import_tracks',
-                'Imported ' . $import->importedCount . ' track(s), ' . $failures->count() . ' row(s) skipped',
+                "Imported {$summary}, " . $result['skippedCount'] . ' row(s) skipped',
                 'tracks',
                 null
             );
 
             return redirect()->route('admin.tracks')
-                ->with('warning', $import->importedCount . ' track(s) imported. ' . $failures->count() . ' row(s) were skipped:')
-                ->with('import_errors', $errorMessages);
+                ->with('warning', "{$summary} imported. " . $result['skippedCount'] . ' row(s) were skipped:')
+                ->with('import_errors', $result['rowMessages'])
+                ->with('import_header_hint', $result['headerHint']);
         }
 
         LogActivity::log(
             'import_tracks',
-            'Bulk imported ' . $import->importedCount . ' track(s) via file upload',
+            "Bulk imported {$summary} via file upload",
             'tracks',
             null
         );
 
         return redirect()->route('admin.tracks')
-            ->with('success', $import->importedCount . ' track(s) imported successfully!');
+            ->with('success', "{$summary} imported successfully!");
     }
 
     /**

@@ -5,27 +5,18 @@
 
 @section('content')
 
-@if(session('import_errors'))
-<div class="bg-yellow-100 text-yellow-800 text-sm p-4 rounded-lg mb-4">
-    <p class="font-medium mb-1">{{ session('warning') }}</p>
-    <ul class="list-disc list-inside">
-        @foreach(session('import_errors') as $error)
-            <li>{{ $error }}</li>
-        @endforeach
-    </ul>
-</div>
-@endif
+@include('partials.import-result')
 
 <div class="bg-white rounded-xl shadow-sm mb-0">
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 px-6 py-4 border-b">
         <div>
             <h2 class="text-sm font-semibold text-gray-800">All Students</h2>
-            <p class="text-xs text-gray-400">{{ $students->count() }} total students</p>
+            <p class="text-xs text-gray-400"><x-count-label :count="$students->count()" noun="student" total /></p>
         </div>
         <div class="flex items-center gap-3 flex-wrap">
             <form method="GET">
                 <select name="section_id" onchange="this.form.submit()"
-                    class="border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                    class="w-64 border rounded-lg pl-3 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
                     <option value="">All Sections</option>
                     @foreach($sections as $section)
                         <option value="{{ $section->id }}"
@@ -52,17 +43,22 @@
         </div>
     </div>
 
-    <table class="w-full text-sm" id="studentTable">
-        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+    {{-- TASK 5 of "terminology, transmutation, and interface cleanup" —
+         body scrolls within a fixed-height container (header stays
+         pinned) instead of the whole page scrolling. Row count above the
+         table already existed here (x-count-label in the header). --}}
+    <div class="max-h-[60vh] overflow-auto">
+    <table class="w-full min-w-full text-sm" id="studentTable">
+        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide sticky top-0 z-10">
             <tr>
-                <th class="text-left px-6 py-3">LRN</th>
-                <th class="text-left px-6 py-3">Last Name</th>
-                <th class="text-left px-6 py-3">First Name</th>
-                <th class="text-left px-6 py-3">Middle Name</th>
-                <th class="text-left px-6 py-3">Birthdate</th>
-                <th class="text-left px-6 py-3">Gender</th>
-                <th class="text-left px-6 py-3">Section</th>
-                <th class="px-6 py-3 text-right">Actions</th>
+                <th scope="col" class="text-left px-6 py-3">LRN</th>
+                <th scope="col" class="text-left px-6 py-3">Last Name</th>
+                <th scope="col" class="text-left px-6 py-3">First Name</th>
+                <th scope="col" class="text-left px-6 py-3">Middle Name</th>
+                <th scope="col" class="text-left px-6 py-3">Birthdate</th>
+                <th scope="col" class="text-left px-6 py-3">Gender</th>
+                <th scope="col" class="text-left px-6 py-3">Section</th>
+                <th scope="col" class="px-6 py-3 text-right">Actions</th>
             </tr>
         </thead>
         <tbody class="divide-y divide-gray-100" id="studentTableBody">
@@ -80,35 +76,38 @@
                         {{ $student->section ? '(Grade ' . $student->section->grade_level . ')' : '' }}
                     </span>
                 </td>
-                <td class="px-6 py-3 text-right space-x-2">
-                    <button type="button"
-                        onclick='openEditStudentModal(@json($student))'
-                        class="inline-flex items-center gap-1 text-brand-600 hover:text-brand-800 text-xs font-medium border border-brand-200 rounded px-2 py-1 hover:bg-brand-50">
-                        <i class="bi bi-pencil-square"></i> Edit
-                    </button>
-                    <form method="POST"
-                          action="{{ route('admin.students.destroy', $student->id) }}"
-                          class="inline"
-                          data-confirm="Remove student {{ $student->last_name }}, {{ $student->first_name }}?">
-                        @csrf
-                        @method('DELETE')
-                        <button type="submit"
-                            class="inline-flex items-center gap-1 text-red-600 hover:text-red-800 text-xs font-medium border border-red-200 rounded px-2 py-1 hover:bg-red-50">
-                            <i class="bi bi-trash"></i> Delete
+                <td class="px-6 py-3 text-right">
+                    <div class="flex items-center justify-end gap-2">
+                        <button type="button"
+                            onclick='openEditStudentModal(@json($student))'
+                            class="inline-flex items-center gap-1 text-brand-600 hover:text-brand-800 text-xs font-medium border border-brand-200 rounded px-2 py-1 hover:bg-brand-50 whitespace-nowrap">
+                            <i class="bi bi-pencil-square"></i> Edit
                         </button>
-                    </form>
+                        <form method="POST"
+                              action="{{ route('admin.students.destroy', $student->id) }}"
+                              class="inline"
+                              data-confirm="Remove student {{ $student->last_name }}, {{ $student->first_name }}?">
+                            @csrf
+                            @method('DELETE')
+                            <button type="submit"
+                                class="inline-flex items-center gap-1 text-red-600 hover:text-red-800 text-xs font-medium border border-red-200 rounded px-2 py-1 hover:bg-red-50 whitespace-nowrap">
+                                <i class="bi bi-trash"></i> Delete
+                            </button>
+                        </form>
+                    </div>
                 </td>
             </tr>
             @empty
             <tr>
-                <td colspan="7" class="px-6 py-8 text-center text-gray-400">
-                    <i class="bi bi-people text-2xl block mb-2"></i>
-                    No students yet.
+                <td colspan="7">
+                    <x-empty-state message="No students yet." icon="bi-people"
+                        hint="Use &quot;Add Student&quot; or &quot;Import Students&quot; above. Each student needs a section." />
                 </td>
             </tr>
             @endforelse
         </tbody>
     </table>
+    </div>
 
     <div id="noStudentResults" class="hidden px-6 py-8 text-center text-gray-400">
         <i class="bi bi-search text-2xl block mb-2"></i>
@@ -134,7 +133,7 @@
                 <span class="px-3 py-1 rounded border text-gray-300 cursor-not-allowed">Next →</span>
             @endif
         </div>
-        <span class="text-xs">Showing {{ $students->firstItem() }}–{{ $students->lastItem() }} of {{ $students->total() }} students</span>
+        <span class="text-xs">Showing {{ $students->firstItem() }}–{{ $students->lastItem() }} of <x-count-label :count="$students->total()" noun="student" /></span>
     </div>
     @endif
 </div>
@@ -147,7 +146,7 @@
         <div class="flex justify-between items-center mb-4">
             <h3 id="studentModalTitle" class="text-lg font-semibold text-gray-800">Edit Student</h3>
             <button type="button" onclick="closeStudentModal()"
-                    class="text-gray-400 hover:text-gray-600">✕</button>
+                    aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         @if($errors->any())
@@ -246,7 +245,7 @@
         <div class="flex justify-between items-center mb-4">
             <h3 class="text-lg font-semibold text-gray-800">Add Student</h3>
             <button type="button" onclick="closeAddStudentModal()"
-                    class="text-gray-400 hover:text-gray-600">✕</button>
+                    aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         @if($errors->any() && !$errors->import->any())
@@ -344,7 +343,7 @@
 
         <div class="flex justify-between items-center mb-4">
             <h3 class="text-lg font-semibold text-gray-800">Import Students</h3>
-            <button type="button" onclick="closeImportStudentsModal()" class="text-gray-400 hover:text-gray-600">✕</button>
+            <button type="button" onclick="closeImportStudentsModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         @if($errors->import->any())

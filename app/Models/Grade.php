@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -17,6 +18,8 @@ use Illuminate\Database\Eloquent\Model;
  */
 class Grade extends Model
 {
+    use HasFactory;
+
     // Fields that can be mass-assigned
     protected $fillable = [
         'student_id',       // Which student
@@ -28,12 +31,15 @@ class Grade extends Model
         'computed_grade',   // Derived from assessment evidence by GradingEngine — evidence, not official
         'is_verified',      // Whether an adviser has reviewed computed_grade
         'verified_at',      // When it was verified
+        'is_provisional',   // Whether `grade` came from a fallback scheme, not the subject's real one — see TransmutationService::resolve()
+        'provisional_scheme', // Which scheme's bands actually produced `grade`, when is_provisional is true
         'school_year',      // e.g. '2026-2027'
     ];
 
     protected $casts = [
         'is_verified' => 'boolean',
         'verified_at' => 'datetime',
+        'is_provisional' => 'boolean',
     ];
 
     // =============================================
@@ -50,5 +56,21 @@ class Grade extends Model
     public function subject()
     {
         return $this->belongsTo(Subject::class);
+    }
+
+    /**
+     * The formal Failing determination (official grade <= 74), for SQL
+     * contexts (aggregate dashboard counts, etc.) where fetching every
+     * Grade model just to call InTermStatusService::isFailing() in PHP
+     * would be wasteful. Must stay in lockstep with that method — both
+     * read the same InTermStatusService::FAILING_THRESHOLD constant, so
+     * there is exactly one place the "74" rule is written.
+     */
+    public function scopeFailing($query)
+    {
+        return $query->where('is_verified', true)
+                     ->where('is_provisional', false)
+                     ->whereNotNull('grade')
+                     ->where('grade', '<=', \App\Services\InTermStatusService::FAILING_THRESHOLD);
     }
 }

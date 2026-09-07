@@ -4,12 +4,15 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Subject;
+use App\Models\SubjectGroupWeight;
 use App\Models\Track;
 use App\Models\Specialization;
+use App\Http\Controllers\Concerns\SummarizesImportFailures;
 use App\Imports\SubjectsImport;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Helpers\LogActivity;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 /**
  * SubjectController (Admin)
@@ -20,6 +23,24 @@ use Illuminate\Http\Request;
  */
 class SubjectController extends Controller
 {
+    use SummarizesImportFailures;
+
+    /**
+     * Which subject_group a subject can be assigned — read from
+     * subject_group_weights itself rather than hardcoded, so a future
+     * scheme's different group list is a seeded row, never a code
+     * change. 'all' is excluded: that's do8_2015's scheme-wide fallback
+     * bucket (see SubjectGroupWeight::resolve()), never a real group a
+     * subject is actually assigned.
+     */
+    private function availableSubjectGroups()
+    {
+        return SubjectGroupWeight::where('subject_group', '!=', 'all')
+            ->distinct()
+            ->orderBy('subject_group')
+            ->pluck('subject_group');
+    }
+
     /**
      * Show all subjects with optional type filter (core/elective).
      * URL: /admin/subjects?type=core or ?type=elective
@@ -35,8 +56,9 @@ class SubjectController extends Controller
 
         $tracks          = Track::with('specializations')->orderBy('name')->get();
         $specializations = Specialization::with('track')->orderBy('name')->get();
+        $subjectGroups   = $this->availableSubjectGroups();
 
-        return view('admin.subjects', compact('subjects', 'tracks', 'specializations'));
+        return view('admin.subjects', compact('subjects', 'tracks', 'specializations', 'subjectGroups'));
     }
 
     /**
@@ -50,6 +72,7 @@ class SubjectController extends Controller
             'name'              => 'required|string|max:255',
             'type'              => 'required|in:core,elective',
             'grade_level'       => 'required|in:11,12',
+            'subject_group'     => ['required', Rule::in($this->availableSubjectGroups())],
             'track_id'          => 'nullable|exists:tracks,id',
             'specialization_id' => 'nullable|exists:specializations,id',
         ]);
@@ -58,6 +81,7 @@ class SubjectController extends Controller
             'name'              => $request->name,
             'type'              => $request->type,
             'grade_level'       => $request->grade_level,
+            'subject_group'     => $request->subject_group,
             // Only elective subjects have track/specialization
             'track_id'          => $request->type === 'elective' ? $request->track_id : null,
             'specialization_id' => $request->type === 'elective' ? $request->specialization_id : null,
@@ -91,20 +115,19 @@ class SubjectController extends Controller
         $failures = $import->failures();
 
         if ($failures->count() > 0) {
-            $errorMessages = $failures->map(function ($failure) {
-                return 'Row ' . $failure->row() . ': ' . implode(', ', $failure->errors());
-            })->toArray();
+            $result = $this->summarizeImportFailures($failures, $import);
 
             LogActivity::log(
                 'import_subjects',
-                'Imported ' . $import->importedCount . ' subject(s), ' . $failures->count() . ' row(s) skipped',
+                'Imported ' . $import->importedCount . ' subject(s), ' . $result['skippedCount'] . ' row(s) skipped',
                 'subjects',
                 null
             );
 
             return redirect()->route('admin.subjects')
-                ->with('warning', $import->importedCount . ' subject(s) imported. ' . $failures->count() . ' row(s) were skipped:')
-                ->with('import_errors', $errorMessages);
+                ->with('warning', $import->importedCount . ' subject(s) imported. ' . $result['skippedCount'] . ' row(s) were skipped:')
+                ->with('import_errors', $result['rowMessages'])
+                ->with('import_header_hint', $result['headerHint']);
         }
 
         LogActivity::log(
@@ -127,6 +150,7 @@ class SubjectController extends Controller
             'name'              => 'required|string|max:255',
             'type'              => 'required|in:core,elective',
             'grade_level'       => 'required|in:11,12',
+            'subject_group'     => ['required', Rule::in($this->availableSubjectGroups())],
             'track_id'          => 'nullable|exists:tracks,id',
             'specialization_id' => 'nullable|exists:specializations,id',
         ]);
@@ -135,6 +159,7 @@ class SubjectController extends Controller
             'name'              => $request->name,
             'type'              => $request->type,
             'grade_level'       => $request->grade_level,
+            'subject_group'     => $request->subject_group,
             'track_id'          => $request->type === 'elective' ? $request->track_id : null,
             'specialization_id' => $request->type === 'elective' ? $request->specialization_id : null,
         ]);

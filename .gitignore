@@ -32,3 +32,11 @@ Thumbs.db
 /_ide_helper.php
 /_ide_helper_models.php
 /.phpstorm.meta.php
+
+# Database backups (contain live student data; timestamped dumps kept locally only)
+/backups
+/storage/backups
+
+# Python bytecode cache
+__pycache__/
+*.pyc

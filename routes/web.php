@@ -8,6 +8,7 @@ use App\Http\Controllers\Adviser\StudentController as AdviserStudentController;
 use App\Http\Controllers\Adviser\GradeController as AdviserGradeController;
 use App\Http\Controllers\Adviser\ReportController as AdviserReportController;
 use App\Http\Controllers\Adviser\AssessmentController as AdviserAssessmentController;
+use App\Http\Controllers\Adviser\InterventionController as AdviserInterventionController;
 
 // Principal controllers
 use App\Http\Controllers\Principal\DashboardController as PrincipalDashboardController;
@@ -73,12 +74,35 @@ Route::middleware(['auth', 'role:adviser'])
         Route::post('/grades/import',  [AdviserGradeController::class, 'importGrades'])->name('grades.import');
         Route::get('/grades/template', [AdviserGradeController::class, 'downloadGradeTemplate'])->name('grades.template');
         Route::post('/grades/verify', [AdviserGradeController::class, 'verifyComputedGrade'])->name('grades.verify');
+        Route::get('/grades/verify-all/preview', [AdviserGradeController::class, 'verifyAllRemainingPreview'])->name('grades.verify-all.preview');
+        Route::post('/grades/verify-all', [AdviserGradeController::class, 'verifyAllRemaining'])->name('grades.verify-all');
         Route::get('/submit-report',      [AdviserReportController::class, 'show'])->name('submit.report');
         Route::post('/submit-report',     [AdviserReportController::class, 'submit'])->name('submit.report.post');
         Route::get('/assessments',          [AdviserAssessmentController::class, 'index'])->name('assessments');
         Route::post('/assessments/detect',  [AdviserAssessmentController::class, 'detect'])->name('assessments.detect');
         Route::post('/assessments/preview', [AdviserAssessmentController::class, 'preview'])->name('assessments.preview');
         Route::post('/assessments/import',  [AdviserAssessmentController::class, 'import'])->name('assessments.import');
+        // "Add an assessment item by hand" — a second, small-batch way in
+        // alongside the file-upload path above; produces identical
+        // Assessment/AssessmentScore rows (see AdviserAssessmentController::storeItem()).
+        Route::post('/assessments/item',             [AdviserAssessmentController::class, 'storeItem'])->name('assessments.item.store');
+        Route::put('/assessments/item/{assessment}', [AdviserAssessmentController::class, 'updateItem'])->name('assessments.item.update');
+        // Read + acknowledge only — the adviser cannot create, approve, or
+        // delete an intervention (see Adviser\InterventionController's
+        // docblock and RoleAuthorizationTest).
+        Route::get('/interventions', [AdviserInterventionController::class, 'index'])->name('interventions');
+        // Registered BEFORE the {intervention}-scoped route below so
+        // "acknowledge-all" is never captured as a route-model-bound id.
+        Route::post('/interventions/acknowledge-all', [AdviserInterventionController::class, 'acknowledgeAll'])->name('interventions.acknowledge-all');
+        // Registered BEFORE the {intervention}-scoped route below for the
+        // same reason as acknowledge-all above — "deliver-group" must
+        // never be captured as a route-model-bound id. The ONE exception
+        // to "delivery is never bulk" — see markDeliveredGroup()'s
+        // docblock: several learners genuinely covered by the SAME
+        // activity, one required note, honestly labelled as a group act.
+        Route::post('/interventions/deliver-group', [AdviserInterventionController::class, 'markDeliveredGroup'])->name('interventions.deliver-group');
+        Route::post('/interventions/{intervention}/acknowledge', [AdviserInterventionController::class, 'acknowledge'])->name('interventions.acknowledge');
+        Route::post('/interventions/{intervention}/deliver', [AdviserInterventionController::class, 'markDelivered'])->name('interventions.deliver');
     });
 
 // =============================================
@@ -94,8 +118,11 @@ Route::middleware(['auth', 'role:principal'])
         // decisions only, never grades or assessments (see RoleAuthorizationTest).
         Route::get('/interventions',            [PrincipalInterventionController::class, 'index'])->name('interventions');
         Route::post('/interventions',           [PrincipalInterventionController::class, 'store'])->name('interventions.store');
+        Route::post('/interventions/bulk',      [PrincipalInterventionController::class, 'storeBulk'])->name('interventions.bulk-store');
         Route::put('/interventions/{intervention}', [PrincipalInterventionController::class, 'update'])->name('interventions.update');
+        Route::post('/interventions/approve-pending', [PrincipalInterventionController::class, 'approvePending'])->name('interventions.approve-pending');
         Route::get('/reports', [PrincipalReportController::class, 'index'])->name('reports');
+        Route::get('/students', [PrincipalStudentController::class, 'index'])->name('students');
         Route::get('/students/{student}', [PrincipalStudentController::class, 'show'])->name('students.show');
         Route::get('/subject-analysis', [PrincipalSubjectAnalysisController::class, 'index'])->name('subject-analysis');
     });
@@ -146,6 +173,7 @@ Route::middleware(['auth', 'role:admin'])
         // Sections Management
         Route::get('/sections',         [SectionController::class, 'index'])->name('sections');
         Route::post('/sections',        [SectionController::class, 'store'])->name('sections.store');
+        Route::post('/sections/import', [SectionController::class, 'import'])->name('sections.import');
         Route::put('/sections/{id}',    [SectionController::class, 'update'])->name('sections.update');
         Route::delete('/sections/{id}', [SectionController::class, 'destroy'])->name('sections.destroy');
 

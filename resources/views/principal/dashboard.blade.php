@@ -5,45 +5,57 @@
 
 @section('content')
 
-{{-- Summary Cards --}}
-<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-brand-500">
-        <p class="text-xs text-gray-500">Total Students</p>
-        <p class="text-2xl font-bold text-brand-700 mt-1">{{ $totalStudents }}</p>
-    </div>
-    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-green-500">
-        <p class="text-xs text-gray-500">Low Risk</p>
-        <p class="text-2xl font-bold text-green-600 mt-1">{{ $lowRisk }}</p>
-    </div>
-    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-yellow-400">
-        <p class="text-xs text-gray-500">Moderate Risk</p>
-        <p class="text-2xl font-bold text-yellow-500 mt-1">{{ $moderateRisk }}</p>
-    </div>
-    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-red-500">
-        <p class="text-xs text-gray-500">High Risk</p>
-        <p class="text-2xl font-bold text-red-600 mt-1">{{ $highRisk }}</p>
-    </div>
+@include('partials.transmutation-fallback-banner')
+@include('partials.stale-risk-warning')
+@include('partials.in-term-vs-risk-help')
+@include('partials.last-updated')
+
+{{-- ============================================================
+     ZONE 1 — Where the school stands now. TASK 1 of "dashboard
+     structure and upload safeguards": everything here populates from
+     assessment evidence and is what the Principal can act on today,
+     grouped and labelled so it reads as deliberate, not a flat stack
+     of eleven unrelated elements. Nothing below was deleted or
+     recomputed differently — only reordered/regrouped and labelled.
+     ============================================================ --}}
+<div class="mb-3">
+    <h2 class="text-base font-bold text-gray-800">1. Where the school stands now</h2>
+    <p class="text-xs text-gray-500">From assessment evidence already on file — available today, before any term report is submitted.</p>
 </div>
 
-{{-- Principal-only summary: intervention status + assessment completion.
-     Not shown on the Admin dashboard — this is what the Principal actually
-     owns that Admin doesn't (see InterventionController). --}}
-<div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-    <a href="{{ route('principal.interventions') }}" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-purple-500 hover:shadow-md transition-shadow block">
-        <p class="text-xs text-gray-500">Under Intervention</p>
-        <p class="text-2xl font-bold text-purple-700 mt-1">{{ $under_intervention }}</p>
-        <p class="text-xs text-gray-400 mt-1">Approved, in progress, or being monitored</p>
-    </a>
-    <a href="{{ route('principal.interventions') }}" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-orange-400 hover:shadow-md transition-shadow block">
-        <p class="text-xs text-gray-500">Awaiting Your Decision</p>
-        <p class="text-2xl font-bold text-orange-600 mt-1">{{ $awaiting_decision }}</p>
-        <p class="text-xs text-gray-400 mt-1">Recommended, not yet reviewed</p>
-    </a>
-    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-brand-500">
+@php
+    // "Correctness and interface pass" TASK 6a — the At Risk comparison
+    // reads from the SAME getInTermStatusTrend() array the sparkline
+    // below renders, so the two numbers can never silently disagree.
+    $prevAtRisk = $previousTermCounts['atRisk'] ?? null;
+    $atRiskDelta = $prevAtRisk !== null ? $inTermAtRisk - $prevAtRisk : null;
+@endphp
+
+{{-- Summary Cards — TASK 7a of "clarity, progress, and visual design
+     pass": neither of these is a status (At Risk/Needs Attention/On
+     Track/Failing), so both stay neutral rather than borrowing the
+     "On Track" green for a plain count.
+     TASK 6a of "correctness and interface pass" — every figure now
+     carries a comparison: Total Students names the scope it covers,
+     Assessment Completion gets a visible progress bar alongside the
+     percentage it was always showing as plain text. --}}
+<div class="grid grid-cols-2 gap-3 mb-4 max-w-xl">
+    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-gray-300">
+        <p class="text-xs text-gray-500">Total Students</p>
+        <p class="text-2xl font-bold text-gray-800 mt-1 tabular-nums">{{ $totalStudents }}</p>
+        <p class="text-xs text-gray-400 mt-1">Across every section, Term {{ $inTermTerm }}, {{ \App\Models\Section::activeSchoolYear() }}</p>
+    </div>
+    {{-- Moved here from the decisions row below — Assessment Completion is
+         evidence-on-file, same as In-Term Status, not a decision the
+         Principal is making. --}}
+    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-gray-300">
         <p class="text-xs text-gray-500">Assessment Completion</p>
         @if($assessment_completion['has_data'])
-            <p class="text-2xl font-bold text-brand-700 mt-1">{{ $assessment_completion['percentage'] }}%</p>
-            <p class="text-xs text-gray-400 mt-1">{{ $assessment_completion['actual'] }} of {{ $assessment_completion['expected'] }} expected scores entered</p>
+            <p class="text-2xl font-bold text-gray-800 mt-1 tabular-nums">{{ $assessment_completion['percentage'] }}%</p>
+            <div class="h-1.5 bg-gray-100 rounded-full overflow-hidden mt-2" role="progressbar" aria-valuenow="{{ $assessment_completion['percentage'] }}" aria-valuemin="0" aria-valuemax="100">
+                <div class="h-full bg-brand-700 rounded-full" style="width: {{ min(100, $assessment_completion['percentage']) }}%"></div>
+            </div>
+            <p class="text-xs text-gray-400 mt-1.5 tabular-nums">{{ $assessment_completion['actual'] }} of {{ $assessment_completion['expected'] }} expected scores entered</p>
         @else
             <p class="text-lg font-medium text-gray-300 mt-1">No data yet</p>
             <p class="text-xs text-gray-400 mt-1">No assessment forms uploaded this school year</p>
@@ -51,8 +63,290 @@
     </div>
 </div>
 
-{{-- Charts Row --}}
+{{-- TASK 3 of "close the intervention loop": populated the instant
+     assessment evidence exists, unlike the Risk cards below — see
+     DashboardAnalyticsService::getInTermStatusSummary(). Deliberately its
+     own row, its own heading, and never merged into the Risk numbers —
+     see the "live in-term risk + stale data guard" prompt: these two
+     signals must never look interchangeable.
+
+     TASK 6c of "correctness and interface pass" — three separate count
+     cards replaced with ONE horizontal stacked bar: the relative size IS
+     the message, and colour is never the only signal — every segment is
+     also labelled with its number below the bar. TASK 6d — each segment
+     links to the Students page filtered to that status for this term
+     (the Students page is scoped to one subject at a time, so this lands
+     on whichever subject it defaults to, filtered — not literally "every
+     subject at once," which no single list on this system currently
+     shows). --}}
+<div class="mb-1">
+    <h3 class="text-sm font-semibold text-gray-700">In-Term Status — Term {{ $inTermTerm }}</h3>
+    <p class="text-xs text-gray-400">From assessment evidence already on file, across every subject — available before any term report is submitted.</p>
+</div>
+@if($inTermTotal > 0)
+<div class="bg-white rounded-lg shadow-sm p-4 mb-1 mt-2">
+    <div class="flex h-6 rounded-full overflow-hidden bg-gray-100">
+        @if($inTermOnTrack > 0)
+        <a href="{{ route('principal.students', ['status_filter' => 'On Track', 'period' => $inTermTerm]) }}"
+           class="bg-green-500 hover:bg-green-600 transition-colors" style="flex-grow: {{ $inTermOnTrack }}"
+           title="On Track: {{ $inTermOnTrack }} — see the filtered Students list"></a>
+        @endif
+        @if($inTermNeedsAttention > 0)
+        <a href="{{ route('principal.students', ['status_filter' => 'Needs Attention', 'period' => $inTermTerm]) }}"
+           class="bg-yellow-400 hover:bg-yellow-500 transition-colors" style="flex-grow: {{ $inTermNeedsAttention }}"
+           title="Needs Attention: {{ $inTermNeedsAttention }} — see the filtered Students list"></a>
+        @endif
+        @if($inTermAtRisk > 0)
+        <a href="{{ route('principal.students', ['status_filter' => 'At Risk', 'period' => $inTermTerm]) }}"
+           class="bg-red-500 hover:bg-red-600 transition-colors" style="flex-grow: {{ $inTermAtRisk }}"
+           title="At Risk: {{ $inTermAtRisk }} — see the filtered Students list"></a>
+        @endif
+    </div>
+    <div class="flex flex-wrap gap-x-5 gap-y-1.5 mt-3 text-xs">
+        <a href="{{ route('principal.students', ['status_filter' => 'On Track', 'period' => $inTermTerm]) }}" class="flex items-center gap-1.5 hover:underline">
+            <span class="w-2.5 h-2.5 rounded-full bg-green-500 inline-block shrink-0"></span>
+            On Track <strong class="text-gray-800 tabular-nums">{{ $inTermOnTrack }}</strong>
+        </a>
+        <a href="{{ route('principal.students', ['status_filter' => 'Needs Attention', 'period' => $inTermTerm]) }}" class="flex items-center gap-1.5 hover:underline">
+            <span class="w-2.5 h-2.5 rounded-full bg-yellow-400 inline-block shrink-0"></span>
+            Needs Attention <strong class="text-gray-800 tabular-nums">{{ $inTermNeedsAttention }}</strong>
+        </a>
+        <a href="{{ route('principal.students', ['status_filter' => 'At Risk', 'period' => $inTermTerm]) }}" class="flex items-center gap-1.5 hover:underline">
+            <span class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block shrink-0"></span>
+            At Risk <strong class="text-gray-800 tabular-nums">{{ $inTermAtRisk }}</strong>
+            @if($atRiskDelta !== null)
+                <span class="text-gray-400">({{ $atRiskDelta > 0 ? 'up' : ($atRiskDelta < 0 ? 'down' : 'unchanged') }}{{ $atRiskDelta !== 0 ? ' from ' . $prevAtRisk . ' in Term ' . ($inTermTerm - 1) : ' since Term ' . ($inTermTerm - 1) }})</span>
+            @endif
+        </a>
+    </div>
+</div>
+@else
+<p class="text-xs text-gray-400 -mt-2 mb-1">No assessment evidence uploaded yet this term — these counts populate as advisers import assessment scores.</p>
+@endif
+
+{{-- TASK 6b of "correctness and interface pass" — "the single most
+     useful thing the dashboard is currently missing": the SAME stacked-bar
+     pattern above, once per term, so the Principal sees the whole school's
+     direction across the year at a glance rather than only a snapshot of
+     the current term. A term with no evidence yet renders as an empty
+     (all-grey) bar, not a hidden one — absence is itself informative here. --}}
+<div class="bg-white rounded-lg shadow-sm p-4 mb-4">
+    <h3 class="font-semibold text-gray-700 text-sm mb-1">Term-over-Term Trend</h3>
+    <p class="text-xs text-gray-400 mb-3">On Track / Needs Attention / At Risk, across every subject, per term.</p>
+    <div class="grid grid-cols-3 gap-4">
+        @foreach($inTermStatusTrend as $t)
+        <div>
+            <p class="text-xs font-medium text-gray-600 mb-1">Term {{ $t['term'] }}</p>
+            @if($t['total'] > 0)
+            <div class="flex h-4 rounded-full overflow-hidden bg-gray-100">
+                @if($t['onTrack'] > 0)<span class="bg-green-500" style="flex-grow: {{ $t['onTrack'] }}" title="On Track: {{ $t['onTrack'] }}"></span>@endif
+                @if($t['needsAttention'] > 0)<span class="bg-yellow-400" style="flex-grow: {{ $t['needsAttention'] }}" title="Needs Attention: {{ $t['needsAttention'] }}"></span>@endif
+                @if($t['atRisk'] > 0)<span class="bg-red-500" style="flex-grow: {{ $t['atRisk'] }}" title="At Risk: {{ $t['atRisk'] }}"></span>@endif
+            </div>
+            <p class="text-[11px] text-gray-400 mt-1 tabular-nums">{{ $t['onTrack'] }} &middot; {{ $t['needsAttention'] }} &middot; {{ $t['atRisk'] }}</p>
+            @else
+            <div class="h-4 rounded-full bg-gray-100"></div>
+            <p class="text-[11px] text-gray-300 mt-1">No evidence yet</p>
+            @endif
+        </div>
+        @endforeach
+    </div>
+</div>
+
+{{-- ============================================================
+     ZONE 2 — What needs a decision. TASK 1 of "dashboard structure
+     and upload safeguards": the three cards the Principal can act on
+     RIGHT NOW, each linking straight to the filtered Interventions
+     view for that state. Markup/queries unchanged from before — only
+     moved up (out of the old 4-card row, which also held Assessment
+     Completion, now in Zone 1 above) and given the collapse-when-empty
+     treatment already established by the Risk Level block below.
+     ============================================================ --}}
+@php
+    $needsDecisionTotal = $under_intervention + $awaiting_decision + $ready_for_review;
+@endphp
+<div class="mb-3">
+    <h2 class="text-base font-bold text-gray-800">2. What needs a decision</h2>
+    <p class="text-xs text-gray-500">Interventions the Principal can act on right now.</p>
+</div>
+@if($needsDecisionTotal > 0)
+{{-- TASK 7a of "clarity, progress, and visual design pass" — "Under
+     Intervention" and "Awaiting Your Decision" are workflow-stage
+     counts, not a status, so both stay neutral. "Ready to Close" keeps
+     green deliberately: it literally reports that the student reached
+     On Track, the one place on this row where the status table's
+     meaning actually applies. --}}
 <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+    <a href="{{ route('principal.interventions') }}" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-gray-300 hover:shadow-md transition-shadow block">
+        <p class="text-xs text-gray-500">Under Intervention</p>
+        <p class="text-2xl font-bold text-gray-800 mt-1">{{ $under_intervention }}</p>
+        <p class="text-xs text-gray-400 mt-1">Approved, in progress, or being monitored</p>
+    </a>
+    <a href="{{ route('principal.interventions', ['awaiting_decision' => 1]) }}" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-gray-300 hover:shadow-md transition-shadow block">
+        <p class="text-xs text-gray-500">Awaiting Your Decision</p>
+        <p class="text-2xl font-bold text-gray-800 mt-1">{{ $awaiting_decision }}</p>
+        {{-- "Master pass" PART 1.3b — "Recommended, not yet reviewed"
+             implied every one of these was a DSS recommendation; most are
+             Principal-recorded batches awaiting the Principal's own
+             approval, not a review of something the system suggested. --}}
+        <p class="text-xs text-gray-400 mt-1">Recorded but not yet approved</p>
+    </a>
+    {{-- TASK 2 of "bulk dialog and intervention closure" — a signal the
+         Principal still has to act on (see
+         InTermStatusService::isReadyForReview()), never an auto-close. --}}
+    <a href="{{ route('principal.interventions', ['ready_for_review' => 1]) }}" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-green-500 hover:shadow-md transition-shadow block">
+        <p class="text-xs text-gray-500">Ready to Close</p>
+        <p class="text-2xl font-bold text-green-700 mt-1 tabular-nums">{{ $ready_for_review }}</p>
+        {{-- TASK 6e of "correctness and interface pass" — a bare "0" here
+             reads as "nothing is working," not "nothing needs it yet." --}}
+        @if($ready_for_review > 0)
+            <p class="text-xs text-gray-400 mt-1">Delivered — student is now On Track</p>
+        @else
+            <p class="text-xs text-gray-400 mt-1">None yet — learners appear here once a delivered intervention brings them back On Track.</p>
+        @endif
+    </a>
+</div>
+@else
+<div class="bg-white rounded-lg shadow-sm p-4 mb-4 text-sm text-gray-500">
+    <i class="bi bi-check-circle text-green-500"></i> No interventions need attention right now.
+</div>
+@endif
+
+{{-- ============================================================
+     ZONE 3 — Trend and outcomes. TASK 1 of "dashboard structure and
+     upload safeguards": the after-the-term view — Risk Level, the
+     three charts, and Recommendations. Academic Honors was removed
+     here by TASK 6 of "terminology, transmutation, and interface
+     cleanup" — honor roll is a reporting function, not decision
+     support, and competed for attention with the cards below that
+     need action; see DashboardAnalyticsService::getSummaryData().
+     ============================================================ --}}
+<div class="mb-3 mt-2">
+    <h2 class="text-base font-bold text-gray-800">3. Trend and outcomes</h2>
+    <p class="text-xs text-gray-500">From submitted term reports — the after-the-term view.</p>
+</div>
+
+{{-- "Workflow completion pass" TASK 2 — moved out of the In-Term Status
+     row above (TASK 4 of "the FAILING layer" originally placed it there,
+     which turned out to be wrong): Failing is an OUTCOME, only knowable
+     once the Adviser has encoded a final official grade at the end of
+     the term. Presenting it alongside On Track / Needs Attention / At
+     Risk — which are early warnings available WHILE there is still time
+     to act — implied it was something to act on preventively. It isn't.
+     It belongs with the rest of this after-the-term view. --}}
+<div class="mb-1">
+    <p class="text-xs text-gray-500">
+        This is an outcome, not an early warning. It counts learners the term's support did not reach in time. Use
+        In-Term Status above to act while there is still time.
+    </p>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4 mt-2">
+    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-red-800">
+        <p class="text-xs text-gray-500">Failed this term</p>
+        <p class="text-2xl font-bold text-red-800 mt-1">{{ $failingCount }}</p>
+        <p class="text-xs text-gray-400 mt-1">Official grade 74 and below. Verified grades only. Available after the Adviser encodes final grades.</p>
+    </div>
+</div>
+
+@php
+    // Computed here (rather than after the charts, as before) because
+    // TASK 1 of "close the delivery loop" needs it to gate the cards too:
+    // risk_level is always low/moderate/high, so a zero across all three
+    // means zero risk_results for the active school year — i.e. no term
+    // report has ever been submitted yet.
+    $hasRiskData = ($lowRisk + $moderateRisk + $highRisk) > 0;
+    $hasTrendData = collect($termTrends)->filter(fn($v) => $v !== null)->isNotEmpty();
+    $hasSectionRiskData = collect($sectionRiskData)->contains(fn($s) => ($s['low'] + $s['moderate'] + $s['high']) > 0);
+@endphp
+
+{{-- Risk cards — moved below In-Term Status. See DssComponentIntegrationTest
+     etc.: Risk Level comes from the submitted term report + classifier,
+     never from assessment evidence alone. --}}
+<div class="mb-1">
+    <h3 class="text-sm font-semibold text-gray-700">Risk Level — submitted term reports</h3>
+</div>
+@if($hasRiskData)
+{{-- TASK 6d of "correctness and interface pass" — Moderate/High link to
+     the "Students Needing Attention" table further down THIS SAME page,
+     pre-filtered to that risk level. Low Risk is deliberately NOT a link:
+     getAtRiskStudentsData() only ever returns moderate/high students (see
+     its own docblock) — there is no roster of low-risk students anywhere
+     in this system to send a click to, so linking it would only ever land
+     on an empty result with no explanation. --}}
+<div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4 mt-2">
+    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-green-500">
+        <p class="text-xs text-gray-500">Low Risk</p>
+        <p class="text-2xl font-bold text-green-600 mt-1 tabular-nums">{{ $lowRisk }}</p>
+    </div>
+    <a href="{{ route('principal.dashboard', ['ar_risk_level' => 'moderate']) }}#atRiskResultsContainer" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-yellow-400 hover:shadow-md transition-shadow block">
+        <p class="text-xs text-gray-500">Moderate Risk</p>
+        <p class="text-2xl font-bold text-yellow-500 mt-1 tabular-nums">{{ $moderateRisk }}</p>
+    </a>
+    <a href="{{ route('principal.dashboard', ['ar_risk_level' => 'high']) }}#atRiskResultsContainer" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-red-500 hover:shadow-md transition-shadow block">
+        <p class="text-xs text-gray-500">High Risk</p>
+        <p class="text-2xl font-bold text-red-600 mt-1 tabular-nums">{{ $highRisk }}</p>
+    </a>
+</div>
+
+{{-- Risk levels and per-student focus areas measure different things and
+     run on different timelines (see PerformanceAnalysisService vs the
+     Random Forest classifier) — without this line, "0/0/0 Risk" next to
+     "99% Assessment Completion" above reads as a contradiction. --}}
+<p class="text-xs text-gray-500 -mt-2 mb-4">
+    Risk levels (above) appear once advisers submit their term reports — a single term has no trend to classify yet.
+    Per-student <strong>Focus Areas</strong>, drawn from assessment evidence already on file, are available now on the
+    <a href="{{ route('principal.students') }}" class="text-brand-700 underline hover:text-brand-800">Students</a> page — no need to wait for a submitted report.
+</p>
+@else
+{{-- TASK 1 of "close the delivery loop": zero cards + three empty charts
+     reads as broken, not "correctly zero" — a single explanatory block
+     replaces all six elements. The markup and queries below (the @endif
+     branch) are untouched — this is a conditional render, nothing was
+     deleted, and it reappears exactly as it was the moment a term report
+     is submitted (see PrincipalDashboardRiskCollapseTest). --}}
+<div class="bg-white rounded-lg shadow-sm p-6 mb-4 text-center">
+    <i class="bi bi-hourglass-split text-2xl text-gray-300"></i>
+    <p class="text-sm text-gray-600 mt-2">
+        Risk Level appears once advisers submit their term reports. It covers every subject and factors in the
+        trend across terms, produced by the classifier from the submitted report.
+    </p>
+    <p class="text-xs text-gray-400 mt-1">
+        <strong>In-Term Status</strong> above is available now, from assessment evidence already on file — no need
+        to wait for a submitted report.
+    </p>
+</div>
+@endif
+
+{{-- Performance Trend — TASK 3 of "status clarity and progress
+     consistency": unlike Risk Distribution and At-Risk per Section
+     below, this does NOT depend on risk_results — it plots the average
+     COMPUTED grade per term straight from assessment evidence (see
+     DashboardAnalyticsService::computeAssessmentEvidenceTrend()), so it
+     renders as soon as any evidence exists, even with zero submitted
+     term reports. Moved out of the $hasRiskData-gated block below,
+     which used to collapse this chart along with the two that
+     genuinely need risk_results. --}}
+<div class="grid grid-cols-1 mb-4">
+    <div class="bg-white rounded-lg shadow-sm p-4">
+        <h3 class="font-semibold text-gray-700 text-sm mb-1">Performance Trend</h3>
+        <p class="text-xs text-gray-400 mb-2">Average COMPUTED grade per term, from assessment evidence — not the official/transmuted grade, and not gated on a submitted term report.</p>
+        <div style="height:180px;" class="{{ $hasTrendData ? '' : 'flex items-center justify-center' }}">
+            @if($hasTrendData)
+                <canvas id="termTrendChart"></canvas>
+            @else
+                <p class="text-xs text-gray-400 text-center px-4">No student/subject yet has scored evidence in all three components for any term — this fills in as that evidence is entered.</p>
+            @endif
+        </div>
+    </div>
+</div>
+
+{{-- Charts Row — TASK 1 of "close the delivery loop": collapsed into the
+     single explanatory block above when $hasRiskData is false, so this
+     row only renders once at least one risk result exists for the
+     school year. Markup and queries untouched — same conditional as the
+     cards above; only Performance Trend (above) was pulled out of it. --}}
+@if($hasRiskData)
+<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
     <div class="bg-white rounded-lg shadow-sm p-4">
         <h3 class="font-semibold text-gray-700 text-sm mb-1">Risk Distribution</h3>
         <p class="text-xs text-gray-400 mb-2">Overall student risk levels</p>
@@ -61,20 +355,18 @@
         </div>
     </div>
     <div class="bg-white rounded-lg shadow-sm p-4">
-        <h3 class="font-semibold text-gray-700 text-sm mb-1">Performance Trend</h3>
-        <p class="text-xs text-gray-400 mb-2">Average grade per term</p>
-        <div style="height:180px;">
-            <canvas id="termTrendChart"></canvas>
-        </div>
-    </div>
-    <div class="bg-white rounded-lg shadow-sm p-4">
         <h3 class="font-semibold text-gray-700 text-sm mb-1">At-Risk per Section</h3>
         <p class="text-xs text-gray-400 mb-2">Moderate + High risk per section</p>
-        <div style="height:180px;">
-            <canvas id="sectionRiskChart"></canvas>
+        <div style="height:180px;" class="{{ $hasSectionRiskData ? '' : 'flex items-center justify-center' }}">
+            @if($hasSectionRiskData)
+                <canvas id="sectionRiskChart"></canvas>
+            @else
+                <p class="text-xs text-gray-400 text-center px-4">No section has a submitted term report yet — this fills in once term reports come in.</p>
+            @endif
         </div>
     </div>
 </div>
+@endif
 
 {{-- Recommendations — the DSS provides these; the Principal makes the
      final decision (see Intervention, a later phase). --}}
@@ -224,96 +516,6 @@
     </div>
 </div>
 @endif
-
-{{-- Academic Honors --}}
-<div class="bg-white rounded-lg shadow-sm mb-4">
-    <div class="px-5 py-3 border-b">
-        <h3 class="font-semibold text-gray-800 text-sm">Academic Honors</h3>
-        <p class="text-xs text-gray-500">Students with outstanding academic performance</p>
-    </div>
-
-    <div class="divide-y divide-gray-100">
-
-        <div class="px-5 py-3">
-            <div class="flex items-center gap-2 mb-2">
-                <i class="bi bi-trophy-fill" style="font-size:40px; color:#FFD700;"></i>
-                <div>
-                    <p class="text-xs font-semibold text-gray-800">With Highest Honors</p>
-                    <p class="text-xs text-gray-400">Average of 98–100</p>
-                </div>
-                <span class="ml-auto text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
-                    {{ $highestHonors->count() }} {{ $highestHonors->count() === 1 ? 'student' : 'students' }}
-                </span>
-            </div>
-            @if($highestHonors->count() > 0)
-                <div class="space-y-1">
-                    @foreach($highestHonors as $student)
-                    <div class="flex justify-between text-xs bg-purple-50 rounded px-3 py-1.5">
-                        <span class="font-medium text-gray-800">{{ $student['name'] }}</span>
-                        <span class="text-gray-500">{{ $student['section'] }}</span>
-                        <span class="font-semibold text-purple-700">{{ number_format($student['average'], 2) }}</span>
-                    </div>
-                    @endforeach
-                </div>
-            @else
-                <p class="text-xs text-gray-400 italic">No students in this category yet.</p>
-            @endif
-        </div>
-
-        <div class="px-5 py-3">
-            <div class="flex items-center gap-2 mb-2">
-                <i class="bi bi-bookmark-star-fill" style="color: #dc3545; font-size: 30px;"></i>
-                <div>
-                    <p class="text-xs font-semibold text-gray-800">With High Honors</p>
-                    <p class="text-xs text-gray-400">Average of 95–97</p>
-                </div>
-                <span class="ml-auto text-xs bg-brand-100 text-brand-700 px-2 py-0.5 rounded-full font-medium">
-                    {{ $highHonors->count() }} {{ $highHonors->count() === 1 ? 'student' : 'students' }}
-                </span>
-            </div>
-            @if($highHonors->count() > 0)
-                <div class="space-y-1">
-                    @foreach($highHonors as $student)
-                    <div class="flex justify-between text-xs bg-brand-50 rounded px-3 py-1.5">
-                        <span class="font-medium text-gray-800">{{ $student['name'] }}</span>
-                        <span class="text-gray-500">{{ $student['section'] }}</span>
-                        <span class="font-semibold text-brand-700">{{ number_format($student['average'], 2) }}</span>
-                    </div>
-                    @endforeach
-                </div>
-            @else
-                <p class="text-xs text-gray-400 italic">No students in this category yet.</p>
-            @endif
-        </div>
-
-        <div class="px-5 py-3">
-            <div class="flex items-center gap-2 mb-2">
-                <i class="bi bi-award-fill" style="color: gold; font-size: 30px;"></i>
-                <div>
-                    <p class="text-xs font-semibold text-gray-800">With Honors</p>
-                    <p class="text-xs text-gray-400">Average of 90–94</p>
-                </div>
-                <span class="ml-auto text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
-                    {{ $withHonors->count() }} {{ $withHonors->count() === 1 ? 'student' : 'students' }}
-                </span>
-            </div>
-            @if($withHonors->count() > 0)
-                <div class="space-y-1">
-                    @foreach($withHonors as $student)
-                    <div class="flex justify-between text-xs bg-green-50 rounded px-3 py-1.5">
-                        <span class="font-medium text-gray-800">{{ $student['name'] }}</span>
-                        <span class="text-gray-500">{{ $student['section'] }}</span>
-                        <span class="font-semibold text-green-700">{{ number_format($student['average'], 2) }}</span>
-                    </div>
-                    @endforeach
-                </div>
-            @else
-                <p class="text-xs text-gray-400 italic">No students in this category yet.</p>
-            @endif
-        </div>
-
-    </div>
-</div>
 
 @endsection
 

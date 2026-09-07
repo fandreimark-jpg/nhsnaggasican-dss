@@ -36,7 +36,7 @@ document.addEventListener('DOMContentLoaded', function () {
             data: {
                 labels: ['Term 1', 'Term 2', 'Term 3'],
                 datasets: [{
-                    label: 'Average Grade',
+                    label: 'Average Computed Grade',
                     data: TERM_TRENDS,
                     borderColor: '#3b82f6',
                     backgroundColor: 'rgba(59,130,246,0.1)',
@@ -56,7 +56,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     tooltip: {
                         callbacks: {
                             label: ctx => ctx.parsed.y !== null
-                                ? `Average: ${ctx.parsed.y.toFixed(2)}`
+                                ? `Computed: ${ctx.parsed.y.toFixed(2)}`
                                 : 'No data yet'
                         }
                     }

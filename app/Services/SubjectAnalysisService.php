@@ -52,11 +52,12 @@ class SubjectAnalysisService
         }
 
         $bySubject = $rows->groupBy('subject_id');
+        $belowTargetCounts = $this->getBelowTargetCounts($schoolYear);
 
         return Subject::whereIn('id', $bySubject->keys())
             ->orderBy('name')
             ->get()
-            ->map(function ($subject) use ($bySubject) {
+            ->map(function ($subject) use ($bySubject, $belowTargetCounts) {
                 $componentRows = $bySubject->get($subject->id, collect())->keyBy('component');
 
                 $components = [];
@@ -72,13 +73,60 @@ class SubjectAnalysisService
                 $weakest = $withData->sortBy('avg_percentage')->keys()->first();
 
                 return [
-                    'subject'           => $subject,
-                    'components'        => $components,
-                    'weakest_component' => $weakest,
-                    'student_count'     => $withData->max('student_count') ?? 0,
+                    'subject'            => $subject,
+                    'components'         => $components,
+                    'weakest_component'  => $weakest,
+                    'student_count'      => $withData->max('student_count') ?? 0,
+                    // How many individual students sit below target in the
+                    // weakest component — the average above (48.3%, say)
+                    // hides whether that's everyone clustered near 48, or a
+                    // handful pulling it down; this is the number a
+                    // Principal can actually act on. Null when there's no
+                    // weakest component to speak of.
+                    'below_target_count' => $weakest ? ($belowTargetCounts[$subject->id][$weakest] ?? 0) : null,
                 ];
             })
             ->values()
             ->all();
+    }
+
+    /**
+     * Per-student, per-component totals (SUM earned / SUM max — the same
+     * aggregation GradingEngine uses, unlike getSubjectSummaries()'s own
+     * AVG-of-item-percentages above, which is a subject-wide summary
+     * only) — grouped down to one query so counting "how many students
+     * are below target" never turns into a per-student loop.
+     *
+     * @return array<int, array<string, int>> [subject_id => [component => count below target]]
+     */
+    private function getBelowTargetCounts(string $schoolYear): array
+    {
+        $perStudentTotals = DB::table('assessment_scores')
+            ->join('assessments', 'assessments.id', '=', 'assessment_scores.assessment_id')
+            ->where('assessments.school_year', $schoolYear)
+            ->select(
+                'assessments.subject_id',
+                'assessments.component',
+                'assessment_scores.student_id',
+                DB::raw('SUM(assessment_scores.score) as earned'),
+                DB::raw('SUM(assessments.max_score) as max_total')
+            )
+            ->groupBy('assessments.subject_id', 'assessments.component', 'assessment_scores.student_id')
+            ->get();
+
+        $counts = [];
+        foreach ($perStudentTotals as $row) {
+            if ($row->max_total <= 0) {
+                continue;
+            }
+            // Plain PHP division — no SQLite integer-division pitfall
+            // here since this happens outside the query, on floats.
+            $percentage = ($row->earned / $row->max_total) * 100;
+            if ($percentage < self::TARGET) {
+                $counts[$row->subject_id][$row->component] = ($counts[$row->subject_id][$row->component] ?? 0) + 1;
+            }
+        }
+
+        return $counts;
     }
 }

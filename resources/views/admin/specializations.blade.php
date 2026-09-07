@@ -5,22 +5,13 @@
 
 @section('content')
 
-@if(session('import_errors'))
-<div class="bg-yellow-100 text-yellow-800 text-sm p-4 rounded-lg mb-4">
-    <p class="font-medium mb-1">{{ session('warning') }}</p>
-    <ul class="list-disc list-inside">
-        @foreach(session('import_errors') as $error)
-            <li>{{ $error }}</li>
-        @endforeach
-    </ul>
-</div>
-@endif
+@include('partials.import-result')
 
 <div class="bg-white rounded-xl shadow-sm mb-0">
     <div class="flex items-center justify-between px-6 py-4 border-b">
         <div>
             <h2 class="text-sm font-semibold text-gray-800">All Specializations</h2>
-            <p class="text-xs text-gray-400">{{ $specializations->count() }} total specializations</p>
+            <p class="text-xs text-gray-400"><x-count-label :count="$specializations->count()" noun="specialization" total /></p>
         </div>
         <div class="flex items-center gap-3">
             <button type="button" onclick="openImportSpecializationsModal()"
@@ -34,13 +25,14 @@
         </div>
     </div>
 
-    <table class="w-full text-sm">
+    <div class="overflow-x-auto">
+    <table class="w-full min-w-full text-sm">
         <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
             <tr>
-                <th class="text-left px-6 py-3">Specialization</th>
-                <th class="text-left px-6 py-3">Code</th>
-                <th class="text-left px-6 py-3">Track</th>
-                <th class="px-6 py-3 text-right">Actions</th>
+                <th scope="col" class="text-left px-6 py-3">Specialization</th>
+                <th scope="col" class="text-left px-6 py-3">Code</th>
+                <th scope="col" class="text-left px-6 py-3">Track</th>
+                <th scope="col" class="px-6 py-3 text-right">Actions</th>
             </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
@@ -53,35 +45,38 @@
                     </span>
                 </td>
                 <td class="px-6 py-3 text-gray-600">{{ $spec->track->name ?? '—' }}</td>
-                <td class="px-6 py-3 text-right space-x-2">
-                    <button type="button"
-                        onclick='openEditSpecModal(@json($spec))'
-                        class="inline-flex items-center gap-1 text-brand-600 hover:text-brand-800 text-xs font-medium border border-brand-200 rounded px-2 py-1 hover:bg-brand-50">
-                        <i class="bi bi-pencil-square"></i> Edit
-                    </button>
-                    <form method="POST"
-                          action="{{ route('admin.specializations.destroy', $spec->id) }}"
-                          class="inline"
-                          data-confirm="Delete specialization {{ $spec->name }}?">
-                        @csrf
-                        @method('DELETE')
-                        <button type="submit"
-                            class="inline-flex items-center gap-1 text-red-600 hover:text-red-800 text-xs font-medium border border-red-200 rounded px-2 py-1 hover:bg-red-50">
-                            <i class="bi bi-trash"></i> Delete
+                <td class="px-6 py-3 text-right">
+                    <div class="flex items-center justify-end gap-2">
+                        <button type="button"
+                            onclick='openEditSpecModal(@json($spec))'
+                            class="inline-flex items-center gap-1 text-brand-600 hover:text-brand-800 text-xs font-medium border border-brand-200 rounded px-2 py-1 hover:bg-brand-50 whitespace-nowrap">
+                            <i class="bi bi-pencil-square"></i> Edit
                         </button>
-                    </form>
+                        <form method="POST"
+                              action="{{ route('admin.specializations.destroy', $spec->id) }}"
+                              class="inline"
+                              data-confirm="Delete specialization {{ $spec->name }}?">
+                            @csrf
+                            @method('DELETE')
+                            <button type="submit"
+                                class="inline-flex items-center gap-1 text-red-600 hover:text-red-800 text-xs font-medium border border-red-200 rounded px-2 py-1 hover:bg-red-50 whitespace-nowrap">
+                                <i class="bi bi-trash"></i> Delete
+                            </button>
+                        </form>
+                    </div>
                 </td>
             </tr>
             @empty
             <tr>
-                <td colspan="4" class="px-6 py-8 text-center text-gray-400">
-                    <i class="bi bi-collection text-2xl block mb-2"></i>
-                    No specializations yet. Add tracks first.
+                <td colspan="4">
+                    <x-empty-state message="No specializations yet." icon="bi-collection"
+                        hint="Specializations belong to a track — add a track first, then use &quot;Add Specialization&quot; or &quot;Import Specializations&quot; above." />
                 </td>
             </tr>
             @endforelse
         </tbody>
     </table>
+    </div>
 </div>
 
 {{-- MODAL --}}
@@ -91,7 +86,7 @@
         <div class="flex justify-between items-center mb-4">
             <h3 id="modalTitle" class="text-lg font-semibold text-gray-800">Add Specialization</h3>
             <button type="button" onclick="closeSpecModal()"
-                    class="text-gray-400 hover:text-gray-600">✕</button>
+                    aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         <form id="specForm" method="POST" class="space-y-4" data-store-url="{{ route('admin.specializations.store') }}">
@@ -143,7 +138,7 @@
 
         <div class="flex justify-between items-center mb-4">
             <h3 class="text-lg font-semibold text-gray-800">Import Specializations</h3>
-            <button type="button" onclick="closeImportSpecializationsModal()" class="text-gray-400 hover:text-gray-600">✕</button>
+            <button type="button" onclick="closeImportSpecializationsModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         @if($errors->import->any())

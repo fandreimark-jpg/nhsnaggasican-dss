@@ -86,7 +86,8 @@ The Principal makes the final academic decision.
 
 # GRADING CONFIGURATION
 
-Current grading configuration:
+Current grading configuration (DO 8, s. 2015 — still Grade 12's scheme,
+and the default for any subject with no more specific rule):
 
 Written Work = 25%
 
@@ -95,6 +96,17 @@ Performance Task = 50%
 Examination = 25%
 
 Total = 100%.
+
+Grade 11, from SY 2026-2027 onward, is on DO 015, s. 2026 instead, which
+assigns a DIFFERENT split per SHS subject group (Core Academic,
+Field Exposure, Arts/Sports/Wellness, Research/Innovation, TechPro, Work
+Immersion) — two of which have no Examination component at all. These
+weights are DATA, never hardcoded: see `subject_group_weights` (keyed by
+scheme + subject group) and `SubjectGroupWeight::resolve()`, which
+`GradingEngine` reads instead of a fixed percentage. Under DO 015, the
+Examination component is itself further split between two Summative
+Tests and a Term Examination — also data, see `exam_role_shares` and
+`GradingEngine::examinationPercentage()`.
 
 Do not simply average the three component percentages.
 
@@ -171,6 +183,50 @@ Ambiguous columns must not be silently classified.
 
 The Adviser must be able to correct the classification before
 import.
+
+## Upload file format
+
+Columns 0/1/2 are always `lrn, last_name, first_name`. Every column
+from index 3 onward is a candidate assessment item, named by its
+header.
+
+The row immediately after the header may optionally be a MAX row,
+carrying each column's maximum score so it does not have to be
+retyped by hand on the Verify screen every upload:
+
+```
+lrn           | last_name | first_name | Quiz 1 | Quiz 2 | Quiz 3
+MAX           |           |            |   20   |   15   |   25
+110000000001  | Agbayani  | Rhea Mae   |   18   |   13   |   23
+```
+
+The MAX row is identified by the literal string `MAX`
+(case-insensitive, trimmed) in column 0, where a real student's LRN
+would otherwise be. A real student row always has a 12-digit LRN
+(enforced everywhere a student is created), so this sentinel can
+never collide with an actual student — there is no ambiguity.
+
+Backward compatibility is mandatory: a file with no MAX row (row 2's
+column 0 is not `MAX`) behaves exactly as before this row existed —
+every max score is typed by hand on the Verify screen, unchanged.
+
+The Verify screen prefills each Max Score field from the MAX row
+when present, labeled "from file", but the field stays editable —
+the Adviser is still the authority on what the paper was worth and
+can override it. A blank MAX-row cell is treated as "not supplied"
+for that column, not an error. A MAX-row cell that is non-numeric or
+zero/negative is a file-level error that blocks the upload and names
+the offending column — a wrong max is exactly what this feature
+exists to prevent, so it is never silently ignored or defaulted.
+
+`assessments.max_score` remains the single source of truth once a
+column is imported — the MAX row only changes where the Verify
+screen's prefilled value initially comes from, never the schema or
+the validation that runs against the confirmed value afterward. A
+declared maximum that looks implausibly high relative to the actual
+scores in the file still produces the same non-blocking Preview
+warning regardless of whether that maximum was typed by hand or read
+from a MAX row (see `AssessmentUploadService::SUSPICIOUS_MAX_RATIO`).
 
 ---
 
@@ -296,6 +352,13 @@ Possible recommendations:
 - Other appropriate intervention
 
 Principal decisions must be recorded where appropriate.
+
+**Delivery is per-learner or per-genuine-group, never blind bulk.** An
+intervention may be marked delivered individually, or together with others
+when one activity genuinely covered all of them. Either way a written note
+describing what was actually done is required, and group deliveries are
+labelled as such so the record never implies individual attention that was not
+given.
 
 ---
 
@@ -566,3 +629,199 @@ A feature is complete only when:
 [ ] Regression checked
 [ ] No known blocking errors remain
 [ ] Documentation updated
+
+---
+
+# KNOWN LIMITATIONS
+
+## Formal DepEd remediation (SRC / RCM / RFG) is not implemented
+
+Under DO 8, s. 2015 and DO 015, s. 2026, remediation is a **post-term**
+programme: the Summer Remedial Class (SRC), open to a learner who failed
+at most two learning areas, runs after Final Grades are computed. It
+produces a Remedial Class Mark (RCM), and the Recomputed Final Grade
+(RFG) is the *average* of the Final Grade and the RCM — never an
+addition to the term's points.
+
+This system supports **within-term academic support only**: an adviser
+can add an additional assessment item (e.g. a re-teach quiz) during the
+term, which counts in full toward the term's total points, exactly like
+any other summative item. The `remediation` intervention type's stored
+enum value is unchanged for backward compatibility, but its display
+label reads "Additional Practice and Re-teaching" for this reason — it
+is not DepEd's formal remediation.
+
+The Summer Remedial Class workflow, Remedial Class Mark, and Recomputed
+Final Grade are **not implemented** anywhere in this codebase. This
+would be a separate module, built once the school decides how SRC
+eligibility, scheduling, and RCM entry should work here — out of scope
+until then.
+
+**Open policy question — how within-term additional support should count.**
+Additional assessment items currently contribute their full points to the
+term's total, alongside every other item. This means a strong remedial result
+lifts the affected component by less than its own percentage, and a learner who
+was well below target often improves without reaching it. In one observed case
+a learner's Examination component moved from 58.89% to 63.89% after remedial
+work — real improvement, still below the 75 target.
+
+Three approaches were considered:
+
+1. **Additive (current).** Simple, transparent, never advantages a
+   remediated learner over one who passed first time. Weak rescue effect.
+2. **Replacement.** The remedial score replaces the item it targets. Strong
+   rescue, but a remediated learner can finish above a learner who passed
+   without support.
+3. **Averaging with a cap at 75.** Mirrors DepEd's Summer Remedial Class,
+   where the Recomputed Final Grade is the average of the Final Grade and the
+   Remedial Class Mark. Rescues to exactly passing and no further.
+
+The school has not yet decided. The system implements (1) and marks grades
+that include additional support so the situation is visible rather than
+silently resolved.
+
+## The `do015_2026` transmutation table is not yet confirmed against the signed order
+
+`transmutation_ranges` is now seeded in full for both schemes: `do8_2015`
+(DO 8, s. 2015, Grade 12's scheme this school year) and `do015_2026` (DO
+015, s. 2026's adjusted table for Grade 11 under the Strengthened SHS
+curriculum, from `Do015TransmutationSeeder` — see
+`TransmutationService::schemeFor()`). Both cover 0–100 with no gaps or
+overlaps, and `php artisan dss:verify-transmutation` checks this on
+demand.
+
+The remaining limitation is provenance, not coverage: `Do015TransmutationSeeder`'s
+41 bands were cross-checked across three independent secondary
+reproductions that agree on every figure, but have **not** been read
+from the signed PDF of DO 015, s. 2026 itself (see the `SOURCE NOTE` in
+that seeder). Before citing this table in the thesis or any official
+report, download the order from deped.gov.ph, confirm the bands against
+it, and remove that note. Until then, treat `do015_2026` results as
+computationally correct against the table this codebase has, not as
+independently verified against the original order.
+
+## The Examination role split (30/30/40) is provisional
+
+Under DO 015, s. 2026 the Examination component splits between two
+Summative Tests and a Term Examination (`exam_role_shares`, scheme
+`do015_2026`, roles `st1`/`st2`/`term_exam`) — but the 30/30/40 split
+itself is NOT confirmed anywhere in this codebase against the published
+order, only entered as the best available estimate at the time this was
+built. Because it's a seeded row rather than code, correcting it later
+is three `UPDATE`s to `exam_role_shares`, never a deployment. Unlike
+`transmutation_ranges`, this table being unseeded degrades gracefully
+rather than blocking anything: `GradingEngine::examinationPercentage()`
+falls back to an equal split among whichever roles are actually present
+for a role missing from the table, so a wrong or absent share is never
+fatal — only wrong, in a way a data correction fixes immediately.
+
+## Elective selection is per-cluster, not per-learner
+
+`Subject::forSection()` returns EVERY elective subject matching a
+section's track and specialization — it has no way to return a
+SUBSET. Under the Strengthened SHS curriculum a Grade 11 learner
+picks two electives from a cluster, not the whole cluster (e.g. a
+STEM section offering Pre-Calculus, General Biology 1, and Physics
+might have some students taking Pre-Calc + Biology and others taking
+Pre-Calc + Physics). There is no `section_subject` (or
+`student_subject`) pivot table anywhere in the schema to record which
+electives a given section — let alone a given student — actually
+takes, so `forSection()` cannot distinguish "offered to this
+track/specialization" from "actually taken."
+
+**Why this is currently invisible:** only two STEM electives
+(Pre-Calculus, General Biology 1) have ever been imported in this
+codebase's fixtures/demo data. With exactly two electives in the
+cluster, "every elective in the cluster" and "the two electives this
+section takes" happen to be the same set by coincidence — there is
+nothing to distinguish because there is no third option to leave out.
+
+**What breaks when a third elective is added:** `Subject::forSection()`
+will return all three, so `AcademicTerm::completionStatus()` (which
+expects a grade for every subject `forSection()` returns, for every
+student in the section) will require grades for all three electives
+from every student — including the one they didn't take. No student
+can ever supply that third grade, so `expected` permanently exceeds
+what `actual` can reach and the term can never be marked complete.
+The same over-counting would show up in `ReportController::submit()`'s
+`totalExpected` check (blocking Submit Report the same way) and in
+`getSectionSubjects()`'s duplicate copy of this same query.
+
+**The fix (not built in this pass):** a `section_subject` pivot table
+recording exactly which electives a given section has chosen for the
+current school year, with `Subject::forSection()`,
+`AcademicTerm::completionStatus()`, `ReportController::getSectionSubjects()`,
+the grade-encoding screen, and the subjects import format all updated
+together to read from it instead of "every matching elective." This
+needs the user's decision on how a section's electives get assigned
+(picked when the section is created? per-student? via a new admin
+screen?) before it can be built, which is why it is deliberately out
+of scope here — see
+`tests/Feature/ElectiveClusterLimitationTest.php` (marked skipped)
+for the assertion this will need to satisfy once the pivot exists.
+
+## Attendance is not part of any grade
+
+Attendance exists in this system only as an intervention type
+(`attendance_monitoring`) that a Principal can record. It is never
+collected as data, never a grading component, and never a classifier
+feature. Under DO 8, s. 2015 and DO 015, s. 2026 the grade is computed
+from Written Work, Performance Task, and Examination only.
+Attendance-based promotion and retention rules are outside this
+system's scope.
+
+## "Failing" catches Grade 11 and Grade 12 at different levels of mastery
+
+The Failing signal is defined on the reported (transmuted) grade at 74 and
+below, which is DepEd's failing mark. Because the two curricula transmute
+differently, the same threshold corresponds to a different raw score in each
+grade level during SY 2026-2027:
+
+- **Grade 11 (DO 015, s. 2026):** an Initial Grade of 70.00 transmutes to 75,
+  so Failing corresponds to a computed grade below 70.00.
+- **Grade 12 (DO 8, s. 2015):** an Initial Grade of 60.00 transmutes to 75,
+  so Failing corresponds to a computed grade below 60.00.
+
+A Grade 12 learner with 62% raw mastery is therefore reported as passing and
+is never Failing, while a Grade 11 learner with the same raw mastery is.
+This is a property of the DepEd transmutation tables themselves, not of this
+system, and it disappears from SY 2027-2028 when transmutation is removed.
+
+## The risk classifier's levels are calibrated thresholds, not a learned signal
+
+Because the model is trained on a single feature, its risk levels are
+effectively thresholds on average grade. Calibration determines the
+boundaries between low, moderate, and high, and different cohorts may
+require different boundaries. The system does not learn these boundaries
+from outcomes.
+
+As of the "correctness and interface pass," the boundaries are Low
+85-100, Moderate 75-84.9, High 0-74.9 (`analytics/classify.py`'s
+`train_model()`) — recalibrated from the original 90/75/60 split, which put
+nearly an entire passing cohort in one 15-point Moderate band (observed
+live: 39 of 40 learners Moderate, 1 Low, 0 High). The new boundaries are
+anchored to figures already used elsewhere in this codebase
+(`PerformanceAnalysisService::DEFAULT_TARGET` = 75,
+`InTermStatusService::FAILING_THRESHOLD` = 74) rather than percentiles of
+any one section's snapshot, so they generalize instead of being tuned to
+fit today's roster. `analytics/test_classify.py`'s
+`TestRiskLevelDistribution` pins that a cohort with a genuine spread of
+averages no longer lands almost entirely in one level.
+
+**This asymmetry is why the component-based In-Term Status must not be
+replaced by the Failing rule.** In-Term Status is computed against a flat 75%
+target per component regardless of grade level and curriculum, so the Grade 12
+learner above still surfaces as At Risk or Needs Attention from the evidence,
+even though their reported grade is passing. Removing the component rule in
+favour of a grade threshold would leave Grade 12 learners with materially
+weaker early detection than Grade 11 learners in the same school year.
+
+## Interventions have an origin
+
+Every intervention record is created by a Principal through the interface; the
+`origin` column records this as `principal`. The value `system` exists for a
+future source that generates intervention records from risk analysis, and
+nothing sets it today. The interface must not claim the DSS decided something
+a person decided. The DSS produces the recommendation text, the focus area,
+and the risk classification that inform the Principal's judgment. It does not
+create, approve, or close intervention records.

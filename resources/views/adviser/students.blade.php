@@ -9,15 +9,24 @@
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 px-6 py-4 border-b">
         <div>
             <h2 class="text-sm font-semibold text-gray-800">Students</h2>
-            <p class="text-xs text-gray-400">{{ $students->count() }} student(s) in your section</p>
+            <p class="text-xs text-gray-400"><x-count-label :count="$students->total()" noun="student" /> in your section</p>
         </div>
         <div class="flex items-center gap-3 flex-wrap">
             {{-- Search box--}}
-            <div class="relative">
-                <input type="text" id="adviserStudentSearch"
-                    placeholder="Search students..."
-                    class="border rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 w-56">
-                <i class="bi bi-search absolute left-3 top-2.5 text-gray-400 text-sm"></i>
+            <div>
+                <div class="relative">
+                    <input type="text" id="adviserStudentSearch"
+                        placeholder="Search this page..."
+                        class="border rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 w-56">
+                    <i class="bi bi-search absolute left-3 top-2.5 text-gray-400 text-sm"></i>
+                </div>
+                {{-- TASK 5d of "clarity, progress, and visual design pass"
+                     — honest about scope now that the roster is paginated:
+                     this box filters only the {{ $students->count() }} rows
+                     on the current page, not the full section. --}}
+                @if($students->hasPages())
+                <p class="text-[11px] text-gray-400 mt-1">Searches this page only ({{ $students->firstItem() }}–{{ $students->lastItem() }} of {{ $students->total() }}).</p>
+                @endif
             </div>
             <p class="text-xs text-gray-400">
                 <i class="bi bi-info-circle"></i> Adding new students is done by the Admin.
@@ -55,13 +64,32 @@
             </tr>
             @empty
             <tr>
-                <td colspan="6" class="px-6 py-6 text-center text-gray-400">
-                    No students in your section yet.
+                <td colspan="6">
+                    <x-empty-state message="No students in your section yet." hint="An Admin adds students and assigns them to your section." />
                 </td>
             </tr>
             @endforelse
         </tbody>
     </table>
+
+    @if($students->hasPages())
+    <div class="px-6 py-4 border-t flex flex-col items-center gap-2 text-sm text-gray-500">
+        <div class="flex items-center gap-1">
+            @if($students->onFirstPage())
+                <span class="px-3 py-1 rounded border text-gray-300 cursor-not-allowed">← Prev</span>
+            @else
+                <a href="{{ $students->previousPageUrl() }}" class="px-3 py-1 rounded border hover:bg-gray-50 text-gray-600">← Prev</a>
+            @endif
+            <span class="px-3 py-1 rounded border bg-brand-700 text-white font-medium">{{ $students->currentPage() }}</span>
+            @if($students->hasMorePages())
+                <a href="{{ $students->nextPageUrl() }}" class="px-3 py-1 rounded border hover:bg-gray-50 text-gray-600">Next →</a>
+            @else
+                <span class="px-3 py-1 rounded border text-gray-300 cursor-not-allowed">Next →</span>
+            @endif
+        </div>
+        <span class="text-xs">Showing {{ $students->firstItem() }}–{{ $students->lastItem() }} of <x-count-label :count="$students->total()" noun="student" /></span>
+    </div>
+    @endif
 </div>
 
 {{-- EDIT MODAL ONLY --}}
@@ -71,7 +99,7 @@
 
         <div class="flex justify-between items-center mb-4">
             <h3 class="text-lg font-semibold text-gray-800">Edit Student</h3>
-            <button type="button" onclick="closeEditModal()" class="text-gray-400 hover:text-gray-600">✕</button>
+            <button type="button" onclick="closeEditModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         <form id="editForm" method="POST" class="space-y-4">

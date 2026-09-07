@@ -31,7 +31,14 @@ class DashboardController extends Controller
 
     public function index()
     {
-        return view('admin.dashboard', $this->analytics->getAdminSummary());
+        return view('admin.dashboard', array_merge(
+            $this->analytics->getAdminSummary(),
+            [
+                'dataHealth'     => $this->analytics->getDataHealthChecks(),
+                'openTermPanel'  => $this->analytics->getOpenTermPanel(),
+                'recentActivity' => $this->analytics->getRecentActivity(),
+            ]
+        ));
     }
 
     /** @deprecated Kept for direct-call test coverage — use DashboardAnalyticsService. */

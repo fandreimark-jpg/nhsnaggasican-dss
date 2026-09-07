@@ -10,14 +10,15 @@
         <p class="text-xs text-gray-500">All system actions recorded</p>
     </div>
 
-    <table class="w-full text-sm">
+    <div class="overflow-x-auto">
+    <table class="w-full min-w-full text-sm">
         <thead class="bg-gray-50 text-gray-500 text-xs">
             <tr>
-                <th class="text-left px-5 py-2">Date & Time</th>
-                <th class="text-left px-3 py-2">User</th>
-                <th class="text-left px-3 py-2">Role</th>
-                <th class="text-left px-3 py-2">Action</th>
-                <th class="text-left px-3 py-2">Description</th>
+                <th scope="col" class="text-left px-5 py-2">Date & Time</th>
+                <th scope="col" class="text-left px-3 py-2">User</th>
+                <th scope="col" class="text-left px-3 py-2">Role</th>
+                <th scope="col" class="text-left px-3 py-2">Action</th>
+                <th scope="col" class="text-left px-3 py-2">Description</th>
             </tr>
         </thead>
         <tbody class="divide-y divide-gray-50">
@@ -56,13 +57,15 @@
             </tr>
             @empty
             <tr>
-                <td colspan="6" class="px-5 py-6 text-center text-gray-400 text-xs">
-                    No activity logs yet.
+                <td colspan="6">
+                    <x-empty-state message="No activity logs yet." icon="bi-clock-history"
+                        hint="Every create, update, and delete across the system is recorded here as it happens." />
                 </td>
             </tr>
             @endforelse
         </tbody>
     </table>
+    </div>
 
     {{-- Pagination --}}
     @if($logs->hasPages())
@@ -84,7 +87,7 @@
                 <span class="px-3 py-1 rounded border text-gray-300 cursor-not-allowed">Next →</span>
             @endif
         </div>
-        <span class="text-xs">Showing {{ $logs->firstItem() }}–{{ $logs->lastItem() }} of {{ $logs->total() }} Logs</span>
+        <span class="text-xs">Showing {{ $logs->firstItem() }}–{{ $logs->lastItem() }} of <x-count-label :count="$logs->total()" noun="log" /></span>
     </div>
     @endif
 </div>

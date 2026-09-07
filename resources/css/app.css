@@ -1,3 +1,37 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Accessibility floor — applied globally instead of per-element so every
+   button/link/select/input in the app gets a visible keyboard focus state
+   without having to touch every Blade file individually. */
+@layer base {
+    a, button, select, input, textarea {
+        @apply outline-none;
+    }
+    a:focus-visible,
+    button:focus-visible,
+    select:focus-visible,
+    input:focus-visible,
+    textarea:focus-visible {
+        @apply ring-2 ring-brand-600 ring-offset-2;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #sidebar {
+        transition: none !important;
+    }
+}
+
+/* "Clarity, progress, and visual design pass" TASK 7b — tabular
+   (lining) numerals in every table cell app-wide, so digits align
+   vertically down a column and patterns (a whole column of failing
+   grades, say) are visible at a glance without reading each number.
+   Applied globally rather than per-column class: this table already
+   holds nearly every grade/percentage/count column in the app, and
+   tabular-nums has no effect on non-digit text, so it is safe here
+   with no risk to any other content in the same cell. */
+table {
+    font-variant-numeric: tabular-nums;
+}

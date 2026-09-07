@@ -1,0 +1,13 @@
+name,type,grade_level,track,specialization
+General Mathematics,core,11,,
+Oral Communication,core,11,,
+21st Century Literature,core,12,,
+Statistics and Probability,core,12,,
+Pre-Calculus,elective,11,ACAD,STEM
+General Biology 1,elective,11,ACAD,STEM
+Creative Writing,elective,11,ACAD,HUMSS
+Disciplines and Ideas in the Social Sciences,elective,12,ACAD,HUMSS
+Business Finance,elective,12,ACAD,ABM
+Computer Programming,elective,11,TVL,ICT
+Computer Systems Servicing,elective,12,TVL,ICT
+Bread and Pastry Production,elective,11,TVL,HE
