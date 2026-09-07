@@ -233,24 +233,24 @@
     <p class="text-xs text-gray-500 px-6 pt-3">
         <x-count-label :count="$interventions->total()" noun="intervention" />
     </p>
-    <div class="max-h-[60vh] overflow-auto mt-2">
-    <table class="w-full text-sm">
-        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide sticky top-0 z-10">
+    <div class="tbl-scroll mt-2">
+    <table class="tbl tbl-sticky">
+        <thead>
             <tr>
-                <th class="text-left px-6 py-3">Student</th>
-                <th class="text-left px-3 py-3">Subject</th>
-                <th class="text-left px-4 py-3">Type &amp; Reason</th>
-                <th class="text-left px-4 py-3">Status</th>
-                <th class="text-left px-4 py-3">Decided</th>
-                <th class="text-left px-4 py-3">Acknowledged / Delivered</th>
-                <th class="text-left px-4 py-3">Within-Term Progress</th>
-                <th class="text-left px-4 py-3">Term-over-Term Progress</th>
+                <th scope="col">Student</th>
+                <th scope="col">Subject</th>
+                <th scope="col">Type &amp; Reason</th>
+                <th scope="col">Status</th>
+                <th scope="col">Decided</th>
+                <th scope="col">Acknowledged / Delivered</th>
+                <th scope="col">Within-Term Progress</th>
+                <th scope="col">Term-over-Term Progress</th>
             </tr>
         </thead>
-        <tbody class="divide-y divide-gray-100">
+        <tbody>
             @forelse($interventions as $iv)
-            <tr class="hover:bg-gray-50 align-top">
-                <td class="px-6 py-3 font-medium text-gray-800 whitespace-nowrap">
+            <tr class="align-top">
+                <td class="font-medium text-gray-800 whitespace-nowrap">
                     <a href="{{ route('principal.students.show', $iv->student_id) }}" class="hover:underline hover:text-brand-700">
                         {{ $iv->student->last_name }}, {{ $iv->student->first_name }}
                     </a>
@@ -262,10 +262,10 @@
                         {{ $iv->student->section->track->name ?? 'Not set' }} / {{ $iv->student->section->specialization->name ?? 'Not set' }}
                     </span>
                 </td>
-                <td class="px-3 py-3 text-gray-600 whitespace-nowrap">
+                <td class="text-gray-600 whitespace-nowrap">
                     {{ $iv->subject->name ?? '—' }}
                 </td>
-                <td class="px-4 py-3 max-w-xs">
+                <td class="max-w-xs">
                     <span class="font-medium text-gray-700">{{ $typeLabels[$iv->recommended_type] ?? $iv->recommended_type }}</span>
                     @if($iv->recommendation_reason)
                         <p class="text-xs text-gray-500 mt-1">{{ $iv->recommendation_reason }}</p>
@@ -289,7 +289,7 @@
                         <i class="bi bi-person-fill"></i> {{ $iv->isSystemGenerated() ? 'Flagged by the DSS' : 'Recorded by you' }}
                     </span>
                 </td>
-                <td class="px-4 py-3 min-w-[220px]">
+                <td class="min-w-[220px]">
                     <span class="px-2 py-0.5 rounded-full text-xs font-medium {{ $statusColors[$iv->status] ?? 'bg-gray-100 text-gray-600' }}">
                         {{-- "Master pass" PART 1.3d — the stored value stays
                              'recommended'; only the DISPLAY label changes for
@@ -350,7 +350,7 @@
                     </div>
                     @endif
                 </td>
-                <td class="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+                <td class="text-xs text-gray-500 whitespace-nowrap">
                     @if($iv->decidedBy)
                         {{ $iv->decidedBy->name }}
                         <span class="block text-gray-400">{{ $iv->decided_at?->format('M d, Y') }}</span>
@@ -359,7 +359,7 @@
                     @endif
                     <span class="block text-gray-400 mt-1">Created {{ $iv->created_at->format('M d, Y') }}</span>
                 </td>
-                <td class="px-4 py-3 text-xs whitespace-nowrap max-w-[220px]">
+                <td class="text-xs whitespace-nowrap max-w-[220px]">
                     @if($iv->acknowledged_at)
                         <span class="inline-flex items-center gap-1 text-blue-700">
                             <i class="bi bi-eye-fill"></i> Ack. by {{ $iv->acknowledgedBy->name ?? 'Adviser' }}
@@ -390,10 +390,10 @@
                         <span class="block text-gray-300 mt-1">Not yet delivered</span>
                     @endif
                 </td>
-                <td class="px-4 py-3 text-xs whitespace-nowrap">
+                <td class="text-xs whitespace-nowrap">
                     @include('partials.within-term-progress', ['p' => $iv->withinTermProgress ?? null])
                 </td>
-                <td class="px-4 py-3 min-w-[220px]">
+                <td class="min-w-[220px]">
                     @if($iv->progress)
                         @php $p = $iv->progress; @endphp
                         <div class="text-xs text-gray-500 bg-gray-50 rounded-md px-2 py-1.5">

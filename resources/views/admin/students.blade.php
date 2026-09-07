@@ -47,36 +47,36 @@
          body scrolls within a fixed-height container (header stays
          pinned) instead of the whole page scrolling. Row count above the
          table already existed here (x-count-label in the header). --}}
-    <div class="max-h-[60vh] overflow-auto">
-    <table class="w-full min-w-full text-sm" id="studentTable">
-        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide sticky top-0 z-10">
+    <div class="tbl-scroll">
+    <table class="tbl tbl-sticky" id="studentTable">
+        <thead>
             <tr>
-                <th scope="col" class="text-left px-6 py-3">LRN</th>
-                <th scope="col" class="text-left px-6 py-3">Last Name</th>
-                <th scope="col" class="text-left px-6 py-3">First Name</th>
-                <th scope="col" class="text-left px-6 py-3">Middle Name</th>
-                <th scope="col" class="text-left px-6 py-3">Birthdate</th>
-                <th scope="col" class="text-left px-6 py-3">Gender</th>
-                <th scope="col" class="text-left px-6 py-3">Section</th>
-                <th scope="col" class="px-6 py-3 text-right">Actions</th>
+                <th scope="col">LRN</th>
+                <th scope="col">Last Name</th>
+                <th scope="col">First Name</th>
+                <th scope="col">Middle Name</th>
+                <th scope="col">Birthdate</th>
+                <th scope="col">Gender</th>
+                <th scope="col">Section</th>
+                <th scope="col" class="text-right">Actions</th>
             </tr>
         </thead>
-        <tbody class="divide-y divide-gray-100" id="studentTableBody">
+        <tbody id="studentTableBody">
             @forelse($students as $student)
-            <tr class="hover:bg-gray-50 student-row">
-                <td class="px-6 py-3 text-gray-600">{{ $student->lrn }}</td>
-                <td class="px-6 py-3 font-medium text-gray-800">{{ $student->last_name }}</td>
-                <td class="px-6 py-3 text-gray-800">{{ $student->first_name }}</td>
-                <td class="px-6 py-3 text-gray-500">{{ $student->middle_name ?? '—' }}</td>
-                <td class="px-6 py-3 capitalize text-gray-600">{{ $student->formatted_birthdate }}</td>
-                <td class="px-6 py-3 capitalize text-gray-600">{{ $student->gender }}</td>
-                <td class="px-6 py-3 text-gray-600">
+            <tr class="student-row">
+                <td>{{ $student->lrn }}</td>
+                <td class="font-medium text-gray-800">{{ $student->last_name }}</td>
+                <td>{{ $student->first_name }}</td>
+                <td class="text-gray-500">{{ $student->middle_name ?? '—' }}</td>
+                <td class="capitalize">{{ $student->formatted_birthdate }}</td>
+                <td class="capitalize">{{ $student->gender }}</td>
+                <td>
                     {{ $student->section->name ?? '—' }}
                     <span class="text-gray-400 text-xs">
                         {{ $student->section ? '(Grade ' . $student->section->grade_level . ')' : '' }}
                     </span>
                 </td>
-                <td class="px-6 py-3 text-right">
+                <td class="text-right">
                     <div class="flex items-center justify-end gap-2">
                         <button type="button"
                             onclick='openEditStudentModal(@json($student))'

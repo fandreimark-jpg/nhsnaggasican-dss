@@ -55,35 +55,35 @@
         </div>
     </div>
 
-    <div class="overflow-x-auto">
-    <table class="w-full min-w-full text-sm" id="subjectTable">
-        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+    <div class="tbl-scroll">
+    <table class="tbl" id="subjectTable">
+        <thead>
             <tr>
-                <th scope="col" class="text-left px-6 py-3">Subject Name</th>
-                <th scope="col" class="text-left px-6 py-3">Type</th>
-                <th scope="col" class="text-left px-6 py-3">Grade Level</th>
-                <th scope="col" class="text-left px-6 py-3">Subject Group</th>
-                <th scope="col" class="text-left px-6 py-3">Track</th>
-                <th scope="col" class="text-left px-6 py-3">Specialization</th>
-                <th scope="col" class="px-6 py-3 text-right">Actions</th>
+                <th scope="col">Subject Name</th>
+                <th scope="col">Type</th>
+                <th scope="col">Grade Level</th>
+                <th scope="col">Subject Group</th>
+                <th scope="col">Track</th>
+                <th scope="col">Specialization</th>
+                <th scope="col" class="text-right">Actions</th>
             </tr>
         </thead>
-        <tbody class="divide-y divide-gray-100">
+        <tbody>
             @forelse($subjects as $subject)
-            <tr class="hover:bg-gray-50 subject-row">
-                <td class="px-6 py-3 font-medium text-gray-800">{{ $subject->name }}</td>
-                <td class="px-6 py-3">
+            <tr class="subject-row">
+                <td class="font-medium text-gray-800">{{ $subject->name }}</td>
+                <td>
                     @if($subject->type === 'core')
                         <span class="bg-green-100 text-green-700 text-xs font-semibold px-2 py-1 rounded">Core</span>
                     @else
                         <span class="bg-orange-100 text-orange-700 text-xs font-semibold px-2 py-1 rounded">Elective</span>
                     @endif
                 </td>
-                <td class="px-6 py-3 text-gray-600">Grade {{ $subject->grade_level }}</td>
-                <td class="px-6 py-3 text-gray-600">{{ $subjectGroupLabel($subject->subject_group) }}</td>
-                <td class="px-6 py-3 text-gray-600">{{ $subject->track->name ?? '—' }}</td>
-                <td class="px-6 py-3 text-gray-600">{{ $subject->specialization->name ?? '—' }}</td>
-                <td class="px-6 py-3 text-right">
+                <td>Grade {{ $subject->grade_level }}</td>
+                <td>{{ $subjectGroupLabel($subject->subject_group) }}</td>
+                <td>{{ $subject->track->name ?? '—' }}</td>
+                <td>{{ $subject->specialization->name ?? '—' }}</td>
+                <td class="text-right">
                     <div class="flex items-center justify-end gap-2">
                         <button type="button"
                             onclick='openEditSubjectModal(@json($subject))'

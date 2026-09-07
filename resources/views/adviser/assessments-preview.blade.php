@@ -65,24 +65,24 @@
         @endif
     @endforeach
 
-    <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-            <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+    <div class="tbl-scroll">
+        <table class="tbl">
+            <thead>
                 <tr>
-                    <th class="text-left px-4 py-2">Row</th>
-                    <th class="text-left px-4 py-2">LRN</th>
-                    <th class="text-left px-4 py-2">Student</th>
+                    <th scope="col">Row</th>
+                    <th scope="col">LRN</th>
+                    <th scope="col">Student</th>
                     @foreach($columns as $col)
-                        <th class="text-center px-4 py-2">{{ $col['name'] }}</th>
+                        <th scope="col" class="text-center">{{ $col['name'] }}</th>
                     @endforeach
                 </tr>
             </thead>
-            <tbody class="divide-y divide-gray-100">
+            <tbody>
                 @forelse($preview['rows'] as $row)
                 <tr class="{{ !$row['matched'] || $row['duplicate'] ? 'bg-red-50' : '' }}">
-                    <td class="px-4 py-2 text-gray-400">{{ $row['excel_row'] }}</td>
-                    <td class="px-4 py-2 font-mono text-xs">{{ $row['lrn'] }}</td>
-                    <td class="px-4 py-2">
+                    <td class="text-gray-400">{{ $row['excel_row'] }}</td>
+                    <td class="font-mono text-xs">{{ $row['lrn'] }}</td>
+                    <td>
                         @if($row['student_name'])
                             {{ $row['student_name'] }}
                             @if($row['duplicate'])
@@ -93,7 +93,7 @@
                         @endif
                     </td>
                     @foreach($row['cells'] as $cell)
-                        <td class="px-4 py-2 text-center">
+                        <td class="text-center">
                             @if($cell['status'] === 'ok')
                                 <span class="text-green-700 font-medium">{{ $cell['value'] }}</span>
                             @elseif($cell['status'] === 'blank')
@@ -108,8 +108,9 @@
                 </tr>
                 @empty
                 <tr>
-                    <td colspan="{{ count($columns) + 3 }}" class="px-4 py-6 text-center text-gray-400">
-                        No data rows found in this file.
+                    <td colspan="{{ count($columns) + 3 }}">
+                        <x-empty-state icon="bi-file-earmark-excel" message="No data rows found in this file."
+                            hint="Check the file has a header row followed by student rows, then re-upload." class="py-6 text-sm" />
                     </td>
                 </tr>
                 @endforelse

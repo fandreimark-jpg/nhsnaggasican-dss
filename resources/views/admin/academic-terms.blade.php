@@ -62,39 +62,42 @@
                     <summary class="text-xs text-brand-700 cursor-pointer hover:underline">
                         Section breakdown ({{ count($term->capacity) }} section{{ count($term->capacity) === 1 ? '' : 's' }})
                     </summary>
-                    <div class="mt-2 overflow-x-auto border rounded-lg">
-                        <table class="w-full text-xs">
-                            <thead class="bg-gray-50 text-gray-500 uppercase tracking-wide">
+                    <div class="mt-2 tbl-wrap tbl-scroll">
+                        <table class="tbl">
+                            <thead>
                                 <tr>
-                                    <th class="text-left px-3 py-2">Section</th>
-                                    <th class="text-center px-3 py-2">Subjects</th>
-                                    <th class="text-center px-3 py-2">Students</th>
-                                    <th class="text-center px-3 py-2">Expected Grades</th>
-                                    <th class="text-center px-3 py-2">Encoded</th>
-                                    <th class="text-center px-3 py-2">Status</th>
+                                    <th scope="col">Section</th>
+                                    <th scope="col" class="tbl-num">Subjects</th>
+                                    <th scope="col" class="tbl-num">Students</th>
+                                    <th scope="col" class="tbl-num">Expected Grades</th>
+                                    <th scope="col" class="tbl-num">Encoded</th>
+                                    <th scope="col" class="text-center">Status</th>
                                 </tr>
                             </thead>
-                            <tbody class="divide-y divide-gray-100">
+                            <tbody>
                                 @forelse($term->capacity as $c)
-                                <tr class="{{ $c['expected'] > 0 && $c['encoded'] < $c['expected'] ? 'bg-red-50' : '' }}">
-                                    <td class="px-3 py-2 text-gray-700 whitespace-nowrap">{{ $c['section']->name }} (Grade {{ $c['section']->grade_level }})</td>
-                                    <td class="px-3 py-2 text-center text-gray-600">{{ $c['subject_count'] }}</td>
-                                    <td class="px-3 py-2 text-center text-gray-600">{{ $c['student_count'] }}</td>
-                                    <td class="px-3 py-2 text-center text-gray-600">{{ $c['expected'] }}</td>
-                                    <td class="px-3 py-2 text-center text-gray-600">{{ $c['encoded'] }}</td>
-                                    <td class="px-3 py-2 text-center">
+                                <tr class="{{ $c['expected'] > 0 && $c['encoded'] < $c['expected'] ? 'bg-status-risk/5' : '' }}">
+                                    <td class="whitespace-nowrap">{{ $c['section']->name }} (Grade {{ $c['section']->grade_level }})</td>
+                                    <td class="tbl-num">{{ $c['subject_count'] }}</td>
+                                    <td class="tbl-num">{{ $c['student_count'] }}</td>
+                                    <td class="tbl-num">{{ $c['expected'] }}</td>
+                                    <td class="tbl-num">{{ $c['encoded'] }}</td>
+                                    <td class="text-center">
                                         @if($c['expected'] === 0)
                                             <span class="text-gray-300">No students/subjects yet</span>
                                         @elseif($c['encoded'] >= $c['expected'])
                                             <span class="text-green-600"><i class="bi bi-check-circle"></i> Complete</span>
                                         @else
-                                            <span class="text-red-600"><i class="bi bi-exclamation-circle"></i> {{ $c['expected'] - $c['encoded'] }} short</span>
+                                            <span class="text-status-risk"><i class="bi bi-exclamation-circle"></i> {{ $c['expected'] - $c['encoded'] }} short</span>
                                         @endif
                                     </td>
                                 </tr>
                                 @empty
                                 <tr>
-                                    <td colspan="6" class="px-3 py-3 text-center text-gray-400">No sections exist for this school year yet.</td>
+                                    <td colspan="6">
+                                        <x-empty-state message="No sections exist for this school year yet." icon="bi-grid"
+                                            hint="Add a section from the Sections page — it will appear here once it does." class="py-4 text-xs" />
+                                    </td>
                                 </tr>
                                 @endforelse
                             </tbody>

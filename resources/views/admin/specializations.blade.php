@@ -25,27 +25,27 @@
         </div>
     </div>
 
-    <div class="overflow-x-auto">
-    <table class="w-full min-w-full text-sm">
-        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+    <div class="tbl-scroll">
+    <table class="tbl">
+        <thead>
             <tr>
-                <th scope="col" class="text-left px-6 py-3">Specialization</th>
-                <th scope="col" class="text-left px-6 py-3">Code</th>
-                <th scope="col" class="text-left px-6 py-3">Track</th>
-                <th scope="col" class="px-6 py-3 text-right">Actions</th>
+                <th scope="col">Specialization</th>
+                <th scope="col">Code</th>
+                <th scope="col">Track</th>
+                <th scope="col" class="text-right">Actions</th>
             </tr>
         </thead>
-        <tbody class="divide-y divide-gray-100">
+        <tbody>
             @forelse($specializations as $spec)
-            <tr class="hover:bg-gray-50">
-                <td class="px-6 py-3 font-medium text-gray-800">{{ $spec->name }}</td>
-                <td class="px-6 py-3">
+            <tr>
+                <td class="font-medium text-gray-800">{{ $spec->name }}</td>
+                <td>
                     <span class="bg-purple-100 text-purple-700 text-xs font-semibold px-2 py-1 rounded">
                         {{ $spec->code }}
                     </span>
                 </td>
-                <td class="px-6 py-3 text-gray-600">{{ $spec->track->name ?? '—' }}</td>
-                <td class="px-6 py-3 text-right">
+                <td>{{ $spec->track->name ?? '—' }}</td>
+                <td class="text-right">
                     <div class="flex items-center justify-end gap-2">
                         <button type="button"
                             onclick='openEditSpecModal(@json($spec))'

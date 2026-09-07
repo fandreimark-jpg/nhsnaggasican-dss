@@ -25,33 +25,33 @@
         </div>
     </div>
 
-    <div class="overflow-x-auto">
-    <table class="w-full min-w-full text-sm">
-        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+    <div class="tbl-scroll">
+    <table class="tbl">
+        <thead>
             <tr>
-                <th scope="col" class="text-left px-6 py-3">Track Name</th>
-                <th scope="col" class="text-left px-6 py-3">Code</th>
-                <th scope="col" class="text-left px-6 py-3">Specializations</th>
-                <th scope="col" class="px-6 py-3 text-right">Actions</th>
+                <th scope="col">Track Name</th>
+                <th scope="col">Code</th>
+                <th scope="col">Specializations</th>
+                <th scope="col" class="text-right">Actions</th>
             </tr>
         </thead>
-        <tbody class="divide-y divide-gray-100">
+        <tbody>
             @forelse($tracks as $track)
-            <tr class="hover:bg-gray-50">
-                <td class="px-6 py-3 font-medium text-gray-800">{{ $track->name }}</td>
-                <td class="px-6 py-3">
+            <tr>
+                <td class="font-medium text-gray-800">{{ $track->name }}</td>
+                <td>
                     <span class="bg-brand-100 text-brand-700 text-xs font-semibold px-2 py-1 rounded">
                         {{ $track->code }}
                     </span>
                 </td>
-                <td class="px-6 py-3 text-gray-600">
+                <td>
                     @if($track->specializations->count() > 0)
                         {{ $track->specializations->pluck('name')->join(', ') }}
                     @else
                         <span class="text-gray-400 text-xs">No specializations yet</span>
                     @endif
                 </td>
-                <td class="px-6 py-3 text-right">
+                <td class="text-right">
                     <div class="flex items-center justify-end gap-2">
                         <button type="button"
                             onclick='openEditTrackModal(@json($track))'

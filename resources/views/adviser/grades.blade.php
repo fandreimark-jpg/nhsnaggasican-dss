@@ -75,12 +75,13 @@
         @csrf
         <input type="hidden" name="grading_period" value="{{ $selectedPeriod }}">
 
-        <table class="w-full text-sm">
-            <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+        <div class="tbl-scroll">
+        <table class="tbl tbl-sticky">
+            <thead>
                 <tr>
-                    <th class="text-left px-6 py-3 sticky left-0 bg-gray-50">Student</th>
+                    <th scope="col" class="sticky left-0 bg-gray-50">Student</th>
                     @foreach($subjects as $subject)
-                        <th class="px-4 py-3 text-center min-w-[120px]">
+                        <th scope="col" class="text-center min-w-[120px]">
                             <span class="block font-medium text-gray-600">{{ $subject->name }}</span>
                             @if($subject->type === 'elective')
                                 <span class="block text-xs text-orange-500 font-normal normal-case">Elective</span>
@@ -89,10 +90,10 @@
                     @endforeach
                 </tr>
             </thead>
-            <tbody class="divide-y divide-gray-100">
+            <tbody>
                 @forelse($students as $studentIndex => $student)
-                <tr class="hover:bg-gray-50">
-                    <td class="px-6 py-3 font-medium text-gray-800 sticky left-0 bg-white whitespace-nowrap">
+                <tr>
+                    <td class="font-medium text-gray-800 sticky left-0 bg-white whitespace-nowrap">
                         {{ $student->last_name }}, {{ $student->first_name }} {{$student->middle_name}}
                     </td>
                     @foreach($subjects as $subjectIndex => $subject)
@@ -102,7 +103,7 @@
                             $isFailing = $existing && $existing->grade < 75;
                             $inputIndex = ($studentIndex * 1000) + $subjectIndex;
                         @endphp
-                        <td class="px-4 py-3 text-center">
+                        <td class="text-center">
                             <input type="hidden"
                                 name="grades[{{ $inputIndex }}][student_id]"
                                 value="{{ $student->id }}">
@@ -118,7 +119,7 @@
                                 class="w-20 border rounded-lg px-2 py-1.5 text-center text-sm
                                        focus:outline-none focus:ring-2 focus:ring-brand-400
                                        {{ $isFailing
-                                            ? 'border-red-300 bg-red-50 text-red-600'
+                                            ? 'border-status-risk/40 bg-status-risk/5 text-status-risk'
                                             : 'border-gray-200 hover:border-gray-300' }}
                                        {{ $isTermOpen ? '' : 'bg-gray-50 text-gray-400 cursor-not-allowed' }}"
                                 placeholder="—"
@@ -141,6 +142,7 @@
                 @endforelse
             </tbody>
         </table>
+        </div>
 
         @if($isTermOpen)
         <div class="px-6 py-4 border-t flex justify-end">

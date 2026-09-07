@@ -24,22 +24,22 @@
 <p class="text-xs text-gray-400 px-5 pt-1">
     Risk levels are derived from grade thresholds; confidence reflects how much the model's decision trees agreed with each other, not predictive certainty about any individual student.
 </p>
-<div class="max-h-[480px] overflow-auto mt-2">
-<table class="w-full min-w-full text-sm">
-    <thead class="bg-gray-50 text-gray-500 sticky top-0 z-10">
+<div class="tbl-scroll mt-2">
+<table class="tbl tbl-sticky">
+    <thead>
         <tr>
-            <th scope="col" class="text-left px-5 py-2 text-xs">Student</th>
-            <th scope="col" class="text-left px-3 py-2 text-xs">Section</th>
-            <th scope="col" class="text-center px-3 py-2 text-xs">Average Grade</th>
-            <th scope="col" class="text-center px-3 py-2 text-xs">Risk Level</th>
-            <th scope="col" class="text-center px-3 py-2 text-xs">Focus Area</th>
-            <th scope="col" class="text-center px-3 py-2 text-xs">Trend</th>
+            <th scope="col">Student</th>
+            <th scope="col">Section</th>
+            <th scope="col" class="text-center">Average Grade</th>
+            <th scope="col" class="text-center">Risk Level</th>
+            <th scope="col" class="text-center">Focus Area</th>
+            <th scope="col" class="text-center">Trend</th>
         </tr>
     </thead>
-    <tbody class="divide-y divide-gray-50">
+    <tbody>
         @forelse($atRiskStudents as $student)
-        <tr class="hover:bg-gray-50">
-            <td class="px-5 py-2 font-medium text-gray-800 text-sm align-top">
+        <tr>
+            <td class="font-medium text-gray-800 align-top">
                 @if(auth()->user()->role === 'principal' && isset($student['student_id']))
                     <a href="{{ route('principal.students.show', $student['student_id']) }}" class="hover:underline hover:text-brand-700">
                         {{ $student['name'] }}
@@ -48,15 +48,15 @@
                     {{ $student['name'] }}
                 @endif
             </td>
-            <td class="px-3 py-2 text-gray-600 text-sm align-top">{{ $student['section'] }}</td>
-            <td class="px-3 py-2 text-center text-gray-700 text-sm align-top">
+            <td class="align-top">{{ $student['section'] }}</td>
+            <td class="tbl-num text-center align-top">
                 {{ is_numeric($student['average']) ? number_format($student['average'], 2) : $student['average'] }}
             </td>
-            <td class="px-3 py-2 text-center align-top">
+            <td class="text-center align-top">
                 @if($student['risk_level'] === 'high')
-                    <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">High</span>
+                    <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-status-risk/10 text-status-risk">High</span>
                 @elseif($student['risk_level'] === 'moderate')
-                    <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700">Moderate</span>
+                    <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-status-attention/10 text-status-attention">Moderate</span>
                 @else
                     <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">{{ ucfirst($student['risk_level']) }}</span>
                 @endif
@@ -66,7 +66,7 @@
                     </div>
                 @endif
             </td>
-            <td class="px-3 py-2 align-top">
+            <td class="align-top">
                 @if(!empty($student['failing_subjects']))
                     <div class="text-xs">
                         @foreach($student['failing_subjects'] as $fs)
@@ -109,7 +109,7 @@
                     </div>
                 @endif
             </td>
-            <td class="px-3 py-2 text-center text-sm align-top">
+            <td class="text-center align-top">
                 @if($student['trend'] === 'improving')
                     <span class="text-green-600 font-medium">&uarr; Improving</span>
                 @elseif($student['trend'] === 'declining')

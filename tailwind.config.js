@@ -40,6 +40,16 @@ export default {
                     500: '#e4cc43', // accent — used only for small highlights
                     600: '#d0b519',
                 },
+                // Status colours carry MEANING in this system and are used only for
+                // the four DSS states. Named semantically so that "what colour is At
+                // Risk" is answered in one place, and so a plain count can never
+                // accidentally borrow a status hue.
+                status: {
+                    ontrack:   '#3b892d', // = brand-800, the institutional green
+                    attention: '#b45309', // amber-700 — readable on white, unlike amber-500
+                    risk:      '#b91c1c', // red-700
+                    failing:   '#7f1d1d', // red-900 — an outcome, graver than At Risk
+                },
             },
         },
     },

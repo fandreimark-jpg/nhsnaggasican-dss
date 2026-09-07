@@ -18,7 +18,7 @@
     $isTermOpen = $openTerm === $selectedPeriod;
     $componentLabels = ['written_work' => 'Written Work', 'performance_task' => 'Performance Task', 'examination' => 'Examination'];
     $componentColors = ['written_work' => 'bg-blue-100 text-blue-700', 'performance_task' => 'bg-purple-100 text-purple-700', 'examination' => 'bg-orange-100 text-orange-700'];
-    $inTermStatusColors = ['On Track' => 'bg-green-100 text-green-700', 'Needs Attention' => 'bg-yellow-100 text-yellow-700', 'At Risk' => 'bg-red-100 text-red-700'];
+    $inTermStatusColors = ['On Track' => 'bg-status-ontrack/10 text-status-ontrack', 'Needs Attention' => 'bg-status-attention/10 text-status-attention', 'At Risk' => 'bg-status-risk/10 text-status-risk'];
 @endphp
 
 @include('partials.stale-risk-warning')
@@ -163,24 +163,24 @@
     <p class="text-xs text-gray-500 px-6 pt-3">
         <x-count-label :count="$items->count()" noun="item" />
     </p>
-    <div class="max-h-[60vh] overflow-auto mt-2">
-    <table class="w-full text-sm">
-        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide sticky top-0 z-10">
+    <div class="tbl-scroll mt-2">
+    <table class="tbl tbl-sticky">
+        <thead>
             <tr>
-                <th class="text-left px-6 py-3">Item</th>
-                <th class="text-left px-4 py-3">Component</th>
-                <th class="text-center px-4 py-3">Max Score</th>
-                <th class="text-center px-4 py-3">Scores Entered</th>
+                <th scope="col">Item</th>
+                <th scope="col">Component</th>
+                <th scope="col" class="tbl-num">Max Score</th>
+                <th scope="col" class="tbl-num">Scores Entered</th>
                 @if($isTermOpen)
-                <th class="text-center px-4 py-3">Actions</th>
+                <th scope="col" class="text-center">Actions</th>
                 @endif
             </tr>
         </thead>
-        <tbody class="divide-y divide-gray-100">
+        <tbody>
             @forelse($items as $item)
-            <tr class="hover:bg-gray-50">
-                <td class="px-6 py-3 font-medium text-gray-800">{{ $item->name }}</td>
-                <td class="px-4 py-3">
+            <tr>
+                <td class="font-medium text-gray-800">{{ $item->name }}</td>
+                <td>
                     <span class="px-2 py-0.5 rounded-full text-xs font-medium {{ $componentColors[$item->component] ?? 'bg-gray-100 text-gray-600' }}">
                         {{ $componentLabels[$item->component] ?? $item->component }}
                     </span>
@@ -190,10 +190,10 @@
                         </span>
                     @endif
                 </td>
-                <td class="px-4 py-3 text-center text-gray-600">{{ number_format($item->max_score, 2) }}</td>
-                <td class="px-4 py-3 text-center text-gray-600">{{ $item->scores_count }}</td>
+                <td class="tbl-num text-gray-600">{{ number_format($item->max_score, 2) }}</td>
+                <td class="tbl-num text-gray-600">{{ $item->scores_count }}</td>
                 @if($isTermOpen)
-                <td class="px-4 py-3 text-center">
+                <td class="text-center">
                     @php
                         $editItemData = [
                             'id' => $item->id,
@@ -324,38 +324,38 @@
     <p class="text-xs text-gray-500 px-6 pt-3">
         <x-count-label :count="$performance->count()" noun="student" />
     </p>
-    <div class="max-h-[60vh] overflow-auto mt-2">
-    <table class="w-full text-sm">
-        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide sticky top-0 z-10">
+    <div class="tbl-scroll mt-2">
+    <table class="tbl tbl-sticky">
+        <thead>
             <tr>
-                <th class="text-left px-6 py-2">Student</th>
+                <th scope="col">Student</th>
                 {{-- "Correctness and interface pass" TASK 5c — explicit
                      widths so numeric columns don't shift width between
                      pages, and right-aligned like every other number in
                      this row (names stay left-aligned). --}}
-                <th class="text-right px-3 py-2 w-28">Written Work</th>
-                <th class="text-right px-3 py-2 w-28">Performance Task</th>
-                <th class="text-right px-3 py-2 w-28">Examination</th>
+                <th scope="col" class="tbl-num w-28">Written Work</th>
+                <th scope="col" class="tbl-num w-28">Performance Task</th>
+                <th scope="col" class="tbl-num w-28">Examination</th>
                 {{-- "Workflow completion pass" TASK 4b — the reader was
                      seeing 77 in Transmuted and concluding "above 75,"
                      missing that Computed (what In-Term Status actually
                      uses) can be well below it. --}}
-                <th class="text-right px-3 py-2 w-24" title="Raw weighted evidence. This is what In-Term Status uses.">
+                <th scope="col" class="tbl-num w-24" title="Raw weighted evidence. This is what In-Term Status uses.">
                     Computed
                     <span class="block normal-case font-normal text-gray-400 text-[10px] tracking-normal">evidence</span>
                 </th>
-                <th class="text-right px-3 py-2 w-24" title="The reported grade after DepEd's transmutation table. Can be higher than the computed grade.">
+                <th scope="col" class="tbl-num w-24" title="The reported grade after DepEd's transmutation table. Can be higher than the computed grade.">
                     Report Card
                     <span class="block normal-case font-normal text-gray-400 text-[10px] tracking-normal">transmuted</span>
                 </th>
-                <th class="text-left px-4 py-2">In-Term Status</th>
-                <th class="text-left px-4 py-2">Focus Area</th>
+                <th scope="col">In-Term Status</th>
+                <th scope="col">Focus Area</th>
                 {{-- "Decision flow, report scoping, and dashboard pass"
                      TASK 3a/3c — the bulk action lives in the SAME visual
                      column as the per-row "Verify & Use as Official"
                      links below it, and inside this sticky thead so it
                      never scrolls out of view on a 40-row section. --}}
-                <th class="text-center px-4 py-2 align-top">
+                <th scope="col" class="text-center align-top">
                     <div>Official Grade</div>
                     @if($isTermOpen && $selectedSubject)
                     <button type="button" id="verifyAllRemainingBtn" disabled
@@ -370,10 +370,10 @@
                 </th>
             </tr>
         </thead>
-        <tbody class="divide-y divide-gray-100">
+        <tbody>
             @forelse($performance as $row)
-            <tr class="hover:bg-gray-50" data-performance-row data-student-id="{{ $row['student']->id }}">
-                <td class="px-6 py-2 font-medium text-gray-800 whitespace-nowrap">
+            <tr data-performance-row data-student-id="{{ $row['student']->id }}">
+                <td class="font-medium text-gray-800 whitespace-nowrap">
                     {{ $row['student']->last_name }}, {{ $row['student']->first_name }}
                     @if($row['has_additional_support'])
                         {{-- "Workflow completion pass" TASK 3a — neutral,
@@ -387,11 +387,11 @@
                 </td>
                 @foreach(['written_work', 'performance_task', 'examination'] as $key)
                     @php $c = $row['components'][$key]; @endphp
-                    <td class="px-3 py-2 text-right tabular-nums">
+                    <td class="tbl-num">
                         @if($c['percentage'] === null)
                             <span class="text-gray-300 text-xs">No data</span>
                         @else
-                            <span class="{{ $c['status'] === 'On Track' ? 'text-green-700' : 'text-red-600 font-medium' }}">
+                            <span class="{{ $c['status'] === 'On Track' ? 'text-status-ontrack' : 'text-status-risk font-medium' }}">
                                 {{ number_format($c['percentage'], 2) }}%
                             </span>
                             <span class="block text-xs text-gray-400">
@@ -400,7 +400,7 @@
                         @endif
                     </td>
                 @endforeach
-                <td class="px-3 py-2 text-right tabular-nums {{ $row['complete'] ? 'text-gray-800' : 'text-gray-300' }}">
+                <td class="tbl-num {{ $row['complete'] ? 'text-gray-800' : 'text-gray-300' }}">
                     @if($row['complete'])
                         {{ number_format($row['computed_grade'], 2) }}
                         {{-- TASK 1b of "clarity, progress, and visual design" —
@@ -414,7 +414,7 @@
                         —
                     @endif
                 </td>
-                <td class="px-3 py-2 text-right text-xs tabular-nums {{ $row['complete'] && $row['transmuted_grade'] !== null ? 'text-gray-500' : 'text-gray-300' }}">
+                <td class="tbl-num text-xs {{ $row['complete'] && $row['transmuted_grade'] !== null ? 'text-gray-500' : 'text-gray-300' }}">
                     @if(!$row['complete'])
                         —
                     @elseif($row['transmuted_grade'] !== null)
@@ -439,12 +439,12 @@
                         </span>
                     @endif
                 </td>
-                <td class="px-4 py-2">
+                <td>
                     @include('partials.in-term-status-badge', ['its' => $row['in_term_status'], 'transmutedGrade' => $row['transmuted_grade']])
                 </td>
-                <td class="px-4 py-2">
+                <td>
                     @if($row['weakest_component'] && ($row['components'][$row['weakest_component']]['status'] ?? null) === 'Needs Attention')
-                        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-status-attention/10 text-status-attention">
                             {{ $componentLabels[$row['weakest_component']] ?? $row['weakest_component'] }}
                         </span>
                     @elseif($row['weakest_component'])
@@ -453,7 +453,7 @@
                         <span class="text-xs text-gray-300">No data yet</span>
                     @endif
                 </td>
-                <td class="px-4 py-2 text-center" data-official-grade-cell>
+                <td class="text-center" data-official-grade-cell>
                     @if($row['official_grade'] && $row['official_grade']->is_provisional)
                         {{-- "The Failing layer" 2b — a provisional grade came
                              from a fallback scheme, not the subject's real
@@ -471,7 +471,7 @@
                         @if($row['is_failing'])
                             {{-- "The Failing layer" 2a — next to the Official
                                  Grade, never in the In-Term Status column. --}}
-                            <span class="block text-[10px] font-bold text-red-700" title="Official grade of {{ number_format($row['official_grade']->grade, 2) }} — 74 or below.">
+                            <span class="block text-[10px] font-bold text-status-failing" title="Official grade of {{ number_format($row['official_grade']->grade, 2) }} — 74 or below.">
                                 <i class="bi bi-x-octagon-fill"></i> Failing
                             </span>
                         @endif
@@ -499,8 +499,9 @@
             </tr>
             @empty
             <tr>
-                <td colspan="9" class="px-6 py-6 text-center text-sm text-gray-400">
-                    No students match the selected status filter.
+                <td colspan="9">
+                    <x-empty-state icon="bi-funnel" message="No students match the selected status filter."
+                        hint="Try a different In-Term Status filter above, or clear it to see every student." class="py-6 text-sm" />
                 </td>
             </tr>
             @endforelse

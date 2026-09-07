@@ -163,22 +163,22 @@
         @else
             <p class="px-5 pt-3 text-xs text-gray-500">Term {{ $openTermPanel['openTerm'] }} is open — per-section encoding progress:</p>
             <div class="max-h-64 overflow-auto mt-1">
-                <table class="w-full text-xs">
-                    <thead class="bg-gray-50 text-gray-500 sticky top-0">
+                <table class="tbl tbl-sticky">
+                    <thead>
                         <tr>
-                            <th class="text-left px-5 py-1.5">Section</th>
-                            <th class="text-right px-3 py-1.5">Encoded</th>
-                            <th class="text-center px-3 py-1.5">Submitted</th>
+                            <th scope="col">Section</th>
+                            <th scope="col" class="tbl-num">Encoded</th>
+                            <th scope="col" class="text-center">Submitted</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-gray-50">
+                    <tbody>
                         @foreach($openTermPanel['sections'] as $row)
                         <tr>
-                            <td class="px-5 py-1.5 text-gray-700">{{ $row['section']->name }} <span class="text-gray-400">(Grade {{ $row['section']->grade_level }})</span></td>
-                            <td class="px-3 py-1.5 text-right tabular-nums {{ $row['expected'] > 0 && $row['encoded'] < $row['expected'] ? 'text-yellow-600' : 'text-gray-600' }}">
+                            <td>{{ $row['section']->name }} <span class="text-gray-400">(Grade {{ $row['section']->grade_level }})</span></td>
+                            <td class="tbl-num {{ $row['expected'] > 0 && $row['encoded'] < $row['expected'] ? 'text-yellow-600' : 'text-gray-600' }}">
                                 {{ $row['encoded'] }} of {{ $row['expected'] }}
                             </td>
-                            <td class="px-3 py-1.5 text-center">
+                            <td class="text-center">
                                 @if($row['submitted'])
                                     <span class="text-green-600"><i class="bi bi-check-circle-fill"></i></span>
                                 @else

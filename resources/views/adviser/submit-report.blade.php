@@ -112,21 +112,21 @@
         <p class="text-sm text-gray-500">Overview of encoded grades per student</p>
     </div>
 
-    <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-            <thead class="bg-gray-50 text-gray-500">
+    <div class="tbl-scroll">
+        <table class="tbl">
+            <thead>
                 <tr>
-                    <th class="text-left px-6 py-3">Student</th>
-                    <th class="text-center px-4 py-3">Term 1</th>
-                    <th class="text-center px-4 py-3">Term 2</th>
-                    <th class="text-center px-4 py-3">Term 3</th>
-                    <th class="text-center px-4 py-3">Status</th>
+                    <th scope="col">Student</th>
+                    <th scope="col" class="text-center">Term 1</th>
+                    <th scope="col" class="text-center">Term 2</th>
+                    <th scope="col" class="text-center">Term 3</th>
+                    <th scope="col" class="text-center">Status</th>
                 </tr>
             </thead>
-            <tbody class="divide-y divide-gray-100">
+            <tbody>
                 @forelse($gradeSummary as $row)
-                <tr class="hover:bg-gray-50">
-                    <td class="px-6 py-3 font-medium text-gray-800">
+                <tr>
+                    <td class="font-medium text-gray-800">
                         {{ $row['student']->last_name }}, {{ $row['student']->first_name }}
                     </td>
                     {{-- "Decision flow, report scoping, and dashboard
@@ -140,12 +140,12 @@
                         $termValue = $row['term' . $period];
                         $termSubmitted = $termStatus[$period]['submitted'] ?? false;
                     @endphp
-                    <td class="px-4 py-3 text-center {{ !$termSubmitted ? 'text-gray-400 italic' : ($termValue && $termValue < 75 ? 'text-red-600 font-semibold' : 'text-gray-700') }}"
+                    <td class="tbl-num text-center {{ !$termSubmitted ? 'text-gray-400 italic' : ($termValue && $termValue < 75 ? 'text-status-risk font-semibold' : 'text-gray-700') }}"
                         @unless($termSubmitted) title="Verified but Term {{ $period }} has not been submitted yet." @endunless>
                         {{ $termValue ? number_format($termValue, 2) : '—' }}
                     </td>
                     @endforeach
-                    <td class="px-4 py-3 text-center">
+                    <td class="text-center">
                         @if($row['term1'] && $row['term2'] && $row['term3'])
                             <span class="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700">Complete</span>
                         @else

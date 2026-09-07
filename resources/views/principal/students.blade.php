@@ -9,8 +9,8 @@
 
 @php
     $componentLabels = ['written_work' => 'Written Work', 'performance_task' => 'Performance Task', 'examination' => 'Examination'];
-    $inTermStatusColors = ['On Track' => 'bg-green-100 text-green-700', 'Needs Attention' => 'bg-yellow-100 text-yellow-700', 'At Risk' => 'bg-red-100 text-red-700'];
-    $riskLevelColors = ['low' => 'bg-green-100 text-green-700', 'moderate' => 'bg-yellow-100 text-yellow-700', 'high' => 'bg-red-100 text-red-700'];
+    $inTermStatusColors = ['On Track' => 'bg-status-ontrack/10 text-status-ontrack', 'Needs Attention' => 'bg-status-attention/10 text-status-attention', 'At Risk' => 'bg-status-risk/10 text-status-risk'];
+    $riskLevelColors = ['low' => 'bg-status-ontrack/10 text-status-ontrack', 'moderate' => 'bg-status-attention/10 text-status-attention', 'high' => 'bg-status-risk/10 text-status-risk'];
     $baseParams = request()->except(['sort', 'dir', 'page']);
 
     $sortHeader = function (string $key, string $label) use ($sortKey, $sortDir, $baseParams) {
@@ -263,26 +263,26 @@
     <p class="text-xs text-gray-500 px-6 pt-1 pb-2">
         <x-count-label :count="$students->total()" noun="student" />
     </p>
-    <div class="max-h-[60vh] overflow-auto">
-    <table class="w-full min-w-full text-sm">
-        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide sticky top-0 z-10">
+    <div class="tbl-scroll">
+    <table class="tbl tbl-sticky">
+        <thead>
             <tr>
                 @php $h = $sortHeader('name', 'Student'); @endphp
-                <th scope="col" class="text-left px-6 py-2">
+                <th scope="col">
                     <a href="{{ $h['url'] }}" class="inline-flex items-center gap-1 hover:text-brand-700">Student @if($h['active'])<i class="bi {{ $h['icon'] }} text-[10px]"></i>@endif</a>
                 </th>
-                <th scope="col" class="text-left px-3 py-2">LRN</th>
+                <th scope="col">LRN</th>
                 {{-- "Correctness and interface pass" TASK 5c — explicit
                      widths so numeric columns don't shift width between
                      pages, and right-aligned like every other number in
                      this row (names stay left-aligned). --}}
-                <th scope="col" class="text-right px-3 py-2 w-16">Grade</th>
-                <th scope="col" class="text-left px-3 py-2">Section</th>
-                <th scope="col" class="text-left px-3 py-2">Track / Specialization</th>
-                <th scope="col" class="text-left px-3 py-2">Adviser</th>
+                <th scope="col" class="tbl-num w-16">Grade</th>
+                <th scope="col">Section</th>
+                <th scope="col">Track / Specialization</th>
+                <th scope="col">Adviser</th>
                 @foreach(['written_work' => 'Written Work', 'performance_task' => 'Performance Task', 'examination' => 'Examination'] as $key => $label)
                     @php $h = $sortHeader($key, $label); @endphp
-                    <th scope="col" class="text-right px-3 py-2 w-28">
+                    <th scope="col" class="tbl-num w-28">
                         <a href="{{ $h['url'] }}" class="inline-flex items-center gap-1 hover:text-brand-700">{{ $label }} @if($h['active'])<i class="bi {{ $h['icon'] }} text-[10px]"></i>@endif</a>
                     </th>
                 @endforeach
@@ -292,14 +292,14 @@
                      without opening "How to read this table"; the sort key
                      ($h['url']) is unchanged, only the visible label moved. --}}
                 @php $h = $sortHeader('computed_grade', 'Computed'); @endphp
-                <th scope="col" class="text-right px-3 py-2 w-24" title="Raw weighted evidence. This is what In-Term Status uses.">
+                <th scope="col" class="tbl-num w-24" title="Raw weighted evidence. This is what In-Term Status uses.">
                     <a href="{{ $h['url'] }}" class="inline-flex flex-col items-end hover:text-brand-700">
                         <span class="inline-flex items-center gap-1">Computed @if($h['active'])<i class="bi {{ $h['icon'] }} text-[10px]"></i>@endif</span>
                         <span class="normal-case font-normal text-gray-400 text-[10px] tracking-normal">evidence</span>
                     </a>
                 </th>
                 @php $h = $sortHeader('transmuted_grade', 'Report Card'); @endphp
-                <th scope="col" class="text-right px-3 py-2 w-24" title="The reported grade after DepEd's transmutation table. Can be higher than the computed grade.">
+                <th scope="col" class="tbl-num w-24" title="The reported grade after DepEd's transmutation table. Can be higher than the computed grade.">
                     <a href="{{ $h['url'] }}" class="inline-flex flex-col items-end hover:text-brand-700">
                         <span class="inline-flex items-center gap-1">Report Card @if($h['active'])<i class="bi {{ $h['icon'] }} text-[10px]"></i>@endif</span>
                         <span class="normal-case font-normal text-gray-400 text-[10px] tracking-normal">transmuted</span>
@@ -311,18 +311,18 @@
                      across every subject) — the two are different numbers
                      on purpose, see Adviser\DashboardController::buildInTermRows(). --}}
                 @php $h = $sortHeader('in_term_status', 'In-Term Status'); @endphp
-                <th scope="col" class="text-left px-4 py-2">
+                <th scope="col">
                     <a href="{{ $h['url'] }}" class="inline-flex items-center gap-1 hover:text-brand-700">In-Term Status (this subject) @if($h['active'])<i class="bi {{ $h['icon'] }} text-[10px]"></i>@endif</a>
                 </th>
-                <th scope="col" class="text-left px-4 py-2">Focus Area</th>
-                <th scope="col" class="text-left px-3 py-2">Risk Level</th>
-                <th scope="col" class="text-center px-4 py-2">Intervention</th>
+                <th scope="col">Focus Area</th>
+                <th scope="col">Risk Level</th>
+                <th scope="col" class="text-center">Intervention</th>
             </tr>
         </thead>
-        <tbody class="divide-y divide-gray-100">
+        <tbody>
             @foreach($students as $row)
-            <tr class="hover:bg-gray-50">
-                <td class="px-6 py-2 font-medium text-gray-800 whitespace-nowrap">
+            <tr>
+                <td class="font-medium text-gray-800 whitespace-nowrap">
                     <a href="{{ route('principal.students.show', ['student' => $row['student']->id, 'period' => $gradingPeriod]) }}" class="hover:underline hover:text-brand-700">
                         {{ $row['student']->last_name }}, {{ $row['student']->first_name }}
                     </a>
@@ -336,21 +336,21 @@
                         </span>
                     @endif
                 </td>
-                <td class="px-3 py-2 text-gray-500 whitespace-nowrap">{{ $row['student']->lrn }}</td>
-                <td class="px-3 py-2 text-right text-gray-600 tabular-nums">{{ $row['section']->grade_level }}</td>
-                <td class="px-3 py-2 text-gray-600 whitespace-nowrap">{{ $row['section']->name }}</td>
-                <td class="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">
+                <td class="text-gray-500 whitespace-nowrap">{{ $row['student']->lrn }}</td>
+                <td class="tbl-num text-gray-600">{{ $row['section']->grade_level }}</td>
+                <td class="text-gray-600 whitespace-nowrap">{{ $row['section']->name }}</td>
+                <td class="text-xs text-gray-600 whitespace-nowrap">
                     {{ $row['section']->track->name ?? 'Not set' }}
                     <span class="block text-gray-400">{{ $row['section']->specialization->name ?? 'Not set' }}</span>
                 </td>
-                <td class="px-3 py-2 text-gray-600 whitespace-nowrap">{{ $row['section']->adviser?->name ?? 'Unassigned' }}</td>
+                <td class="text-gray-600 whitespace-nowrap">{{ $row['section']->adviser?->name ?? 'Unassigned' }}</td>
                 @foreach(['written_work', 'performance_task', 'examination'] as $key)
                     @php $c = $row['components'][$key]; @endphp
-                    <td class="px-3 py-2 text-right tabular-nums">
+                    <td class="tbl-num">
                         @if($c['percentage'] === null)
                             <span class="text-gray-300 text-xs">—</span>
                         @else
-                            <span class="{{ $c['status'] === 'On Track' ? 'text-green-700' : 'text-red-600 font-medium' }}">
+                            <span class="{{ $c['status'] === 'On Track' ? 'text-status-ontrack' : 'text-status-risk font-medium' }}">
                                 {{ number_format($c['percentage'], 2) }}%
                             </span>
                             <span class="block text-xs text-gray-400">
@@ -359,7 +359,7 @@
                         @endif
                     </td>
                 @endforeach
-                <td class="px-3 py-2 text-right tabular-nums {{ $row['complete'] ? 'text-gray-800' : 'text-gray-300' }}">
+                <td class="tbl-num {{ $row['complete'] ? 'text-gray-800' : 'text-gray-300' }}">
                     @if($row['complete'])
                         {{ number_format($row['computed_grade'], 2) }}
                         {{-- TASK 1b of "clarity, progress, and visual design" —
@@ -373,7 +373,7 @@
                         —
                     @endif
                 </td>
-                <td class="px-3 py-2 text-right text-xs tabular-nums {{ $row['complete'] && $row['transmuted_grade'] !== null ? 'text-gray-500' : 'text-gray-300' }}">
+                <td class="tbl-num text-xs {{ $row['complete'] && $row['transmuted_grade'] !== null ? 'text-gray-500' : 'text-gray-300' }}">
                     @if(!$row['complete'])
                         —
                     @elseif($row['official_grade'] && $row['official_grade']->is_verified && $row['official_grade']->is_provisional)
@@ -400,7 +400,7 @@
                                  the Official Grade, NEVER in the In-Term
                                  Status column: these are different signals
                                  and must not look like one. --}}
-                            <span class="block text-[10px] font-bold text-red-700" title="Official grade of {{ number_format($row['official_grade']->grade, 2) }} — 74 or below.">
+                            <span class="block text-[10px] font-bold text-status-failing" title="Official grade of {{ number_format($row['official_grade']->grade, 2) }} — 74 or below.">
                                 <i class="bi bi-x-octagon-fill"></i> Failing
                             </span>
                         @endif
@@ -415,12 +415,12 @@
                         </span>
                     @endif
                 </td>
-                <td class="px-4 py-2">
+                <td>
                     @include('partials.in-term-status-badge', ['its' => $row['in_term_status'], 'transmutedGrade' => $row['transmuted_grade']])
                 </td>
-                <td class="px-4 py-2">
+                <td>
                     @if($row['weakest_component'] && ($row['components'][$row['weakest_component']]['status'] ?? null) === 'Needs Attention')
-                        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-status-attention/10 text-status-attention">
                             {{ $componentLabels[$row['weakest_component']] ?? $row['weakest_component'] }}
                         </span>
                     @elseif($row['weakest_component'])
@@ -429,7 +429,7 @@
                         <span class="text-xs text-gray-300">No data yet</span>
                     @endif
                 </td>
-                <td class="px-3 py-2">
+                <td>
                     @if($row['risk_level'] ?? null)
                         <span class="px-2 py-0.5 rounded-full text-xs font-medium {{ $riskLevelColors[$row['risk_level']] ?? 'bg-gray-100 text-gray-600' }}">
                             {{ ucfirst($row['risk_level']) }}
@@ -438,7 +438,7 @@
                         <span class="text-xs text-gray-300" title="No term report submitted yet for this term.">Not yet available</span>
                     @endif
                 </td>
-                <td class="px-4 py-2 text-center">
+                <td class="text-center">
                     @if($row['existing_intervention'])
                         <a href="{{ route('principal.interventions') }}"
                            class="inline-flex items-center gap-1 text-xs text-gray-600 hover:text-brand-700 hover:underline whitespace-nowrap"
@@ -684,7 +684,7 @@
                         $statusSlug = ['At Risk' => 'at_risk', 'Needs Attention' => 'needs_attention', 'Failing' => 'failing'][$row['status']] ?? 'at_risk';
                         $isAtRisk = $statusSlug === 'at_risk';
                         $isDisabled = $row['has_existing_intervention'] || !$isAtRisk;
-                        $statusColor = ['at_risk' => 'text-red-500', 'needs_attention' => 'text-yellow-600', 'failing' => 'text-red-700 font-semibold'][$statusSlug];
+                        $statusColor = ['at_risk' => 'text-status-risk', 'needs_attention' => 'text-status-attention', 'failing' => 'text-status-failing font-semibold'][$statusSlug];
                     @endphp
                     <div class="p-3 flex items-center gap-3 {{ $row['has_existing_intervention'] ? 'bg-gray-50' : '' }} biv-row"
                          data-status="{{ $statusSlug }}"

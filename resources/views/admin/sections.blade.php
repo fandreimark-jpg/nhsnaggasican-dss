@@ -31,46 +31,46 @@
         </div>
     </div>
 
-    <div class="overflow-x-auto">
-    <table class="w-full min-w-full text-sm" id="sectionTable">
-        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+    <div class="tbl-scroll">
+    <table class="tbl" id="sectionTable">
+        <thead>
             <tr>
-                <th scope="col" class="text-left px-6 py-3">Section Name</th>
-                <th scope="col" class="text-left px-6 py-3">Grade Level</th>
-                <th scope="col" class="text-left px-6 py-3">Track</th>
-                <th scope="col" class="text-left px-6 py-3">Specialization</th>
-                <th scope="col" class="text-left px-6 py-3">School Year</th>
-                <th scope="col" class="text-left px-6 py-3">Adviser</th>
-                <th scope="col" class="text-left px-6 py-3">Students</th>
+                <th scope="col">Section Name</th>
+                <th scope="col">Grade Level</th>
+                <th scope="col">Track</th>
+                <th scope="col">Specialization</th>
+                <th scope="col">School Year</th>
+                <th scope="col">Adviser</th>
+                <th scope="col" class="tbl-num">Students</th>
                 {{-- TASK 4 of "dashboard structure and upload safeguards" —
                      the same subjects x students arithmetic
                      AcademicTerm::completionStatus() uses to decide whether
                      a term can complete, shown here so the gap is visible
                      before it silently blocks the next term from opening. --}}
-                <th scope="col" class="text-left px-6 py-3" title="Subjects Subject::forSection() returns for this section">Subjects</th>
-                <th scope="col" class="text-left px-6 py-3" title="Subjects x Students — grades required per term before it can complete">Expected/Term</th>
-                <th scope="col" class="px-6 py-3 text-right">Actions</th>
+                <th scope="col" class="tbl-num" title="Subjects Subject::forSection() returns for this section">Subjects</th>
+                <th scope="col" class="tbl-num" title="Subjects x Students — grades required per term before it can complete">Expected/Term</th>
+                <th scope="col" class="text-right">Actions</th>
             </tr>
         </thead>
-        <tbody class="divide-y divide-gray-100">
+        <tbody>
             @forelse($sections as $section)
-            <tr class="hover:bg-gray-50 section-row">
-                <td class="px-6 py-3 font-medium text-gray-800">{{ $section->name }}</td>
-                <td class="px-6 py-3 text-gray-600">Grade {{ $section->grade_level }}</td>
-                <td class="px-6 py-3 text-gray-600">{{ $section->track->name ?? '—' }}</td>
-                <td class="px-6 py-3 text-gray-600">{{ $section->specialization->name ?? '—' }}</td>
-                <td class="px-6 py-3 text-gray-600">{{ $section->school_year }}</td>
-                <td class="px-6 py-3 text-gray-600">
+            <tr class="section-row">
+                <td class="font-medium text-gray-800">{{ $section->name }}</td>
+                <td>Grade {{ $section->grade_level }}</td>
+                <td>{{ $section->track->name ?? '—' }}</td>
+                <td>{{ $section->specialization->name ?? '—' }}</td>
+                <td>{{ $section->school_year }}</td>
+                <td>
                     @if($section->adviser)
                         {{ $section->adviser->name }}
                     @else
                         <span class="text-yellow-500 text-xs font-medium">Unassigned</span>
                     @endif
                 </td>
-                <td class="px-6 py-3 text-gray-600"><x-count-label :count="$section->students->count()" noun="student" /></td>
-                <td class="px-6 py-3 text-gray-600">{{ $section->subject_count }}</td>
-                <td class="px-6 py-3 text-gray-600">{{ $section->subject_count * $section->students->count() }}</td>
-                <td class="px-6 py-3 text-right">
+                <td class="tbl-num"><x-count-label :count="$section->students->count()" noun="student" /></td>
+                <td class="tbl-num">{{ $section->subject_count }}</td>
+                <td class="tbl-num">{{ $section->subject_count * $section->students->count() }}</td>
+                <td class="text-right">
                     <div class="flex items-center justify-end gap-2">
                         <button type="button"
                             onclick='openEditSectionModal(@json($section->load(["track", "specialization"])))'

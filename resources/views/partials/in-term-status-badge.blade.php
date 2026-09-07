@@ -28,7 +28,7 @@
     @param float|null $transmutedGrade this same subject's transmuted grade, when known (null if incomplete/unavailable)
 --}}
 @php
-    $inTermStatusColors = ['On Track' => 'bg-green-100 text-green-700', 'Needs Attention' => 'bg-yellow-100 text-yellow-700', 'At Risk' => 'bg-red-100 text-red-700'];
+    $inTermStatusColors = ['On Track' => 'bg-status-ontrack/10 text-status-ontrack', 'Needs Attention' => 'bg-status-attention/10 text-status-attention', 'At Risk' => 'bg-status-risk/10 text-status-risk'];
     $passingOnPaper = in_array($its['status'], ['At Risk', 'Needs Attention'], true)
         && ($its['complete'] ?? false)
         && $transmutedGrade !== null
@@ -39,7 +39,7 @@
     {{ $its['status'] }}@if($its['computed_grade'] !== null) &middot; computed {{ number_format($its['computed_grade'], 2) }}@endif
 </span>
 @if($passingOnPaper)
-    <span class="block mt-0.5 text-[11px] font-semibold text-amber-700 truncate" title="passing on paper (transmuted {{ number_format($transmutedGrade, 2) }}) &middot; {{ $itemCountText }}">
+    <span class="block mt-0.5 text-[11px] font-semibold text-status-attention truncate" title="passing on paper (transmuted {{ number_format($transmutedGrade, 2) }}) &middot; {{ $itemCountText }}">
         <i class="bi bi-exclamation-triangle-fill"></i> passing on paper &middot; {{ $itemCountText }}
     </span>
 @else

@@ -7,7 +7,7 @@
 
 @php
     $componentLabels = ['written_work' => 'Written Work', 'performance_task' => 'Performance Task', 'examination' => 'Examination'];
-    $riskColors = ['low' => 'bg-green-100 text-green-700', 'moderate' => 'bg-yellow-100 text-yellow-700', 'high' => 'bg-red-100 text-red-700'];
+    $riskColors = ['low' => 'bg-status-ontrack/10 text-status-ontrack', 'moderate' => 'bg-status-attention/10 text-status-attention', 'high' => 'bg-status-risk/10 text-status-risk'];
 @endphp
 
 <div class="mb-4">
@@ -48,7 +48,7 @@
 {{-- Subject -> Component -> Evidence drill-down --}}
 <div class="space-y-4 mb-4">
     @forelse($subjectAnalysis as $row)
-    <div class="bg-white rounded-xl shadow-sm overflow-hidden {{ $row['weakest_component'] && ($row['components'][$row['weakest_component']]['status'] ?? null) === 'Needs Attention' ? 'ring-1 ring-red-200' : '' }}">
+    <div class="bg-white rounded-xl shadow-sm overflow-hidden {{ $row['weakest_component'] && ($row['components'][$row['weakest_component']]['status'] ?? null) === 'Needs Attention' ? 'ring-1 ring-status-attention/30' : '' }}">
         <div class="px-5 py-3 border-b flex justify-between items-center">
             <h3 class="font-semibold text-gray-800">{{ $row['subject']->name }}</h3>
             <span class="font-semibold {{ $row['complete'] ? 'text-gray-800' : 'text-gray-300' }}">
@@ -60,12 +60,12 @@
         <div class="grid grid-cols-3 divide-x">
             @foreach(['written_work', 'performance_task', 'examination'] as $key)
                 @php $c = $row['components'][$key]; @endphp
-                <div class="p-3 text-center {{ $row['weakest_component'] === $key && $c['status'] === 'Needs Attention' ? 'bg-red-50' : '' }}">
+                <div class="p-3 text-center {{ $row['weakest_component'] === $key && $c['status'] === 'Needs Attention' ? 'bg-status-attention/5' : '' }}">
                     <p class="text-xs text-gray-500">{{ $componentLabels[$key] }}</p>
                     @if($c['percentage'] === null)
                         <p class="text-sm text-gray-300 mt-1">No data</p>
                     @else
-                        <p class="text-lg font-bold {{ $c['status'] === 'On Track' ? 'text-green-700' : 'text-red-600' }} mt-1">
+                        <p class="text-lg font-bold {{ $c['status'] === 'On Track' ? 'text-status-ontrack' : 'text-status-risk' }} mt-1">
                             {{ number_format($c['percentage'], 1) }}%
                         </p>
                         <p class="text-xs text-gray-400">
@@ -80,12 +80,12 @@
         @if($row['evidence']->isNotEmpty())
         <div class="border-t px-5 py-3">
             <p class="text-xs font-medium text-gray-500 mb-2">Evidence</p>
-            <div class="overflow-x-auto">
-            <table class="w-full min-w-full text-xs">
-                <tbody class="divide-y divide-gray-50">
+            <div class="tbl-scroll">
+            <table class="tbl">
+                <tbody>
                     @foreach($row['evidence'] as $item)
                     <tr>
-                        <td class="py-1.5 text-gray-700">
+                        <td class="text-gray-700">
                             {{ $item['name'] }}
                             @if($item['is_additional_support'])
                                 {{-- "Workflow completion pass" TASK 3c — lists
@@ -96,8 +96,8 @@
                                 </span>
                             @endif
                         </td>
-                        <td class="py-1.5 text-gray-400">{{ $componentLabels[$item['component']] ?? $item['component'] }}</td>
-                        <td class="py-1.5 text-right font-medium">
+                        <td class="text-gray-400">{{ $componentLabels[$item['component']] ?? $item['component'] }}</td>
+                        <td class="tbl-num font-medium">
                             @if($item['score'] !== null)
                                 {{ number_format($item['score'], 2) }} / {{ number_format($item['max_score'], 2) }}
                             @else

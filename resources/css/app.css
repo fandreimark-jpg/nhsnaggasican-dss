@@ -35,3 +35,19 @@
 table {
     font-variant-numeric: tabular-nums;
 }
+
+@layer components {
+    /* One definition for every table in the app. Previously each Blade
+       file carried its own class string — eight variants had drifted
+       apart, so the same column read differently on two screens. */
+    .tbl-wrap  { @apply bg-white rounded-lg shadow-sm overflow-hidden; }
+    .tbl-scroll{ @apply overflow-y-auto max-h-[32rem]; }
+    .tbl       { @apply w-full text-sm text-left; }
+    .tbl thead { @apply bg-gray-50 text-gray-500 text-xs uppercase tracking-wide; }
+    .tbl thead th { @apply px-4 py-3 font-medium whitespace-nowrap; }
+    .tbl tbody tr { @apply border-t border-gray-100; }
+    .tbl tbody tr:hover { @apply bg-brand-50; }
+    .tbl tbody td { @apply px-4 py-3 text-gray-700 align-middle; }
+    .tbl-sticky thead { @apply sticky top-0 z-10 shadow-[0_1px_0_rgb(229,231,235)]; }
+    .tbl-num   { @apply text-right; }
+}

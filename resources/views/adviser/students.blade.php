@@ -33,30 +33,30 @@
             </p>
         </div>
     </div>
-    <table class="w-full text-sm">
-        <thead class="bg-gray-50 text-gray-500">
+    <table class="tbl">
+        <thead>
             <tr>
-                <th class="text-left px-6 py-3">LRN</th>
-                <th class="text-left px-6 py-3">Last Name</th>
-                <th class="text-left px-6 py-3">First Name</th>
-                <th class="text-left px-6 py-3">Middle Name</th>
-                <th class="text-left px-6 py-3">Birthdate</th>
-                <th class="text-left px-6 py-3">Gender</th>
-                <th class="px-6 py-3 text-right">Actions</th>
+                <th scope="col">LRN</th>
+                <th scope="col">Last Name</th>
+                <th scope="col">First Name</th>
+                <th scope="col">Middle Name</th>
+                <th scope="col">Birthdate</th>
+                <th scope="col">Gender</th>
+                <th scope="col" class="text-right">Actions</th>
             </tr>
         </thead>
 
-        <tbody id="adviserStudentTableBody" class="divide-y divide-gray-100">
+        <tbody id="adviserStudentTableBody">
             @forelse($students as $student)
 
-            <tr class="student-row hover:bg-gray-50">
-                <td class="px-6 py-3 text-gray-600">{{ $student->lrn }}</td>
-                <td class="px-6 py-3 font-medium text-gray-800">{{ $student->last_name }}</td>
-                <td class="px-6 py-3 text-gray-800">{{ $student->first_name }}</td>
-                <td class="px-6 py-3 text-gray-800">{{ $student->middle_name ?? '—' }}</td>
-                <td class="px-6 py-3 capitalize text-gray-600">{{ $student->formatted_birthdate }}</td>
-                <td class="px-6 py-3 capitalize text-gray-600">{{ $student->gender }}</td>
-                <td class="px-6 py-3 text-right">
+            <tr class="student-row">
+                <td>{{ $student->lrn }}</td>
+                <td class="font-medium text-gray-800">{{ $student->last_name }}</td>
+                <td>{{ $student->first_name }}</td>
+                <td>{{ $student->middle_name ?? '—' }}</td>
+                <td class="capitalize">{{ $student->formatted_birthdate }}</td>
+                <td class="capitalize">{{ $student->gender }}</td>
+                <td class="text-right">
                     <button type="button"
                         onclick='openEditModal(@json($student))'
                         class="text-brand-600 hover:underline text-sm"><i class="bi bi-pencil-square"></i>Edit</button>

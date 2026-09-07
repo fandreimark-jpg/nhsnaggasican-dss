@@ -19,8 +19,8 @@
 @include('partials.stale-risk-warning')
 
 @php
-    $inTermStatusColors = ['On Track' => 'bg-green-100 text-green-700', 'Needs Attention' => 'bg-yellow-100 text-yellow-700', 'At Risk' => 'bg-red-100 text-red-700'];
-    $riskLevelColors = ['low' => 'bg-green-100 text-green-700', 'moderate' => 'bg-yellow-100 text-yellow-700', 'high' => 'bg-red-100 text-red-700'];
+    $inTermStatusColors = ['On Track' => 'bg-status-ontrack/10 text-status-ontrack', 'Needs Attention' => 'bg-status-attention/10 text-status-attention', 'At Risk' => 'bg-status-risk/10 text-status-risk'];
+    $riskLevelColors = ['low' => 'bg-status-ontrack/10 text-status-ontrack', 'moderate' => 'bg-status-attention/10 text-status-attention', 'high' => 'bg-status-risk/10 text-status-risk'];
     $componentLabels = ['written_work' => 'Written Work', 'performance_task' => 'Performance Task', 'examination' => 'Examination'];
     // TASK 1 of "terminology, transmutation, and interface cleanup" —
     // see the same map on the Interventions pages: 'remediation' is a
@@ -64,7 +64,7 @@
     </div>
     @if($attentionItems->isEmpty())
         <div class="px-6 py-5 text-sm text-gray-500">
-            <i class="bi bi-check-circle text-green-600"></i> Nothing needs your attention right now.
+            <i class="bi bi-check-circle text-status-ontrack"></i> Nothing needs your attention right now.
         </div>
     @else
         <ul class="divide-y divide-gray-100">
@@ -233,9 +233,9 @@
                  below now shows only the top 10 highest-priority rows. --}}
             @if($students->isNotEmpty())
             <p class="text-xs text-gray-500 mt-1">
-                <span class="text-red-600 font-medium">{{ $inTermStatusCounts['At Risk'] }} At Risk</span>,
-                <span class="text-yellow-600 font-medium">{{ $inTermStatusCounts['Needs Attention'] }} Needs Attention</span>,
-                <span class="text-green-600 font-medium">{{ $inTermStatusCounts['On Track'] }} On Track</span>
+                <span class="text-status-risk font-medium">{{ $inTermStatusCounts['At Risk'] }} At Risk</span>,
+                <span class="text-status-attention font-medium">{{ $inTermStatusCounts['Needs Attention'] }} Needs Attention</span>,
+                <span class="text-status-ontrack font-medium">{{ $inTermStatusCounts['On Track'] }} On Track</span>
             </p>
             @endif
         </div>
@@ -275,18 +275,18 @@
          scroll potential is moot (it's capped at 10) but this keeps the
          header pinned if a section ever has fewer than 10 and the panel
          is short, and keeps the pattern consistent app-wide. --}}
-    <div class="max-h-[28rem] overflow-auto">
-    <table class="w-full min-w-full text-sm">
-        <thead class="bg-gray-50 text-gray-500 sticky top-0 z-10">
+    <div class="tbl-scroll">
+    <table class="tbl tbl-sticky">
+        <thead>
             <tr>
-                <th scope="col" class="text-left px-6 py-3">Student</th>
-                <th scope="col" class="text-left px-4 py-3">Overall In-Term Status</th>
-                <th scope="col" class="text-left px-4 py-3">Focus Area</th>
-                <th scope="col" class="text-center px-4 py-3">Risk Level</th>
-                <th scope="col" class="text-center px-4 py-3">Trend</th>
+                <th scope="col">Student</th>
+                <th scope="col">Overall In-Term Status</th>
+                <th scope="col">Focus Area</th>
+                <th scope="col" class="text-center">Risk Level</th>
+                <th scope="col" class="text-center">Trend</th>
             </tr>
         </thead>
-        <tbody class="divide-y divide-gray-100">
+        <tbody>
             @forelse($inTermRows as $row)
             @php
                 $drillPayload = [
@@ -299,23 +299,23 @@
                     ])->values(),
                 ];
             @endphp
-            <tr class="hover:bg-gray-50">
-                <td class="px-6 py-3 font-medium text-gray-800">
+            <tr>
+                <td class="font-medium text-gray-800">
                     <button type="button" onclick='openStudentSubjectModal(@json($drillPayload))'
                             class="hover:underline hover:text-brand-700 text-left">
                         {{ $row['student']->last_name }}, {{ $row['student']->first_name }}
                     </button>
                 </td>
-                <td class="px-4 py-3">
+                <td>
                     @if($row['in_term_status'])
                         @include('partials.in-term-status-badge', ['its' => $row['in_term_status'], 'transmutedGrade' => $row['transmuted_grade']])
                     @else
                         <span class="text-xs text-gray-300">No evidence yet</span>
                     @endif
                 </td>
-                <td class="px-4 py-3">
+                <td>
                     @if($row['focus_subject'] && $row['in_term_status']['weakest_component'] ?? null)
-                        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-status-risk/10 text-status-risk">
                             {{ $componentLabels[$row['in_term_status']['weakest_component']] ?? $row['in_term_status']['weakest_component'] }}
                         </span>
                         <span class="block text-xs text-gray-400 mt-1">{{ $row['focus_subject']->name }}</span>
@@ -323,7 +323,7 @@
                         <span class="text-xs text-gray-300">—</span>
                     @endif
                 </td>
-                <td class="px-4 py-3 text-center">
+                <td class="text-center">
                     @if($row['risk_level'])
                         <span class="px-2 py-0.5 rounded-full text-xs font-medium {{ $riskLevelColors[$row['risk_level']] ?? 'bg-gray-100 text-gray-600' }}">
                             {{ ucfirst($row['risk_level']) }}
@@ -332,7 +332,7 @@
                         <span class="text-xs text-gray-300">Not yet available</span>
                     @endif
                 </td>
-                <td class="px-4 py-3 text-center">
+                <td class="text-center">
                     @php $trend = $trends[$row['student']->id] ?? null; @endphp
                     @if($trend === 'improving')
                         <span class="text-xs text-green-600 font-medium">&uarr; Improving</span>
@@ -386,9 +386,9 @@
 @push('scripts')
 <script>
     const SSM_STATUS_COLORS = {
-        'On Track': 'bg-green-100 text-green-700',
-        'Needs Attention': 'bg-yellow-100 text-yellow-700',
-        'At Risk': 'bg-red-100 text-red-700',
+        'On Track': 'bg-status-ontrack/10 text-status-ontrack',
+        'Needs Attention': 'bg-status-attention/10 text-status-attention',
+        'At Risk': 'bg-status-risk/10 text-status-risk',
     };
 
     window.openStudentSubjectModal = function (data) {

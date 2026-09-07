@@ -54,25 +54,25 @@
         <input type="hidden" name="stored_filename" value="{{ $storedFilename }}">
         <input type="hidden" name="original_filename" value="{{ $originalName }}">
 
-        <div class="overflow-x-auto mb-6">
-        <table class="w-full min-w-full text-sm">
-            <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+        <div class="tbl-scroll mb-6">
+        <table class="tbl">
+            <thead>
                 <tr>
-                    <th scope="col" class="text-left px-4 py-3">Column (from file)</th>
-                    <th scope="col" class="text-left px-4 py-3">Classify as</th>
-                    <th scope="col" class="text-left px-4 py-3">Exam Role</th>
-                    <th scope="col" class="text-left px-4 py-3">Max Score</th>
-                    <th scope="col" class="text-left px-4 py-3">Additional Support</th>
+                    <th scope="col">Column (from file)</th>
+                    <th scope="col">Classify as</th>
+                    <th scope="col">Exam Role</th>
+                    <th scope="col">Max Score</th>
+                    <th scope="col">Additional Support</th>
                 </tr>
             </thead>
-            <tbody class="divide-y divide-gray-100">
+            <tbody>
                 @foreach($columns as $i => $col)
-                <tr class="hover:bg-gray-50">
-                    <td class="px-4 py-3 font-medium text-gray-800">
+                <tr>
+                    <td class="font-medium text-gray-800">
                         {{ $col['name'] }}
                         <input type="hidden" name="columns[{{ $i }}][name]" value="{{ $col['name'] }}">
                     </td>
-                    <td class="px-4 py-3">
+                    <td>
                         <select name="columns[{{ $i }}][component]" required
                                 onchange="toggleExamRoleField(this)"
                                 class="w-48 border rounded-lg text-sm pl-3 pr-8 py-1.5 {{ $col['guessed_component'] ? '' : 'border-orange-400 bg-orange-50' }}">
@@ -84,7 +84,7 @@
                             <option value="examination" {{ $col['guessed_component'] === 'examination' ? 'selected' : '' }}>Examination</option>
                         </select>
                     </td>
-                    <td class="px-4 py-3">
+                    <td>
                         {{-- Under DO 015, s. 2026 the Examination component
                              splits between two Summative Tests and a Term
                              Examination, each worth a different share (see
@@ -102,7 +102,7 @@
                             <option value="term_exam" {{ ($col['guessed_exam_role'] ?? null) === 'term_exam' ? 'selected' : '' }}>Term Examination</option>
                         </select>
                     </td>
-                    <td class="px-4 py-3">
+                    <td>
                         <input type="number" name="columns[{{ $i }}][max_score]" min="0.01" step="0.01" required
                                placeholder="e.g. 20"
                                value="{{ $col['file_max_score'] ?? '' }}"
@@ -111,7 +111,7 @@
                             <span class="block text-xs text-gray-400 mt-0.5">from file</span>
                         @endif
                     </td>
-                    <td class="px-4 py-3">
+                    <td>
                         {{-- "Workflow completion pass" TASK 3b — display
                              only: never inferred from the column's name.
                              Defaults unchecked; the Adviser decides. --}}

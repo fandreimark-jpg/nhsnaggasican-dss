@@ -10,18 +10,18 @@
         <p class="text-xs text-gray-500">All system actions recorded</p>
     </div>
 
-    <div class="overflow-x-auto">
-    <table class="w-full min-w-full text-sm">
-        <thead class="bg-gray-50 text-gray-500 text-xs">
+    <div class="tbl-scroll">
+    <table class="tbl">
+        <thead>
             <tr>
-                <th scope="col" class="text-left px-5 py-2">Date & Time</th>
-                <th scope="col" class="text-left px-3 py-2">User</th>
-                <th scope="col" class="text-left px-3 py-2">Role</th>
-                <th scope="col" class="text-left px-3 py-2">Action</th>
-                <th scope="col" class="text-left px-3 py-2">Description</th>
+                <th scope="col">Date & Time</th>
+                <th scope="col">User</th>
+                <th scope="col">Role</th>
+                <th scope="col">Action</th>
+                <th scope="col">Description</th>
             </tr>
         </thead>
-        <tbody class="divide-y divide-gray-50">
+        <tbody>
             @forelse($logs as $log)
             @php
                 $actionColors = [
@@ -36,22 +36,22 @@
                 ];
                 $actionColor = $actionColors[$log->action] ?? 'bg-gray-100 text-gray-600';
             @endphp
-            <tr class="hover:bg-gray-50">
-                <td class="px-5 py-2 text-xs text-gray-500">
+            <tr>
+                <td class="text-xs text-gray-500">
                     {{ $log->created_at->format('M d, Y h:i A') }}
                 </td>
-                <td class="px-3 py-2 font-medium text-gray-800 text-xs">
+                <td class="font-medium text-gray-800 text-xs">
                     {{ $log->user->name ?? 'Unknown' }}
                 </td>
-                <td class="px-3 py-2 text-xs text-gray-500 capitalize">
+                <td class="text-xs text-gray-500 capitalize">
                     {{ $log->user->role ?? '—' }}
                 </td>
-                <td class="px-3 py-2">
+                <td>
                     <span class="px-2 py-0.5 rounded-full text-xs font-medium {{ $actionColor }}">
                         {{ str_replace('_', ' ', ucfirst($log->action)) }}
                     </span>
                 </td>
-                <td class="px-3 py-2 text-xs text-gray-600">
+                <td class="text-xs text-gray-600">
                     {{ $log->description }}
                 </td>
             </tr>

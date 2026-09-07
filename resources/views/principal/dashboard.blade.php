@@ -88,31 +88,31 @@
     <div class="flex h-6 rounded-full overflow-hidden bg-gray-100">
         @if($inTermOnTrack > 0)
         <a href="{{ route('principal.students', ['status_filter' => 'On Track', 'period' => $inTermTerm]) }}"
-           class="bg-green-500 hover:bg-green-600 transition-colors" style="flex-grow: {{ $inTermOnTrack }}"
+           class="bg-status-ontrack hover:opacity-90 transition-opacity" style="flex-grow: {{ $inTermOnTrack }}"
            title="On Track: {{ $inTermOnTrack }} — see the filtered Students list"></a>
         @endif
         @if($inTermNeedsAttention > 0)
         <a href="{{ route('principal.students', ['status_filter' => 'Needs Attention', 'period' => $inTermTerm]) }}"
-           class="bg-yellow-400 hover:bg-yellow-500 transition-colors" style="flex-grow: {{ $inTermNeedsAttention }}"
+           class="bg-status-attention hover:opacity-90 transition-opacity" style="flex-grow: {{ $inTermNeedsAttention }}"
            title="Needs Attention: {{ $inTermNeedsAttention }} — see the filtered Students list"></a>
         @endif
         @if($inTermAtRisk > 0)
         <a href="{{ route('principal.students', ['status_filter' => 'At Risk', 'period' => $inTermTerm]) }}"
-           class="bg-red-500 hover:bg-red-600 transition-colors" style="flex-grow: {{ $inTermAtRisk }}"
+           class="bg-status-risk hover:opacity-90 transition-opacity" style="flex-grow: {{ $inTermAtRisk }}"
            title="At Risk: {{ $inTermAtRisk }} — see the filtered Students list"></a>
         @endif
     </div>
     <div class="flex flex-wrap gap-x-5 gap-y-1.5 mt-3 text-xs">
         <a href="{{ route('principal.students', ['status_filter' => 'On Track', 'period' => $inTermTerm]) }}" class="flex items-center gap-1.5 hover:underline">
-            <span class="w-2.5 h-2.5 rounded-full bg-green-500 inline-block shrink-0"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-status-ontrack inline-block shrink-0"></span>
             On Track <strong class="text-gray-800 tabular-nums">{{ $inTermOnTrack }}</strong>
         </a>
         <a href="{{ route('principal.students', ['status_filter' => 'Needs Attention', 'period' => $inTermTerm]) }}" class="flex items-center gap-1.5 hover:underline">
-            <span class="w-2.5 h-2.5 rounded-full bg-yellow-400 inline-block shrink-0"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-status-attention inline-block shrink-0"></span>
             Needs Attention <strong class="text-gray-800 tabular-nums">{{ $inTermNeedsAttention }}</strong>
         </a>
         <a href="{{ route('principal.students', ['status_filter' => 'At Risk', 'period' => $inTermTerm]) }}" class="flex items-center gap-1.5 hover:underline">
-            <span class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block shrink-0"></span>
+            <span class="w-2.5 h-2.5 rounded-full bg-status-risk inline-block shrink-0"></span>
             At Risk <strong class="text-gray-800 tabular-nums">{{ $inTermAtRisk }}</strong>
             @if($atRiskDelta !== null)
                 <span class="text-gray-400">({{ $atRiskDelta > 0 ? 'up' : ($atRiskDelta < 0 ? 'down' : 'unchanged') }}{{ $atRiskDelta !== 0 ? ' from ' . $prevAtRisk . ' in Term ' . ($inTermTerm - 1) : ' since Term ' . ($inTermTerm - 1) }})</span>
@@ -139,9 +139,9 @@
             <p class="text-xs font-medium text-gray-600 mb-1">Term {{ $t['term'] }}</p>
             @if($t['total'] > 0)
             <div class="flex h-4 rounded-full overflow-hidden bg-gray-100">
-                @if($t['onTrack'] > 0)<span class="bg-green-500" style="flex-grow: {{ $t['onTrack'] }}" title="On Track: {{ $t['onTrack'] }}"></span>@endif
-                @if($t['needsAttention'] > 0)<span class="bg-yellow-400" style="flex-grow: {{ $t['needsAttention'] }}" title="Needs Attention: {{ $t['needsAttention'] }}"></span>@endif
-                @if($t['atRisk'] > 0)<span class="bg-red-500" style="flex-grow: {{ $t['atRisk'] }}" title="At Risk: {{ $t['atRisk'] }}"></span>@endif
+                @if($t['onTrack'] > 0)<span class="bg-status-ontrack" style="flex-grow: {{ $t['onTrack'] }}" title="On Track: {{ $t['onTrack'] }}"></span>@endif
+                @if($t['needsAttention'] > 0)<span class="bg-status-attention" style="flex-grow: {{ $t['needsAttention'] }}" title="Needs Attention: {{ $t['needsAttention'] }}"></span>@endif
+                @if($t['atRisk'] > 0)<span class="bg-status-risk" style="flex-grow: {{ $t['atRisk'] }}" title="At Risk: {{ $t['atRisk'] }}"></span>@endif
             </div>
             <p class="text-[11px] text-gray-400 mt-1 tabular-nums">{{ $t['onTrack'] }} &middot; {{ $t['needsAttention'] }} &middot; {{ $t['atRisk'] }}</p>
             @else
@@ -194,9 +194,9 @@
     {{-- TASK 2 of "bulk dialog and intervention closure" — a signal the
          Principal still has to act on (see
          InTermStatusService::isReadyForReview()), never an auto-close. --}}
-    <a href="{{ route('principal.interventions', ['ready_for_review' => 1]) }}" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-green-500 hover:shadow-md transition-shadow block">
+    <a href="{{ route('principal.interventions', ['ready_for_review' => 1]) }}" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-status-ontrack hover:shadow-md transition-shadow block">
         <p class="text-xs text-gray-500">Ready to Close</p>
-        <p class="text-2xl font-bold text-green-700 mt-1 tabular-nums">{{ $ready_for_review }}</p>
+        <p class="text-2xl font-bold text-status-ontrack mt-1 tabular-nums">{{ $ready_for_review }}</p>
         {{-- TASK 6e of "correctness and interface pass" — a bare "0" here
              reads as "nothing is working," not "nothing needs it yet." --}}
         @if($ready_for_review > 0)
@@ -208,7 +208,7 @@
 </div>
 @else
 <div class="bg-white rounded-lg shadow-sm p-4 mb-4 text-sm text-gray-500">
-    <i class="bi bi-check-circle text-green-500"></i> No interventions need attention right now.
+    <i class="bi bi-check-circle text-status-ontrack"></i> No interventions need attention right now.
 </div>
 @endif
 
@@ -241,9 +241,9 @@
     </p>
 </div>
 <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4 mt-2">
-    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-red-800">
+    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-status-failing">
         <p class="text-xs text-gray-500">Failed this term</p>
-        <p class="text-2xl font-bold text-red-800 mt-1">{{ $failingCount }}</p>
+        <p class="text-2xl font-bold text-status-failing mt-1">{{ $failingCount }}</p>
         <p class="text-xs text-gray-400 mt-1">Official grade 74 and below. Verified grades only. Available after the Adviser encodes final grades.</p>
     </div>
 </div>
@@ -274,17 +274,17 @@
      in this system to send a click to, so linking it would only ever land
      on an empty result with no explanation. --}}
 <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4 mt-2">
-    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-green-500">
+    <div class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-status-ontrack">
         <p class="text-xs text-gray-500">Low Risk</p>
-        <p class="text-2xl font-bold text-green-600 mt-1 tabular-nums">{{ $lowRisk }}</p>
+        <p class="text-2xl font-bold text-status-ontrack mt-1 tabular-nums">{{ $lowRisk }}</p>
     </div>
-    <a href="{{ route('principal.dashboard', ['ar_risk_level' => 'moderate']) }}#atRiskResultsContainer" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-yellow-400 hover:shadow-md transition-shadow block">
+    <a href="{{ route('principal.dashboard', ['ar_risk_level' => 'moderate']) }}#atRiskResultsContainer" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-status-attention hover:shadow-md transition-shadow block">
         <p class="text-xs text-gray-500">Moderate Risk</p>
-        <p class="text-2xl font-bold text-yellow-500 mt-1 tabular-nums">{{ $moderateRisk }}</p>
+        <p class="text-2xl font-bold text-status-attention mt-1 tabular-nums">{{ $moderateRisk }}</p>
     </a>
-    <a href="{{ route('principal.dashboard', ['ar_risk_level' => 'high']) }}#atRiskResultsContainer" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-red-500 hover:shadow-md transition-shadow block">
+    <a href="{{ route('principal.dashboard', ['ar_risk_level' => 'high']) }}#atRiskResultsContainer" class="bg-white rounded-lg p-4 shadow-sm border-t-4 border-status-risk hover:shadow-md transition-shadow block">
         <p class="text-xs text-gray-500">High Risk</p>
-        <p class="text-2xl font-bold text-red-600 mt-1 tabular-nums">{{ $highRisk }}</p>
+        <p class="text-2xl font-bold text-status-risk mt-1 tabular-nums">{{ $highRisk }}</p>
     </a>
 </div>
 
@@ -375,26 +375,26 @@
 
     <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
 
-        <div class="flex gap-3 p-3 bg-green-50 rounded-lg border border-green-200">
-            <span class="w-2 h-2 rounded-full bg-green-500 block mt-1 shrink-0"></span>
+        <div class="flex gap-3 p-3 bg-status-ontrack/5 rounded-lg border border-status-ontrack/20">
+            <span class="w-2 h-2 rounded-full bg-status-ontrack block mt-1 shrink-0"></span>
             <div>
-                <p class="text-xs font-semibold text-green-700">
+                <p class="text-xs font-semibold text-status-ontrack">
                     Low Risk — {{ $lowRisk }} {{ $lowRisk === 1 ? 'student' : 'students' }}
                 </p>
-                <p class="text-xs text-green-600 mt-0.5">
+                <p class="text-xs text-status-ontrack mt-0.5">
                     Students are performing well. Continue regular monitoring and maintain current academic support strategies.
                 </p>
             </div>
         </div>
 
-        <div class="flex gap-3 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-            <span class="w-2 h-2 rounded-full bg-yellow-400 block mt-1 shrink-0"></span>
+        <div class="flex gap-3 p-3 bg-status-attention/5 rounded-lg border border-status-attention/20">
+            <span class="w-2 h-2 rounded-full bg-status-attention block mt-1 shrink-0"></span>
             <div>
-                <p class="text-xs font-semibold text-yellow-700">
+                <p class="text-xs font-semibold text-status-attention">
                     Moderate Risk — {{ $moderateRisk }} {{ $moderateRisk === 1 ? 'student' : 'students' }}
                 </p>
-                <p class="text-xs text-yellow-600 mt-0.5">Students need academic attention. Suggested actions:</p>
-                <ul class="text-xs text-yellow-600 mt-1 list-disc list-inside">
+                <p class="text-xs text-status-attention mt-0.5">Students need academic attention. Suggested actions:</p>
+                <ul class="text-xs text-status-attention mt-1 list-disc list-inside">
                     <li>Conduct parent-teacher conference</li>
                     <li>Provide remedial or tutorial sessions</li>
                     <li>Monitor performance closely each term</li>
@@ -402,14 +402,14 @@
             </div>
         </div>
 
-        <div class="flex gap-3 p-3 bg-red-50 rounded-lg border border-red-200">
-            <span class="w-2 h-2 rounded-full bg-red-500 block mt-1 shrink-0"></span>
+        <div class="flex gap-3 p-3 bg-status-risk/5 rounded-lg border border-status-risk/20">
+            <span class="w-2 h-2 rounded-full bg-status-risk block mt-1 shrink-0"></span>
             <div>
-                <p class="text-xs font-semibold text-red-700">
+                <p class="text-xs font-semibold text-status-risk">
                     High Risk — {{ $highRisk }} {{ $highRisk === 1 ? 'student' : 'students' }}
                 </p>
-                <p class="text-xs text-red-600 mt-0.5">Immediate academic intervention suggested. Consider:</p>
-                <ul class="text-xs text-red-600 mt-1 list-disc list-inside">
+                <p class="text-xs text-status-risk mt-0.5">Immediate academic intervention suggested. Consider:</p>
+                <ul class="text-xs text-status-risk mt-1 list-disc list-inside">
                     <li>Schedule immediate parent conference</li>
                     <li>Refer to guidance counselor</li>
                     <li>Enroll in intensive remedial program</li>

@@ -100,13 +100,13 @@
     {{-- Students Table — TASK 7c of "clarity, progress, and visual
          design pass": sticky header on the scrollable table, same
          pattern as every other table in this app. --}}
-    <div class="max-h-[60vh] overflow-auto">
-        <table class="w-full text-sm">
-            <thead class="bg-white text-gray-500 border-b sticky top-0 z-10">
+    <div class="tbl-scroll">
+        <table class="tbl tbl-sticky">
+            <thead>
                 <tr>
-                    <th class="text-left px-5 py-2">Student</th>
+                    <th scope="col">Student</th>
                     @foreach([1, 2, 3] as $period)
-                    <th class="text-center px-3 py-2">
+                    <th scope="col" class="text-center">
                         Term {{ $period }}
                         @unless(in_array($period, $submittedPeriods, true))
                             <span class="text-gray-400 font-normal" title="Not yet submitted for this section — shown for reference, excluded from the overall average.">
@@ -115,14 +115,14 @@
                         @endunless
                     </th>
                     @endforeach
-                    <th class="text-center px-3 py-2">
+                    <th scope="col" class="text-center">
                         Overall Avg
                         <span class="block text-[10px] font-normal normal-case text-gray-400">({{ $submittedCount }} of 3 terms submitted)</span>
                     </th>
-                    <th class="text-center px-3 py-2">Risk Level</th>
+                    <th scope="col" class="text-center">Risk Level</th>
                 </tr>
             </thead>
-            <tbody class="divide-y divide-gray-50">
+            <tbody>
                 @forelse($section->students as $student)
                 @php
                     $g1 = $student->grades->where('grading_period', 1)->avg('grade');
@@ -141,8 +141,8 @@
                     $overallAvg = $filledSubmitted->count() ? round($filledSubmitted->avg(), 2) : null;
                     $latestRisk = $student->riskResults->sortByDesc('grading_period')->first();
                 @endphp
-                <tr class="hover:bg-gray-50">
-                    <td class="px-5 py-2 font-medium text-gray-800">
+                <tr>
+                    <td class="font-medium text-gray-800">
                         @if(auth()->user()->role === 'principal')
                             <a href="{{ route('principal.students.show', $student->id) }}" class="hover:underline hover:text-brand-700">
                                 {{ $student->last_name }}, {{ $student->first_name }}
@@ -156,22 +156,22 @@
                         $g = $periodValues[$period];
                         $isSubmitted = in_array($period, $submittedPeriods, true);
                     @endphp
-                    <td class="px-3 py-2 text-center {{ !$isSubmitted ? 'text-gray-400 italic' : ($g && $g < 75 ? 'text-red-600 font-semibold' : 'text-gray-700') }}"
+                    <td class="tbl-num text-center {{ !$isSubmitted ? 'text-gray-400 italic' : ($g && $g < 75 ? 'text-status-risk font-semibold' : 'text-gray-700') }}"
                         @unless($isSubmitted) title="Verified by the adviser but not yet part of a submitted term report. Not included in the overall average." @endunless>
                         {{ $g ? number_format($g, 2) : '—' }}
                     </td>
                     @endforeach
-                    <td class="px-3 py-2 text-center font-medium {{ $overallAvg && $overallAvg < 75 ? 'text-red-600' : 'text-gray-800' }}">
+                    <td class="tbl-num text-center font-medium {{ $overallAvg && $overallAvg < 75 ? 'text-status-risk' : 'text-gray-800' }}">
                         {{ $overallAvg ? number_format($overallAvg, 2) : '—' }}
                     </td>
-                    <td class="px-3 py-2 text-center">
+                    <td class="text-center">
                         @if($latestRisk)
                             @if($latestRisk->risk_level === 'high')
-                                <span class="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-700">High</span>
+                                <span class="text-xs px-2 py-0.5 rounded-full font-medium bg-status-risk/10 text-status-risk">High</span>
                             @elseif($latestRisk->risk_level === 'moderate')
-                                <span class="text-xs px-2 py-0.5 rounded-full font-medium bg-yellow-100 text-yellow-700">Moderate</span>
+                                <span class="text-xs px-2 py-0.5 rounded-full font-medium bg-status-attention/10 text-status-attention">Moderate</span>
                             @else
-                                <span class="text-xs px-2 py-0.5 rounded-full font-medium bg-green-100 text-green-700">Low</span>
+                                <span class="text-xs px-2 py-0.5 rounded-full font-medium bg-status-ontrack/10 text-status-ontrack">Low</span>
                             @endif
                             {{-- TASK 2d — a Risk Level shown on a row whose
                                  later term column is populated (submitted

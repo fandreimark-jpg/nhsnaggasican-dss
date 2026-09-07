@@ -26,27 +26,27 @@
         </div>
     </div>
 
-    <div class="overflow-x-auto">
-    <table class="w-full min-w-full text-sm" id="userTable">
-        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+    <div class="tbl-scroll">
+    <table class="tbl" id="userTable">
+        <thead>
             <tr>
-                <th scope="col" class="text-left px-6 py-3">Last Name</th>
-                <th scope="col" class="text-left px-6 py-3">First Name</th>
-                <th scope="col" class="text-left px-6 py-3">Middle Name</th>
-                <th scope="col" class="text-left px-6 py-3">Email</th>
-                <th scope="col" class="text-left px-6 py-3">Role</th>
-                <th scope="col" class="text-left px-6 py-3">Status</th>
-                <th scope="col" class="px-6 py-3 text-right">Actions</th>
+                <th scope="col">Last Name</th>
+                <th scope="col">First Name</th>
+                <th scope="col">Middle Name</th>
+                <th scope="col">Email</th>
+                <th scope="col">Role</th>
+                <th scope="col">Status</th>
+                <th scope="col" class="text-right">Actions</th>
             </tr>
         </thead>
-        <tbody class="divide-y divide-gray-100" id="userTableBody">
+        <tbody id="userTableBody">
             @forelse($users as $user)
-            <tr class="hover:bg-gray-50 user-row">
-                <td class="px-6 py-3 font-medium text-gray-800">{{ $user->last_name ?? '—' }}</td>
-                <td class="px-6 py-3 text-gray-800">{{ $user->first_name ?? '—' }}</td>
-                <td class="px-6 py-3 text-gray-500">{{ $user->middle_name ?? '—' }}</td>
-                <td class="px-6 py-3 text-gray-500">{{ $user->email }}</td>
-                <td class="px-6 py-3">
+            <tr class="user-row">
+                <td class="font-medium text-gray-800">{{ $user->last_name ?? '—' }}</td>
+                <td>{{ $user->first_name ?? '—' }}</td>
+                <td class="text-gray-500">{{ $user->middle_name ?? '—' }}</td>
+                <td class="text-gray-500">{{ $user->email }}</td>
+                <td>
                     @if($user->role === 'admin')
                         <span class="px-2 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
                             <i class="bi bi-shield-lock-fill"></i> Admin
@@ -61,7 +61,7 @@
                         </span>
                     @endif
                 </td>
-                <td class="px-6 py-3">
+                <td>
                     @if($user->is_active)
                         <span class="px-2 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
                             <i class="bi bi-check-circle-fill"></i> Active
@@ -72,7 +72,7 @@
                         </span>
                     @endif
                 </td>
-                <td class="px-6 py-3 text-right">
+                <td class="text-right">
                     <div class="flex items-center justify-end gap-2 flex-wrap">
                         <button type="button"
                             onclick='openUserEditModal(@json($user))'

@@ -250,27 +250,27 @@
             </span>
         @endif
     </p>
-    <div class="max-h-[60vh] overflow-auto mt-2">
-    <table class="w-full text-sm">
-        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide sticky top-0 z-10">
+    <div class="tbl-scroll mt-2">
+    <table class="tbl tbl-sticky">
+        <thead>
             <tr>
-                <th class="text-left px-6 py-3">Student</th>
-                <th class="text-left px-3 py-3">Subject</th>
-                <th class="text-left px-4 py-3">Type &amp; Reason</th>
-                <th class="text-left px-4 py-3">Status</th>
-                <th class="text-left px-4 py-3">Decided By</th>
-                <th class="text-left px-4 py-3">Delivery</th>
-                <th class="text-left px-4 py-3">Within-Term Progress</th>
+                <th scope="col">Student</th>
+                <th scope="col">Subject</th>
+                <th scope="col">Type &amp; Reason</th>
+                <th scope="col">Status</th>
+                <th scope="col">Decided By</th>
+                <th scope="col">Delivery</th>
+                <th scope="col">Within-Term Progress</th>
             </tr>
         </thead>
-        <tbody class="divide-y divide-gray-100">
+        <tbody>
             @forelse($interventions as $iv)
-            <tr class="hover:bg-gray-50 align-top" data-intervention-row data-student-name="{{ $iv->student->last_name }}, {{ $iv->student->first_name }}">
-                <td class="px-6 py-3 font-medium text-gray-800 whitespace-nowrap">
+            <tr class="align-top" data-intervention-row data-student-name="{{ $iv->student->last_name }}, {{ $iv->student->first_name }}">
+                <td class="font-medium text-gray-800 whitespace-nowrap">
                     {{ $iv->student->last_name }}, {{ $iv->student->first_name }}
                 </td>
-                <td class="px-3 py-3 text-gray-600 whitespace-nowrap">{{ $iv->subject->name ?? '—' }}</td>
-                <td class="px-4 py-3 max-w-xs">
+                <td class="text-gray-600 whitespace-nowrap">{{ $iv->subject->name ?? '—' }}</td>
+                <td class="max-w-xs">
                     <span class="font-medium text-gray-700">{{ $typeLabels[$iv->recommended_type] ?? $iv->recommended_type }}</span>
                     @if($iv->recommendation_reason)
                         <p class="text-xs text-gray-500 mt-1">{{ $iv->recommendation_reason }}</p>
@@ -279,12 +279,12 @@
                         <p class="text-xs text-gray-400 mt-1 italic">"{{ $iv->principal_notes }}"</p>
                     @endif
                 </td>
-                <td class="px-4 py-3">
+                <td>
                     <span class="px-2 py-0.5 rounded-full text-xs font-medium {{ $statusColors[$iv->status] ?? 'bg-gray-100 text-gray-600' }}">
                         {{ $statusLabels[$iv->status] ?? $iv->status }}
                     </span>
                 </td>
-                <td class="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+                <td class="text-xs text-gray-500 whitespace-nowrap">
                     @if($iv->decidedBy)
                         {{ $iv->decidedBy->name }}
                         <span class="block text-gray-400">{{ $iv->decided_at?->format('M d, Y') }}</span>
@@ -292,7 +292,7 @@
                         <span class="text-gray-300">Not yet decided</span>
                     @endif
                 </td>
-                <td class="px-4 py-3 text-xs whitespace-nowrap">
+                <td class="text-xs whitespace-nowrap">
                     {{-- Not yet acknowledged -> Acknowledged -> Delivered.
                          Delivery is only ever offered once acknowledged —
                          see Adviser\InterventionController::markDelivered(). --}}
@@ -402,7 +402,7 @@
                         </form>
                     @endif
                 </td>
-                <td class="px-4 py-3 text-xs whitespace-nowrap">
+                <td class="text-xs whitespace-nowrap">
                     @include('partials.within-term-progress', ['p' => $iv->withinTermProgress ?? null])
                 </td>
             </tr>
