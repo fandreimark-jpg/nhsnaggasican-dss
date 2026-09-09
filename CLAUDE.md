@@ -11,6 +11,22 @@ Do not rebuild the application from scratch.
 The system must be developed incrementally while preserving
 existing functionality and existing data.
 
+## Work orders
+
+Task-level instructions live in separate files in the project root, not here.
+This file holds architecture, conventions, and standing decisions — things that
+stay true after the work is done.
+
+- `ECR_ALIGNMENT_WORK_ORDER.md` — current, nine parts with stop points
+- `WORK_ORDER.md` — the UI and decision-flow pass, mostly landed
+- `MASTER_PROMPT.md` — earlier, partly superseded; where it conflicts with
+  `WORK_ORDER.md`, the later one won and the code follows it
+- `HANDOFF.md` — design decisions that may not change without asking
+
+When a work order and this file disagree, the code is the answer and the
+disagreement is worth reporting. Documents in this project have gone stale
+before.
+
 ---
 
 # THREE SYSTEM ROLES
@@ -143,6 +159,116 @@ Final = 81.11
 This must be tested through automated tests.
 
 Do not hard-code the example into production logic.
+
+---
+
+# STRENGTHENED SHS E-CLASS RECORD
+
+The official DepEd instrument for SY 2026-2027, `ECRSHS2026`, version
+`2026_v1.0`. Everything below was read from the workbook itself, not from
+documentation about it.
+
+## Seven sheets
+
+`INSTRUCTIONS`, `INPUT DATA`, `Term 1`, `Term 2`, `Term 3`, `FINAL GRADES`,
+and `HELPER` (hidden). One subject per workbook, three terms inside it.
+
+The active sheet on open is `INSTRUCTIONS`, so the legacy reader's
+`getActiveSheet()` call lands on the instructions page. The ECR path must
+select sheets by name.
+
+## The subject catalog — HELPER!J7:AC161
+
+141 subjects: TRACK, CLUSTER, COURSE TITLE, TOTAL HOURS, GRADE LVL, terms and
+units per grade level, then WW, PT, ST-TE, ST 1, ST 2, TE. The term sheets read
+their weights from here by matching cluster and course title. This is a live
+source inside the workbook, not reference material.
+
+| Track | Cluster | WW/PT/EX | n |
+|---|---|---|---|
+| CORE | Core | 20/50/30 | 6 |
+| ACADEMIC | Arts, Social Sciences, and Humanities | 20/60/20 | 24 |
+| ACADEMIC | Arts, Social Sciences, and Humanities | 15/70/15 | 1 |
+| ACADEMIC | Business and Entrepreneurship | 20/50/30 | 6 |
+| ACADEMIC | STEM | 20/50/30 | 26 |
+| ACADEMIC | Sports, Health, and Wellness | 20/60/20 | 10 |
+| ACADEMIC | Field Experience | 40/60/—, 15/70/15, 20/80/— | 13 |
+| TECH-PRO | nine clusters | 15/65/20 | 48 |
+| TECH-PRO | Work Immersion | 20/80/— | 5 |
+
+Plus one `OTHER ELECTIVE / SPECIAL CURRICULAR PROGRAM` row per track, whose
+weights come from `INPUT DATA!F43:F48` — the only place in the workbook where a
+teacher types the weights.
+
+The client school is Academic Track only, so 87 of the 141 rows apply. Only the
+TechPro 15/65/20 weighting drops out. Five weightings remain, and all nine
+Term-Exam-only subjects are Academic.
+
+## Term sheet geometry — identical on all three term sheets
+
+| Row | Contents |
+|---|---|
+| 11 | Band headers: Written/Oral Works, Product/Performance Tasks, Examinations |
+| 12 | Component weight as a fraction, pulled from HELPER |
+| 13 | Item numbers 1-10, then TOTAL, PS, WS; then ST 1, ST 2, TE |
+| 14 | HIGHEST POSSIBLE SCORE |
+| 17-66 | Male learners |
+| 68-117 | Female learners |
+
+Columns: WW `D:M`, TOTAL `N`, PS `O`, WS `P`. PT `Q:Z`, TOTAL `AA`, PS `AB`,
+WS `AC`. EX `AD` ST1, `AE` ST2, `AF` TE, weighted `AG:AI`, PS `AJ`, WS `AK`.
+`AL` INITIAL GRADE, `AM` TERM GRADE.
+
+Ceiling: 10 WW + 10 PT + 3 EX = 23 items per subject per term.
+
+Learner names and LRNs live only on `INPUT DATA` — male in `N`/`O` rows 11-60,
+female in `R`/`S`. Column `C` on a term sheet is a formula pointing there.
+
+## What is never imported
+
+`N`, `O`, `P`, `AA`, `AB`, `AC`, `AG`-`AK`, `AL`, `AM`. These are computed.
+Raw scores only.
+
+Two reasons, and both matter. In-Term Status is based on the computed grade,
+not the transmuted one, so taking `AM` would discard the early warning
+entirely. And the DSS analyses components, not final grades — "two components
+below the 75 target" cannot be recovered from a single figure of 76.00.
+Importing derived columns would also create assessment items out of totals and
+double-count the evidence.
+
+## The rule on conflicting evidence
+
+Three sources of weight will disagree:
+
+1. DO 015 Table 10 — six subject groups. The order itself.
+2. The ECR catalog — 141 subjects, per-subject weights. DepEd's own instrument.
+3. The uploaded file's weight cells — what a teacher typed.
+
+Resolution order: catalog row, then subject group, then the scheme default.
+
+The third never wins. That spreadsheet is filled in by hand, and a mistyped
+cell must not be able to change how a grade is computed. A mismatch is a
+warning on the Verify screen naming both figures, never an overwrite. The one
+exception is `OTHER ELECTIVE / SPECIAL CURRICULAR PROGRAM`, where the order
+publishes no weight at all — and the Verify screen must say so explicitly
+rather than treating it like any other subject.
+
+Where the catalog and Table 10 disagree, report it. Do not reconcile it
+silently. Two authorities disagreeing is a finding.
+
+## The client's real structure
+
+Grade 11 runs the Strengthened SHS curriculum under DO 015: sections
+**Shakespeare** and **Curie**, 42 learners each, no specialization, because
+SSHS has no strands.
+
+Grade 12 remains on the 2013 curriculum under DO 8: **ABM** 22, **HUMSS** 39,
+**STEM** 20. Academic Track only — no TVL, Sports, or Arts and Design, so
+three of DO 8's five weighting columns apply.
+
+165 learners, one school, two curricula, two grading orders, running at the
+same time. The pilot section Molave is not one of these and carries
+`specialization = ABM`, a value that cannot correctly exist on an SSHS section.
 
 ---
 
@@ -495,6 +621,32 @@ DOCUMENT
 
 Never stop immediately after generating code.
 
+## Forbidden routes to green
+
+The loop exists to make the system right, not to make the signal green. When
+stuck, the following are forbidden, and taking any of them is worse than
+reporting failure:
+
+- Deleting, skipping, or commenting out a failing test
+- Weakening an assertion so it passes
+- Mocking or stubbing over a real failure
+- Catching an exception to silence it
+- Editing a migration that has already run — write a new one
+- Deleting rows so a count check passes
+- Guessing an answer that a human was asked for
+
+If the same error survives three attempts, stop and report what you tried,
+what the error says, and what you think it means. Three failed attempts is
+information. A twelfth is not.
+
+If a fix would require changing something these instructions forbid, stop and
+ask. Do not route around the constraint.
+
+The suite baseline is 722 passing, 1 skipped — 723 total. The skip is
+`ElectiveClusterLimitationTest` and it is deliberate. A run that is still at
+722 because two failing tests were removed and two trivial ones added has made
+the project worse while making it look better.
+
 ---
 
 # MANDATORY EXECUTION RULE
@@ -814,40 +966,39 @@ The school has not yet decided. The system implements (1) and marks grades
 that include additional support so the situation is visible rather than
 silently resolved.
 
-## The `do015_2026` transmutation table is not yet confirmed against the signed order
+## The do015_2026 transmutation table is confirmed against DepEd's own instrument
 
-`transmutation_ranges` is now seeded in full for both schemes: `do8_2015`
-(DO 8, s. 2015, Grade 12's scheme this school year) and `do015_2026` (DO
-015, s. 2026's adjusted table for Grade 11 under the Strengthened SHS
-curriculum, from `Do015TransmutationSeeder` — see
-`TransmutationService::schemeFor()`). Both cover 0–100 with no gaps or
-overlaps, and `php artisan dss:verify-transmutation` checks this on
-demand.
+The 41 bands seeded by `Do015TransmutationSeeder` were checked band by band
+against `HELPER!B7:D47` of the official DepEd Strengthened SHS Electronic Class
+Record for SY 2026-2027 (`ECRSHS2026`, `2026_v1.0`). All 41 match exactly: the
+same minimum, the same maximum, the same transmuted grade.
 
-The remaining limitation is provenance, not coverage: `Do015TransmutationSeeder`'s
-41 bands were cross-checked across three independent secondary
-reproductions that agree on every figure, but have **not** been read
-from the signed PDF of DO 015, s. 2026 itself (see the `SOURCE NOTE` in
-that seeder). Before citing this table in the thesis or any official
-report, download the order from deped.gov.ph, confirm the bands against
-it, and remove that note. Until then, treat `do015_2026` results as
-computationally correct against the table this codebase has, not as
-independently verified against the original order.
+This is DepEd's own operational instrument, not a secondary reproduction. It is
+still not the signed PDF of the order, and that distinction should be stated
+plainly in the paper rather than dropped.
 
-## The Examination role split (30/30/40) is provisional
+`Do015BandsMatchOfficialEcrTest` holds the extracted bands as a fixture and
+asserts them against the seeder, so a future edit to the table cannot pass
+silently.
 
-Under DO 015, s. 2026 the Examination component splits between two
-Summative Tests and a Term Examination (`exam_role_shares`, scheme
-`do015_2026`, roles `st1`/`st2`/`term_exam`) — but the 30/30/40 split
-itself is NOT confirmed anywhere in this codebase against the published
-order, only entered as the best available estimate at the time this was
-built. Because it's a seeded row rather than code, correcting it later
-is three `UPDATE`s to `exam_role_shares`, never a deployment. Unlike
-`transmutation_ranges`, this table being unseeded degrades gracefully
-rather than blocking anything: `GradingEngine::examinationPercentage()`
-falls back to an equal split among whichever roles are actually present
-for a role missing from the table, so a wrong or absent share is never
-fatal — only wrong, in a way a data correction fixes immediately.
+## The Examination role split is per subject, not universal
+
+ST1 30 / ST2 30 / TE 40 is the common case, not the rule. The official SSHS
+E-Class Record catalog assigns the split per subject, and nine subjects — all
+of them in the Academic Track — carry Term Exam at 100 with no summative tests
+at all: six in Field Experience, two in STEM, one Work Immersion.
+
+A subject whose catalog row has a null `st1_share` must not expect ST1 or ST2
+evidence. This is the same distinction a null `ex_weight` already makes, one
+level further down: null means the item does not exist for this subject, never
+that it is worth zero.
+
+Because these are seeded rows rather than code, correcting a share is an
+`UPDATE`, never a deployment. `GradingEngine::examinationPercentage()` still
+falls back to an equal split among whichever roles are present, so a missing
+share is wrong rather than fatal.
+
+This amends `HANDOFF.md` design decision 5, which stated the split as universal.
 
 ## Elective selection is per-cluster, not per-learner
 

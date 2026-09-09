@@ -19,11 +19,14 @@ use Illuminate\Support\Facades\DB;
  * with 60 as the minimum reportable grade.
  *
  * SOURCE NOTE — read before defending this in writing.
- * These 41 bands were cross-checked across three independent
- * reproductions of the table, which agree on every figure. They have
- * NOT been read from the signed PDF of DO 015, s. 2026 itself.
- * Before citing this table in the thesis, download the order from
- * deped.gov.ph and confirm the bands, then delete this note.
+ * "ECR alignment" work order, PART 1 — these 41 bands are confirmed
+ * against HELPER!B7:D47 of the official DepEd Strengthened SHS
+ * Electronic Class Record for SY 2026-2027 (ECRSHS2026, 2026_v1.0):
+ * 41 of 41 exact, same minimum, same maximum, same transmuted grade.
+ * See Do015BandsMatchOfficialEcrTest, which pins this against a fixture
+ * transcribed from that sheet so a future edit here cannot pass silently.
+ * This is DepEd's own operational instrument, not the signed PDF of the
+ * order itself — that distinction still belongs in the thesis.
  *
  * Run with:  php artisan db:seed --class=Do015TransmutationSeeder
  */
@@ -128,7 +131,7 @@ class Do015TransmutationSeeder extends Seeder
         $this->command->line('  0.00  -> 60   (minimum reportable)');
         $this->command->line('  100.00 -> 100');
         $this->command->newLine();
-        $this->command->warn('Bands are from cross-checked secondary sources, not the signed PDF.');
-        $this->command->warn('Confirm against DO 015, s. 2026 on deped.gov.ph before citing in writing.');
+        $this->command->info('Confirmed 41/41 against HELPER!B7:D47 of the official DepEd SSHS E-Class Record (ECRSHS2026, 2026_v1.0).');
+        $this->command->warn('Still not the signed PDF of DO 015, s. 2026 itself — that distinction belongs in the thesis.');
     }
 }
