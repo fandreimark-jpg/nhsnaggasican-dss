@@ -76,7 +76,7 @@
             <tr>
                 <td colspan="4">
                     <x-empty-state message="No tracks yet." icon="bi-diagram-3"
-                        hint="Use &quot;Add Track&quot; or &quot;Import Tracks&quot; above to get started." />
+                        hint='Use "Add Track" or "Import Tracks" above to get started.' />
                 </td>
             </tr>
             @endforelse

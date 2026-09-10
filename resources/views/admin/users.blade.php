@@ -123,7 +123,7 @@
             <tr id="emptyRow">
                 <td colspan="7">
                     <x-empty-state message="No users yet." icon="bi-people"
-                        hint="Use &quot;Add User&quot; above — every account is created here by an Admin; public registration is disabled." />
+                        hint='Use "Add User" above — every account is created here by an Admin; public registration is disabled.' />
                 </td>
             </tr>
             @endforelse

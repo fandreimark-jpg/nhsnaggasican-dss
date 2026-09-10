@@ -216,7 +216,7 @@
                 <td colspan="{{ $isTermOpen ? 5 : 4 }}">
                     <x-empty-state icon="bi-clipboard-data"
                         message="No assessment items uploaded yet for {{ $selectedSubject->name }}, Term {{ $selectedPeriod }}."
-                        hint="Use &quot;Upload Assessment Form&quot; or &quot;Add Assessment Item&quot; above." />
+                        hint='Use "Upload Assessment Form" or "Add Assessment Item" above.' />
                 </td>
             </tr>
             @endforelse

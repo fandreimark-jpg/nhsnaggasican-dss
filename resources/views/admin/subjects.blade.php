@@ -141,7 +141,7 @@
             <tr>
                 <td colspan="7">
                     <x-empty-state message="No subjects yet." icon="bi-book"
-                        hint="Use &quot;Add Subject&quot; or &quot;Import Subjects&quot; above to get started." />
+                        hint='Use "Add Subject" or "Import Subjects" above to get started.' />
                 </td>
             </tr>
             @endforelse

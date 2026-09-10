@@ -101,7 +101,7 @@
             <tr>
                 <td colspan="7">
                     <x-empty-state message="No students yet." icon="bi-people"
-                        hint="Use &quot;Add Student&quot; or &quot;Import Students&quot; above. Each student needs a section." />
+                        hint='Use "Add Student" or "Import Students" above. Each student needs a section.' />
                 </td>
             </tr>
             @endforelse

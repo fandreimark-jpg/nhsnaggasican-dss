@@ -70,7 +70,7 @@
             <tr>
                 <td colspan="4">
                     <x-empty-state message="No specializations yet." icon="bi-collection"
-                        hint="Specializations belong to a track — add a track first, then use &quot;Add Specialization&quot; or &quot;Import Specializations&quot; above." />
+                        hint='Specializations belong to a track — add a track first, then use "Add Specialization" or "Import Specializations" above.' />
                 </td>
             </tr>
             @endforelse

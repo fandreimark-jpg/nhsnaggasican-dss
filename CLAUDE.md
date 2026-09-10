@@ -1341,6 +1341,18 @@ this beyond the pilot, they become the next engineering pass, in this order:
 
 # UI DESIGN SYSTEM
 
+## Empty-state hints are only reachable on a fresh install
+
+`<x-empty-state>`'s `hint` prop only renders when the table it's inside has
+zero rows. On a populated database — the pilot database included — no admin
+ever sees it, which is exactly how a double-escaped-entities bug in six of
+these hints (`&quot;` written into a `hint="..."` attribute, then re-escaped
+a second time by the component's own `{{ $hint }}`) went unnoticed until a
+dedicated test pass on a clean database caught it. Checking an empty-state
+hint's actual rendered output requires testing against a fresh/empty
+database, not the pilot one — a populated table will never exercise this
+code path at all.
+
 ## Status colour is reserved for the four DSS states
 
 `tailwind.config.js` defines a `status` colour scale — `status-ontrack`,
