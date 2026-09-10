@@ -26,6 +26,7 @@ class AssessmentUpload extends Model
         'school_year',
         'original_filename',
         'column_mapping',
+        'ecr_profile_version', // set only when read through the DepEd ECR profile — see EcrProfileDetector
         'status',
         'imported_count',
         'error_count',

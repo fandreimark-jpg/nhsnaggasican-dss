@@ -254,7 +254,7 @@ class AssessmentController extends Controller
         $request->file('file')->storeAs(self::TEMP_DIR, $storedFilename, 'local');
 
         $absolutePath = Storage::disk('local')->path(self::TEMP_DIR . '/' . $storedFilename);
-        $detected = $this->uploads->detectColumns($absolutePath);
+        $detected = $this->uploads->detectColumns($absolutePath, $gradingPeriod);
 
         if (empty($detected['columns'])) {
             Storage::disk('local')->delete(self::TEMP_DIR . '/' . $storedFilename);
@@ -286,6 +286,12 @@ class AssessmentController extends Controller
             $sectionSubjects
         );
 
+        // "ECR alignment" work order, PART 5f — dismissible, non-blocking,
+        // only ever populated for a file actually read through the ECR
+        // profile. Never overwrites the subject's own weights — see
+        // EcrReaderService::checkWeightMismatch().
+        $weightMismatch = $this->uploads->checkEcrWeightMismatch($absolutePath, $subject);
+
         return view('adviser.assessments-verify', [
             'section'          => $section,
             'subject'          => $subject,
@@ -296,6 +302,7 @@ class AssessmentController extends Controller
             'maxRowPresent'    => $detected['max_row_present'],
             'originalName'     => $request->file('file')->getClientOriginalName(),
             'filenameMismatch' => $filenameMismatch,
+            'weightMismatch'   => $weightMismatch,
         ]);
     }
 
@@ -356,7 +363,8 @@ class AssessmentController extends Controller
         $preview = $this->uploads->previewRows(
             Storage::disk('local')->path($relativePath),
             $columnMapping,
-            $section
+            $section,
+            $gradingPeriod
         );
 
         // TASK 3b of "dashboard structure and upload safeguards" — a
@@ -457,9 +465,12 @@ class AssessmentController extends Controller
         // errors — error_count already captures that; status here is
         // about whether the upload as a whole was processed at all.
         $upload->update([
-            'status'         => 'imported',
-            'imported_count' => $result['imported'],
-            'error_count'    => count($result['errors']),
+            'status'               => 'imported',
+            'imported_count'       => $result['imported'],
+            'error_count'          => count($result['errors']),
+            // "ECR alignment" work order, PART 5a — null for every upload
+            // read through the existing flat path, unchanged.
+            'ecr_profile_version'  => $result['ecr_profile_version'] ?? null,
         ]);
 
         Storage::disk('local')->delete($relativePath);

@@ -68,8 +68,35 @@ class AssessmentUploadService
         'sheet', 'data', 'copy', 'section', 'class', 'form', 'template',
     ];
 
-    public function __construct(private AssessmentColumnClassifier $classifier = new AssessmentColumnClassifier())
+    public function __construct(
+        private AssessmentColumnClassifier $classifier = new AssessmentColumnClassifier(),
+        private EcrProfileDetector $ecrProfile = new EcrProfileDetector(),
+        private EcrReaderService $ecrReader = new EcrReaderService()
+    ) {
+    }
+
+    /**
+     * "ECR alignment" work order, PART 5a — set by readRows() only when
+     * the most recent detectColumns()/previewRows()/import() call actually
+     * matched the ECR profile; null otherwise. import() reads this to
+     * return it to the caller, which stores it on AssessmentUpload.
+     */
+    private ?string $lastEcrProfileVersion = null;
+
+    /**
+     * "ECR alignment" work order, PART 5f — passthrough so the controller
+     * doesn't need its own EcrReaderService dependency. Returns null (no
+     * notice) for a non-ECR file, a subject the weights agree with, or a
+     * subject not yet resolved — see EcrReaderService::checkWeightMismatch()
+     * for the actual comparison and the OTHER ELECTIVE exception.
+     */
+    public function checkEcrWeightMismatch(string $filePath, ?Subject $subject): ?string
     {
+        if ($this->ecrProfile->detect($filePath) === null) {
+            return null;
+        }
+
+        return $this->ecrReader->checkWeightMismatch($filePath, $subject);
     }
 
     /**
@@ -93,9 +120,9 @@ class AssessmentUploadService
      *     max_row_errors: array<string, string>,
      * }
      */
-    public function detectColumns(string $filePath): array
+    public function detectColumns(string $filePath, ?int $gradingPeriod = null): array
     {
-        $rows = $this->readRows($filePath);
+        $rows = $this->readRows($filePath, $gradingPeriod);
 
         if (empty($rows)) {
             return ['columns' => [], 'row_count' => 0, 'max_row_present' => false, 'max_row_errors' => []];
@@ -243,9 +270,9 @@ class AssessmentUploadService
      *     column_stats: array<string, array{highest: ?float, lowest: ?float, count: int, max_score: float, suspicious_max: bool}>,
      * }
      */
-    public function previewRows(string $filePath, array $columnMapping, Section $section): array
+    public function previewRows(string $filePath, array $columnMapping, Section $section, ?int $gradingPeriod = null): array
     {
-        $rows = $this->readRows($filePath);
+        $rows = $this->readRows($filePath, $gradingPeriod);
 
         if (empty($rows)) {
             return ['rows' => [], 'total_rows' => 0, 'matched_rows' => 0, 'total_valid_cells' => 0, 'total_invalid_cells' => 0, 'column_stats' => []];
@@ -344,7 +371,7 @@ class AssessmentUploadService
 
     /**
      * @param array<string, array{component: string, max_score: float, exam_role?: ?string, is_additional_support?: bool}> $columnMapping keyed by column name
-     * @return array{imported: int, errors: array<int, string>}
+     * @return array{imported: int, errors: array<int, string>, ecr_profile_version: ?string}
      */
     public function import(
         string $filePath,
@@ -356,12 +383,12 @@ class AssessmentUploadService
         ?int $uploaderId,
         AssessmentUpload $upload
     ): array {
-        $rows = $this->readRows($filePath);
+        $rows = $this->readRows($filePath, $gradingPeriod);
         $errors = [];
         $importedCount = 0;
 
         if (empty($rows)) {
-            return ['imported' => 0, 'errors' => ['The uploaded file is empty.']];
+            return ['imported' => 0, 'errors' => ['The uploaded file is empty.'], 'ecr_profile_version' => $this->lastEcrProfileVersion];
         }
 
         ['header' => $header, 'maxRow' => $maxRow, 'dataRows' => $dataRows] = $this->splitRows($rows);
@@ -449,7 +476,7 @@ class AssessmentUploadService
             }
         }
 
-        return ['imported' => $importedCount, 'errors' => $errors];
+        return ['imported' => $importedCount, 'errors' => $errors, 'ecr_profile_version' => $this->lastEcrProfileVersion];
     }
 
     /**
@@ -540,9 +567,30 @@ class AssessmentUploadService
         return [$maxRow, array_values($dataRows)];
     }
 
-    /** @return array<int, array<int, mixed>> */
-    private function readRows(string $filePath): array
+    /**
+     * "ECR alignment" work order, PART 5a/5b — the single dispatch point:
+     * if the file matches the DepEd ECR profile (three marks together —
+     * see EcrProfileDetector) AND a grading period is known (which term
+     * sheet to read), EcrReaderService translates it into this exact same
+     * flat shape and everything below is unaffected. Otherwise this falls
+     * through to the ORIGINAL, unchanged flat-file read — byte-identical
+     * to what this method did before PART 5 existed, so no existing
+     * caller/test on a non-ECR file sees any behavior change at all.
+     *
+     * @return array<int, array<int, mixed>>
+     */
+    private function readRows(string $filePath, ?int $gradingPeriod = null): array
     {
+        $this->lastEcrProfileVersion = null;
+
+        if ($gradingPeriod !== null) {
+            $version = $this->ecrProfile->detect($filePath);
+            if ($version !== null) {
+                $this->lastEcrProfileVersion = $version;
+                return $this->ecrReader->toFlatRows($filePath, $gradingPeriod);
+            }
+        }
+
         $spreadsheet = IOFactory::load($filePath);
         $sheet = $spreadsheet->getActiveSheet();
 

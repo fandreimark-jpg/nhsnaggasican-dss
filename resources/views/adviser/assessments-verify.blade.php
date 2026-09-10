@@ -25,6 +25,21 @@
 </div>
 @endif
 
+{{-- "ECR alignment" work order, PART 5f — a signal, never a block, and
+     never an overwrite: see EcrReaderService::checkWeightMismatch(). Only
+     ever populated for a file actually read through the DepEd ECR profile. --}}
+@if($weightMismatch ?? null)
+<div id="weightMismatchNotice" class="bg-amber-50 border border-amber-200 text-amber-800 text-sm p-4 rounded-lg mb-4 flex items-start justify-between gap-3">
+    <div>
+        <p class="font-medium"><i class="bi bi-exclamation-triangle-fill"></i> Weight mismatch — not corrected automatically</p>
+        <p class="mt-1">{{ $weightMismatch }}</p>
+    </div>
+    <button type="button" onclick="document.getElementById('weightMismatchNotice').remove()" aria-label="Dismiss" class="shrink-0 text-amber-500 hover:text-amber-700">
+        <i class="bi bi-x-lg"></i>
+    </button>
+</div>
+@endif
+
 <div class="bg-white rounded-xl shadow-sm p-6">
     <p class="text-sm text-gray-500 mb-1">
         Found <strong>{{ count($columns) }}</strong> assessment column{{ count($columns) === 1 ? '' : 's' }}

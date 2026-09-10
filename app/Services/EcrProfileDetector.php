@@ -1,0 +1,72 @@
+<?php
+
+namespace App\Services;
+
+use PhpOffice\PhpSpreadsheet\IOFactory;
+
+/**
+ * "ECR alignment" work order, PART 5a — recognises the official DepEd
+ * Strengthened SHS Electronic Class Record workbook by three marks
+ * TOGETHER, verified directly against the real instrument
+ * (tests/Fixtures/SSHS-E-Class-Record-SY-2026-2027.xlsx), not guessed:
+ *
+ *  1. The sheet name set: INSTRUCTIONS, INPUT DATA, Term 1, Term 2, Term 3,
+ *     FINAL GRADES, HELPER (order not required — checked by name).
+ *  2. HELPER!B4 literally reads "ECRSHS2026".
+ *  3. INPUT DATA!T64 carries a non-blank version tag (e.g. "2026_v1.0").
+ *
+ * If any of the three is absent, this returns null and the caller falls
+ * through to the existing flat lrn/last_name/first_name/item… reader
+ * completely unchanged — this class never throws for "not an ECR file,"
+ * only for a genuinely unreadable one, which also resolves to null.
+ *
+ * Deliberately cheap: `listWorksheetNames()` reads the sheet index without
+ * loading any cell data, and `setLoadSheetsOnly()` restricts the one real
+ * load to just the two sheets the two remaining marks live on — a 7-sheet,
+ * multi-hundred-row workbook is never fully parsed just to answer "is this
+ * an ECR file."
+ */
+class EcrProfileDetector
+{
+    private const REQUIRED_SHEETS = ['INSTRUCTIONS', 'INPUT DATA', 'Term 1', 'Term 2', 'Term 3', 'FINAL GRADES', 'HELPER'];
+
+    private const HELPER_MARKER_CELL = 'B4';
+    private const HELPER_MARKER_VALUE = 'ECRSHS2026';
+    private const VERSION_TAG_CELL = 'T64';
+
+    /** Null means "not this profile" (or unreadable) — never throws for that case. */
+    public function detect(string $filePath): ?string
+    {
+        try {
+            $reader = IOFactory::createReaderForFile($filePath);
+            $sheetNames = $reader->listWorksheetNames($filePath);
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        foreach (self::REQUIRED_SHEETS as $required) {
+            if (!in_array($required, $sheetNames, true)) {
+                return null;
+            }
+        }
+
+        try {
+            $reader->setLoadSheetsOnly(['HELPER', 'INPUT DATA']);
+            $reader->setReadDataOnly(true);
+            $spreadsheet = $reader->load($filePath);
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        $helper = $spreadsheet->getSheetByName('HELPER');
+        $marker = $helper ? trim((string) $helper->getCell(self::HELPER_MARKER_CELL)->getValue()) : '';
+        if ($marker !== self::HELPER_MARKER_VALUE) {
+            return null;
+        }
+
+        $inputData = $spreadsheet->getSheetByName('INPUT DATA');
+        $version = $inputData ? trim((string) $inputData->getCell(self::VERSION_TAG_CELL)->getValue()) : '';
+
+        return $version !== '' ? $version : null;
+    }
+}
