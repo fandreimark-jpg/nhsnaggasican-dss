@@ -28,6 +28,7 @@ class Subject extends Model
         'type',               // 'core' or 'elective'
         'grade_level',        // 11 or 12
         'subject_group',      // which subject_group_weights row applies — see that table's migration
+        'catalog_id',         // linked deped_subject_catalog row, if any — see that model's docblock; wins over subject_group in GradingEngine
         'track_id',           // null for core, required for elective
         'specialization_id',  // null if applies to whole track, specific if specialization-only
     ];
@@ -43,6 +44,12 @@ class Subject extends Model
     public function track()
     {
         return $this->belongsTo(Track::class);
+    }
+
+    /** Linked DepEd Strengthened SHS catalog row, if this subject is actually in that curriculum — see DepedSubjectCatalog. */
+    public function catalog()
+    {
+        return $this->belongsTo(DepedSubjectCatalog::class, 'catalog_id');
     }
 
     /**

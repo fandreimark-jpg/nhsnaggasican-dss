@@ -270,6 +270,93 @@ three of DO 8's five weighting columns apply.
 same time. The pilot section Molave is not one of these and carries
 `specialization = ABM`, a value that cannot correctly exist on an SSHS section.
 
+## Implementation — `deped_subject_catalog` ("ECR alignment" work order, PART 2)
+
+The 141-row catalog above is seeded into `deped_subject_catalog`, extracted
+from `HELPER!J7:AC161` into `database/seeders/deped_sshs_catalog.csv` and
+parsed by `DepedSubjectCatalog::rowsFromCsv()` — one parser, called by both
+the seeding migration (fresh environments) and `DepedSubjectCatalogSeeder`
+(re-seeding when DepEd ships a future version and the CSV is replaced), so
+the normalisation rules live once. `subjects.catalog_id` links an existing
+`Subject` to its row by exact, case-insensitive `course_title` match — no
+fuzzy matching. `GradingEngine::computeGrade()` reads a linked catalog row's
+weights and exam-role shares FIRST, falling through to
+`SubjectGroupWeight::resolve()` exactly as before Part 2 for any subject with
+no link. `subjects.subject_group` and `subject_group_weights` are untouched
+and still used for everything the catalog doesn't cover.
+
+**The catalog vs. the pre-Part-2 6-bucket default — the actual disagreement,
+counted, not just described.** `subjects.subject_group` has no cluster-aware
+assignment logic anywhere in this codebase; every subject silently defaults
+to `core_academic` (20/50/30) unless something explicitly overrides it. Of
+the 139 catalog rows with a real weight (141 minus the 2 teacher-supplied
+`OTHER ELECTIVE` rows), only **38 actually agree with that default** —
+exactly CORE (6) + STEM (26) + Business & Entrepreneurship (6), all
+genuinely 20/50/30. **101 disagree.** 34 of those are Arts, Social Sciences,
+and Humanities + Sports, Health, and Wellness at 20/60/20 (e.g. *Citizenship
+and Civic Engagement*: catalog 20/60/20, silent default 20/50/30) — the rest
+are Field Experience/Research/Work-Immersion/Tech-Pro rows defaulting to a
+triple that's wrong in a different way. `CatalogDisagreesWithSilentDefaultTest`
+pins these exact counts.
+
+**Live backfill result, restored pilot data (2 subjects exist)**: `General
+Mathematics` matched — its catalog weights (20/50/30, 30/30/40) are
+numerically identical to its `core_academic` fallback, so linking it changed
+nothing about WW/PT/EX. `Oral Communication` did **not** match, and this is a
+finding, not a gap to gloss over: that name is not in the Strengthened SHS
+catalog at all. It is a K-12 2013 core-subject name; the Strengthened SHS
+Grade 11 core list (Effective Communication, General Mathematics, General
+Science, Life and Career Skills, Mabisang Komunikasyon, Pag-aaral ng
+Kasaysayan at Lipunang Pilipino) replaced it outright. One of the two
+subjects in the pilot data is not a real Strengthened SHS subject.
+
+**A real pre-existing gap this surfaced, corrected in the same pass**:
+`exam_role_shares` had zero rows on this database — `ExamRoleSharesSeeder`
+had never been run against it. Every `do015_2026` subject's Examination
+component had therefore been computing on an equal-thirds split
+(33.33/33.33/33.33) instead of the documented 30/30/40, silently, since
+nothing in the test suite exercises a real subject against an unseeded
+table. Linking `General Mathematics` to its catalog row (which carries real
+`st1_share`/`st2_share`/`te_share`) surfaced this the moment its Examination
+percentage stopped matching the old equal-thirds figure. Fixed by seeding
+`ExamRoleSharesSeeder` and re-running `dss:recompute-grades` for all three
+terms — 54/40/39 grades moved (Terms 1/2/3), largest movement 1.00 point,
+**zero passing-status changes**. This was a real correction to real grades,
+not a Part 2 side effect to route around — recorded here so it isn't
+mistaken for one later.
+
+**DO 8, s. 2015's five-row table** — unlike DO 015, DO 8 weights by **track**
+(Core / Academic / TVL-Sports-Arts-Design), not by subject group, and has no
+equivalent 141-row catalog. Seeded as five new rows in the *existing*
+`subject_group_weights` table (`do8_core`, `do8_academic_other`,
+`do8_academic_work_immersion`, `do8_tvl_sports_arts_other`,
+`do8_tvl_sports_arts_work_immersion`) rather than a new table.
+
+SOURCE NOTE — these five rows are read from secondary reproductions of the
+DO 8, s. 2015 table, not the signed PDF of the order itself. Correcting one
+later is an `UPDATE`, never a deployment. Before citing this table in
+writing, confirm it against the signed order and delete this note.
+
+`GradingEngine::resolveDo8GroupKey(Section, Subject)` is the mapping, written
+down in full: a section's `track.code` of `ACAD` is the Academic branch;
+`TECHPRO` or `TVL` is the non-Academic branch (DO 8's table groups TVL,
+Sports, and Arts and Design into one weighting bucket — this codebase's
+"TechPro Track" is DO 015-era vocabulary for what DO 8 calls TVL). A section
+with **no track set at all** falls to the scheme's universal `all` row
+(25/50/25) rather than guessing a branch — every pre-Part-2 test and any
+untracked real subject relied on exactly that fallback. Within a branch, a
+`core` subject gets that branch's `*_core` slug (Academic only — DO 8 defines
+Core Subjects once, not per track); an elective is matched by name against a
+short keyword list (`work immersion`/`research`/`business enterprise
+simulation` for Academic, `work immersion`/`research`/`exhibit`/`performance`
+for non-Academic) to the `*_work_immersion` slug, else `*_other`. Every such
+keyword match is logged (`Log::info`) and listed by `dss:check-integrity`
+(non-failing — a genuinely-named "Work Immersion" subject routed there is
+correct, not an error) precisely because no per-subject DO 8 catalog exists
+to check against and zero Grade 12 subjects exist in this database yet (Part
+7 is blocked on the school's answer to Q2) — this is a stopgap, and it is
+built to look like one.
+
 ---
 
 # ASSESSMENT SYSTEM

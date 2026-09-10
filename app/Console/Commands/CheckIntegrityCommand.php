@@ -8,7 +8,10 @@ use App\Models\Grade;
 use App\Models\Intervention;
 use App\Models\ReportSubmission;
 use App\Models\RiskResult;
+use App\Models\Section;
 use App\Models\Student;
+use App\Models\Subject;
+use App\Services\GradingEngine;
 use Illuminate\Console\Command;
 
 /**
@@ -27,7 +30,7 @@ class CheckIntegrityCommand extends Command
 
     protected $description = 'Reports orphaned/stale data (risk results, submissions, interventions, assessment scores, students) without changing anything. Exits non-zero if anything is found.';
 
-    public function handle(): int
+    public function handle(GradingEngine $gradingEngine): int
     {
         $findings = [];
 
@@ -89,14 +92,42 @@ class CheckIntegrityCommand extends Command
             ];
         }
 
+        $exitCode = self::SUCCESS;
+
         if (empty($findings)) {
             $this->info('No orphaned or inconsistent data found.');
-            return self::SUCCESS;
+        } else {
+            $this->error(count($findings) . ' issue(s) found:');
+            $this->table(['Issue', 'Detail', 'To resolve'], $findings);
+            $exitCode = self::FAILURE;
         }
 
-        $this->error(count($findings) . ' issue(s) found:');
-        $this->table(['Issue', 'Detail', 'To resolve'], $findings);
+        // "ECR alignment" work order, PART 2d — GradingEngine::
+        // resolveDo8GroupKey() routes a Grade-12 elective to a DO 8
+        // Work-Immersion weighting bucket by matching its NAME against a
+        // short keyword list, since no per-subject DO 8 catalog exists (see
+        // that method's docblock). That is a heuristic, not a data
+        // integrity problem — a subject that genuinely is named "Work
+        // Immersion" is correctly routed — so this is a separate,
+        // NON-FAILING listing printed after the pass/fail result above, not
+        // counted toward this command's exit code. The point is that a
+        // subject routed there by an accident of naming is visible here
+        // rather than only showing up as an unexplained grade weight.
+        $do8WorkImmersionRoutes = [];
+        foreach (Subject::where('grade_level', 12)->where('type', 'elective')->get() as $subject) {
+            $pseudoSection = new Section(['track_id' => $subject->track_id]);
+            $slug = $gradingEngine->resolveDo8GroupKey($pseudoSection, $subject);
+            if (str_ends_with($slug, '_work_immersion')) {
+                $do8WorkImmersionRoutes[] = [$subject->name, $slug];
+            }
+        }
 
-        return self::FAILURE;
+        if (!empty($do8WorkImmersionRoutes)) {
+            $this->newLine();
+            $this->line(count($do8WorkImmersionRoutes) . ' Grade 12 subject(s) routed to a DO 8 Work-Immersion weighting bucket by name — review, not necessarily wrong:');
+            $this->table(['Subject', 'Resolved DO 8 group'], $do8WorkImmersionRoutes);
+        }
+
+        return $exitCode;
     }
 }

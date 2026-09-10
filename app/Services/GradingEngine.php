@@ -4,11 +4,13 @@ namespace App\Services;
 
 use App\Models\Assessment;
 use App\Models\AssessmentScore;
+use App\Models\DepedSubjectCatalog;
 use App\Models\ExamRoleShare;
 use App\Models\Section;
 use App\Models\Student;
 use App\Models\Subject;
 use App\Models\SubjectGroupWeight;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Centralized Written Work / Performance Task / Examination grading
@@ -84,13 +86,35 @@ class GradingEngine
         // which subject_group_weights row applies below — one scheme
         // concept, resolved once, driving both.
         $scheme = $this->transmutation->schemeFor($section->grade_level, $schoolYear);
-        $weights = SubjectGroupWeight::resolve($scheme, $subject->subject_group);
+
+        // "ECR alignment" work order, PART 2 — resolution order is: a
+        // linked catalog row (the official per-subject DepEd weights) if
+        // this subject actually has one, THEN the existing subject_group_
+        // weights lookup exactly as before. A subject with no catalog_id
+        // (every subject that predates this, or one genuinely outside the
+        // Strengthened SHS catalog — see CLAUDE.md's "rule on conflicting
+        // evidence") sees no behavior change at all.
+        $catalog = $subject->catalog_id ? DepedSubjectCatalog::find($subject->catalog_id) : null;
+
+        if ($catalog) {
+            $wwWeight = (float) $catalog->ww_weight;
+            $ptWeight = (float) $catalog->pt_weight;
+            $exWeight = $catalog->ex_weight !== null ? (float) $catalog->ex_weight : null;
+        } else {
+            $groupKey = $scheme === 'do8_2015'
+                ? $this->resolveDo8GroupKey($section, $subject)
+                : $subject->subject_group;
+            $weights = SubjectGroupWeight::resolve($scheme, $groupKey);
+            $wwWeight = (float) $weights->ww_weight;
+            $ptWeight = (float) $weights->pt_weight;
+            $exWeight = $weights->ex_weight !== null ? (float) $weights->ex_weight : null;
+        }
 
         $componentPercentages = [
             'written_work'     => $this->componentPercentage($student, $subject, $section, $gradingPeriod, $schoolYear, 'written_work'),
             'performance_task' => $this->componentPercentage($student, $subject, $section, $gradingPeriod, $schoolYear, 'performance_task'),
-            'examination'      => $weights->ex_weight !== null
-                ? $this->examinationPercentage($student, $subject, $section, $gradingPeriod, $schoolYear, $scheme)
+            'examination'      => $exWeight !== null
+                ? $this->examinationPercentage($student, $subject, $section, $gradingPeriod, $schoolYear, $scheme, $catalog)
                 : null,
         ];
 
@@ -99,9 +123,9 @@ class GradingEngine
         // group's weights actually name must have evidence for the
         // grade to be complete.
         $weightMap = [
-            'written_work'     => (float) $weights->ww_weight,
-            'performance_task' => (float) $weights->pt_weight,
-            'examination'      => $weights->ex_weight !== null ? (float) $weights->ex_weight : null,
+            'written_work'     => $wwWeight,
+            'performance_task' => $ptWeight,
+            'examination'      => $exWeight,
         ];
         $requiredKeys = array_keys(array_filter($weightMap, fn($w) => $w !== null));
 
@@ -235,7 +259,8 @@ class GradingEngine
         Section $section,
         int $gradingPeriod,
         string $schoolYear,
-        string $scheme
+        string $scheme,
+        ?DepedSubjectCatalog $catalog = null
     ): ?float {
         $items = Assessment::where('subject_id', $subject->id)
             ->where('section_id', $section->id)
@@ -268,7 +293,17 @@ class GradingEngine
 
         $itemsByRole = $items->filter(fn($item) => $item->exam_role !== null)->groupBy('exam_role');
         $scoresByAssessmentId = $scores->keyBy('assessment_id');
-        $shareRows = ExamRoleShare::where('scheme', $scheme)->pluck('share', 'exam_role');
+
+        // "ECR alignment" work order, PART 2c — a linked catalog row's own
+        // st1/st2/te shares win when it has any (including a TE-only row,
+        // where st1/st2 are simply absent from the array and fall through
+        // to the equal-split fallback below exactly like an unknown role
+        // always has). Only when there is no catalog row, or its shares are
+        // entirely null, does this fall back to the scheme-wide table.
+        $catalogShares = $catalog?->examRoleShares() ?? [];
+        $shareRows = !empty($catalogShares)
+            ? $catalogShares
+            : ExamRoleShare::where('scheme', $scheme)->pluck('share', 'exam_role');
 
         $presentRoles = array_values(array_intersect(self::EXAM_ROLES, $itemsByRole->keys()->all()));
         $equalShare = 100 / count($presentRoles);
@@ -305,5 +340,78 @@ class GradingEngine
         }
 
         return $totalShare > 0 ? round($weightedSum / $totalShare, 2) : null;
+    }
+
+    /**
+     * "ECR alignment" work order, PART 2d — DO 8, s. 2015 weights by TRACK,
+     * unlike DO 015's subject_group axis, so it needs its own resolution
+     * path rather than reading $subject->subject_group directly. The
+     * mapping, written down in full per the work order's own requirement:
+     *
+     *  1. Section's track code ACAD -> the Academic branch; TECHPRO or TVL
+     *     -> the non-Academic (TVL/Sports/Arts and Design) branch — DO 8's
+     *     table has no separate Tech-Pro row, it groups TVL, Sports, and
+     *     Arts and Design into one weighting bucket, and this codebase's
+     *     "TechPro Track" is DO 015-era vocabulary for what DO 8 calls TVL.
+     *  2. Within a branch: a core subject (type 'core') always gets that
+     *     branch's *_core slug — but only the Academic branch HAS one; DO 8's
+     *     table defines Core Subjects once, not per track, so a hypothetical
+     *     non-Academic core subject falls through to that branch's *_other
+     *     slug instead.
+     *  3. An elective subject is checked by name against a short, explicit
+     *     keyword list for "Work Immersion / Research / Business Enterprise
+     *     Simulation" (Academic) or "Work Immersion / Research / Exhibit /
+     *     Performance" (non-Academic). A match routes to that branch's
+     *     *_work_immersion slug and is logged (subject id, name, matched
+     *     keyword) — see CheckIntegrityCommand's DO 8 listing, which surfaces
+     *     every such match for a human to confirm rather than trusting the
+     *     name silently. No match -> that branch's *_other slug.
+     *
+     * Name-based matching is a stopgap: no equivalent DO 8/2013-curriculum
+     * catalog exists (unlike DO 015's 141-row extraction), and zero Grade 12
+     * subjects exist in this database as of this work order (Part 7 is
+     * blocked on the school's answer to Q2) — it is deliberately built to
+     * look like a stopgap rather than a silent decision.
+     */
+    public function resolveDo8GroupKey(Section $section, Subject $subject): string
+    {
+        $trackCode = $section->track?->code;
+
+        // No track recorded on the section at all is NOT the same as "not
+        // Academic" — every pre-existing Grade 12 subject/test relied on
+        // the scheme's universal 'all' fallback (25/50/25) precisely
+        // because nothing here used to read track. Guessing non-Academic
+        // for an unset track would silently mis-weight every such subject
+        // at 20/60/20 instead. Only an ACTUAL track answers this question.
+        if ($trackCode === null) {
+            return 'all';
+        }
+
+        $isAcademic = $trackCode === 'ACAD';
+        $branch = $isAcademic ? 'do8_academic' : 'do8_tvl_sports_arts';
+
+        if ($isAcademic && $subject->type === 'core') {
+            return 'do8_core';
+        }
+
+        $keywords = $isAcademic
+            ? ['work immersion', 'research', 'business enterprise simulation']
+            : ['work immersion', 'research', 'exhibit', 'performance'];
+
+        $name = strtolower($subject->name);
+        foreach ($keywords as $keyword) {
+            if (str_contains($name, $keyword)) {
+                Log::info('GradingEngine::resolveDo8GroupKey routed by name keyword match — review, not an error', [
+                    'subject_id'      => $subject->id,
+                    'subject_name'    => $subject->name,
+                    'matched_keyword' => $keyword,
+                    'slug'            => $branch . '_work_immersion',
+                ]);
+
+                return $branch . '_work_immersion';
+            }
+        }
+
+        return $branch . '_other';
     }
 }

@@ -22,7 +22,16 @@ class ExistingInterventionsBackfilledToPrincipalTest extends TestCase
 
     public function test_a_pre_existing_row_is_backfilled_to_principal_on_migrate(): void
     {
-        Artisan::call('migrate:rollback', ['--step' => 1]);
+        // --step=1 assumed the origin migration was always the newest one —
+        // true when this test was written, false since the "ECR alignment"
+        // work order added migrations after it. Roll back exactly from the
+        // origin migration through whatever is newest, by name rather than
+        // a hardcoded position, so this keeps working no matter how many
+        // more migrations land later.
+        $ranMigrations = DB::table('migrations')->orderBy('id')->pluck('migration')->values();
+        $originIndex = $ranMigrations->search('2026_09_09_000001_add_origin_to_interventions_table');
+        $this->assertNotFalse($originIndex, 'The origin migration must have already run before this test can roll it back.');
+        Artisan::call('migrate:rollback', ['--step' => $ranMigrations->count() - $originIndex]);
 
         // Confirm we actually rolled back the origin migration, not some
         // unrelated later one — this table must have no origin column now.

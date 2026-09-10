@@ -120,7 +120,7 @@ Molave is not one of these sections.
 - Interventions recorded and delivered for Terms 1 and 2
 - Group delivery, within-term progress, and the Failing layer all built
 - Intervention `origin` column landed; approve-pending route built
-- Test suite at 722 passing, 1 skipped
+- Test suite at 740 passing, 1 skipped (ECR alignment Part 1 + Part 2)
 
 **Outstanding:** see `ECR_ALIGNMENT_WORK_ORDER.md`, nine parts. Two are blocked
 on questions only the school can answer — whether Grade 11 electives are chosen
@@ -158,6 +158,14 @@ It is the clearest single answer to "why not just use 74 and below", which the
 panel will ask.
 
 **Correction, 2026-09-09:** this section previously read "computed 71.95, two
-components below the 75 target." That was stale — the live data says 71.90 and
-three components, not two. The figure now matches the screenshot actually
-captured for the defence; do not let the two drift apart again.
+components below the 75 target." That was stale — the live data said 71.90 and
+three components, not two, at the time this note was written.
+
+**Note, 2026-09-10:** "ECR alignment" Part 2 found `exam_role_shares` had
+never been seeded on this database and corrected it (see CLAUDE.md's
+"Implementation — `deped_subject_catalog`"). That correction moved this exact
+figure again, by 0.03: computed 71.90 → **71.93**. Report card, all-three-
+components-below-target, and At Risk status are all unchanged. The screenshot
+already captured still tells the true story; only the second decimal place is
+now stale. Recapture only if the exact figure needs to match a printed number
+somewhere — otherwise not worth a re-shoot for 0.03.
