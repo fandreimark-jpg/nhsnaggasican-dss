@@ -22,9 +22,10 @@ class Specialization extends Model
 
     // Fields that can be mass-assigned
     protected $fillable = [
-        'track_id',  // Which track this specialization belongs to
-        'name',      // e.g. 'Humanities and Social Sciences'
-        'code',      // e.g. 'HUMSS' — always uppercase
+        'track_id',    // Which track this specialization belongs to
+        'name',        // e.g. 'Humanities and Social Sciences'
+        'code',        // e.g. 'HUMSS' — always uppercase
+        'curriculum',  // 'sshs' or 'k12_2013' — see the migration adding this column; (track_id, code) is no longer unique alone
     ];
 
     // =============================================

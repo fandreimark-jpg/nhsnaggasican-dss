@@ -78,9 +78,21 @@ Mathematics, Oral Communication), 3 terms.
   this is an open school policy decision.
 - **Elective cluster limitation:** if a section has more than two electives,
   `totalExpected` over-counts and Submit Report can never complete. No longer
-  deferrable — the client's Grade 11 sections have no specialization at all,
-  which breaks `Subject::forSection()` silently. See `ECR_ALIGNMENT_WORK_ORDER.md`
-  Parts 3 and 6.
+  deferrable — the client's Grade 11 sections have no specialization at all.
+
+  **Correction, 2026-09-10 ("ECR alignment" PART 3b):** the previous line here
+  said this "breaks `Subject::forSection()` silently" — that implied a SQL
+  defect, and there isn't one. Tested directly: Laravel converts
+  `where('specialization_id', null)` to `IS NULL` correctly, so
+  `forSection()`'s query runs exactly as written for a null-specialization
+  section. The real problem is semantic: `specialization_id` means "the
+  strand a section chose" under the old 2013 curriculum but "an inherent
+  property of the subject" under SSHS, where sections have no strand to
+  choose at all — so the section-to-subject specialization match can't be
+  the elective-selection mechanism under SSHS regardless of any SQL fix. See
+  `CLAUDE.md`, "Elective selection is per-cluster, not per-learner," for the
+  full correction. Still blocked on `ECR_ALIGNMENT_WORK_ORDER.md` Parts 3
+  and 6 — same status, corrected reasoning.
 
 ---
 

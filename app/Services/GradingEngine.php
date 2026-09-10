@@ -80,12 +80,13 @@ class GradingEngine
      */
     public function computeGrade(Student $student, Subject $subject, Section $section, int $gradingPeriod, string $schoolYear): array
     {
-        // Which published table applies depends on the SECTION's grade
-        // level and school year, not a fixed default — see
+        // Which published table applies is decided by the SECTION's
+        // curriculum when it's set ("ECR alignment" work order, PART 3a),
+        // falling back to the grade-level/year inference otherwise — see
         // TransmutationService::schemeFor(). The SAME scheme also picks
         // which subject_group_weights row applies below — one scheme
         // concept, resolved once, driving both.
-        $scheme = $this->transmutation->schemeFor($section->grade_level, $schoolYear);
+        $scheme = $this->transmutation->schemeFor($section->grade_level, $schoolYear, $section->curriculum);
 
         // "ECR alignment" work order, PART 2 — resolution order is: a
         // linked catalog row (the official per-subject DepEd weights) if

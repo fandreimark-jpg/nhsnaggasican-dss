@@ -24,19 +24,35 @@ class TransmutationService
     public const SCHEME_DO015_2026 = 'do015_2026';
 
     /**
-     * Which published transmutation table applies to a grade computed for
-     * this grade level / school year. TASK 2 of "terminology,
+     * Which published transmutation table applies. TASK 2 of "terminology,
      * transmutation, and interface cleanup": Grade 11 moved to the
      * Strengthened SHS curriculum starting SY 2026-2027 and reports under
      * DO 015, s. 2026's adjusted table; Grade 12 in that same school year
      * has NOT moved and continues reporting under DO 8, s. 2015 — the two
      * grade levels can legitimately be on different schemes in the same
-     * school year. Any other grade level/year combination (earlier years,
-     * or a grade level outside 11/12) falls back to the long-standing
-     * do8_2015 default.
+     * school year.
+     *
+     * "ECR alignment" work order, PART 3a — $curriculum, when given, is
+     * what actually decides this now, not grade level: a `sshs` section
+     * always resolves to do015_2026 and a `k12_2013` section always
+     * resolves to do8_2015, regardless of grade level or year, because
+     * that is the whole reason `sections.curriculum` exists — the moment a
+     * school runs a transition cohort differently than "Grade 11 = new
+     * curriculum," inferring from grade level alone becomes wrong. $curriculum
+     * is OPTIONAL and defaults to null so every existing caller (and every
+     * test that calls this with the original 2-argument form) is
+     * unaffected — a null or unrecognised curriculum falls back to the
+     * original grade-level/year inference below, unchanged.
      */
-    public function schemeFor(int $gradeLevel, string $schoolYear): string
+    public function schemeFor(int $gradeLevel, string $schoolYear, ?string $curriculum = null): string
     {
+        if ($curriculum === 'sshs') {
+            return self::SCHEME_DO015_2026;
+        }
+        if ($curriculum === 'k12_2013') {
+            return self::DEFAULT_SCHEME;
+        }
+
         $startYear = (int) substr($schoolYear, 0, 4);
 
         if ($gradeLevel === 11 && $startYear >= 2026) {

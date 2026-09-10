@@ -357,6 +357,57 @@ to check against and zero Grade 12 subjects exist in this database yet (Part
 7 is blocked on the school's answer to Q2) — this is a stopgap, and it is
 built to look like one.
 
+## Implementation — `curriculum` on `specializations` and `sections` ("ECR alignment" work order, PART 3a)
+
+`specializations` mixed two DepEd taxonomies on one row with nothing to tell
+them apart — a Strengthened SHS cluster and an old 2013-curriculum strand
+could collide on the same `(track_id, code)` pair (e.g. `STEM` meant either
+depending on which section asked). `curriculum` (`sshs` / `k12_2013`) now
+distinguishes them, backfilled by `code` against the live data: `STEM`,
+`ASSH`, `BUSENT`, `SHW` (Academic Track) and `ICTPROG`, `AGRIFOOD`,
+`HOSPTOUR` (Tech-Pro Track — these three match Strengthened SHS Tech-Pro
+cluster names in the Part 2 catalog exactly, not old strand names) are
+`sshs`; `ABM`, `HUMSS`, `GAS` (Academic Track) and `ICT`, `HE` (TVL Track —
+the old 2013 TVL strand names) are `k12_2013`. The missing old-curriculum
+STEM strand row (Academic Track, code `STEM`, curriculum `k12_2013`) was
+inserted — the reason the unique index widened from `(track_id, code)` to
+`(track_id, code, curriculum)`: two rows now legitimately share
+`(track_id, code)`, disambiguated only by curriculum.
+
+`specializations.curriculum` stays **nullable**, deliberately, matching
+`sections.curriculum` below: three live creation paths — `Admin\
+SpecializationController::store()`, and the `SpecializationsImport` and
+`TracksImport` bulk-import classes — have no curriculum concept in their
+form or file format at all and no way to answer the question. Forcing
+`NOT NULL` would mean fabricating a classification for every specialization
+those paths create rather than honestly recording "not yet classified."
+None of the three were changed to ask for it in this pass.
+
+`sections.curriculum` is what `TransmutationService::schemeFor()` actually
+reads now (an added, optional third parameter — every pre-existing call
+site, including three direct test call sites, keeps working unchanged via
+the original grade-level/year inference as the fallback for a null or
+unrecognised curriculum). `GradingEngine::computeGrade()` and
+`DashboardAnalyticsService`'s section-scheme map both pass it through.
+Existing sections were backfilled using that exact same inference (so
+nothing about any already-computed grade moved — verified: zero movement
+on `dss:recompute-grades` for all three terms), which means it is **now
+true by luck, not by design**, that this client's sections land correctly:
+Molave backfilled to `sshs` (Grade 11, SY 2026-2027) by the same rule
+`schemeFor()` always used.
+
+**No Admin UI change was made to let curriculum be set explicitly on
+section create/update** — deliberately out of scope for this pass; the work
+order's own PART 3a text only names the column as a forward-looking
+capability, not a UI to build now. Every section created after this
+migration keeps `curriculum = null` until something sets it, which is safe
+today only because grade-level inference still happens to be right for
+every section this client actually has. **This is a fact that is true by
+luck and must not be trusted to stay true**: `ECR_ALIGNMENT_WORK_ORDER.md`
+Part 7 (loading Shakespeare, Curie, ABM, HUMSS, STEM) now requires
+`curriculum` to be set explicitly on every section it creates, rather than
+relying on this same inference a second time.
+
 ---
 
 # ASSESSMENT SYSTEM
@@ -1100,6 +1151,46 @@ Pre-Calc + Physics). There is no `section_subject` (or
 electives a given section — let alone a given student — actually
 takes, so `forSection()` cannot distinguish "offered to this
 track/specialization" from "actually taken."
+
+**Correction, "ECR alignment" work order PART 3b — there is no SQL bug
+here.** An earlier draft of `ECR_ALIGNMENT_WORK_ORDER.md` described this as
+`specialization_id = NULL` silently comparing false, "which is never true
+in SQL," for a section with no `specialization_id`. That description was
+wrong and has been corrected in that file too. Tested directly against
+this codebase's actual Laravel version, both in isolation and through
+`forSection()` itself:
+
+```
+select * from `subjects` where `specialization_id` is null
+select * from `subjects` where `grade_level` = ? and (`type` = ? or (`type` = ? and `track_id` = ? and (`specialization_id` is null or `specialization_id` is null)))
+```
+
+Laravel's query builder converts `where('col', null)` to `IS NULL`
+automatically. The query runs exactly as written; nothing here is broken
+at the SQL level.
+
+**The real problem is semantic, not syntactic, and it is why a pivot table
+is required rather than merely convenient.** `specialization_id` carries
+two different meanings depending on which curriculum a row belongs to.
+Under the old 2013 curriculum, a subject's `specialization_id` means "this
+belongs to the ABM strand" — a strand a *section chose to be*, so comparing
+`section.specialization_id` to `subject.specialization_id` is a legitimate
+"did this section choose this strand" test. Under the Strengthened SHS
+curriculum, a subject's cluster (Arts/Social Sciences and Humanities,
+STEM, etc.) is a property of the subject itself — *Citizenship and Civic
+Engagement* is in Arts/Social Sciences and Humanities because of what it
+is, not because any section "chose" that cluster the way a section chooses
+a strand. An SSHS section has no `specialization_id` at all (SSHS has no
+strands), so the comparison `section.specialization_id` against
+`subject.specialization_id` is not merely unmatched for these subjects —
+it is asking a question that doesn't apply to them. **Under SSHS, the
+section-to-subject specialization match cannot be the elective-selection
+mechanism, full stop** — not because of a SQL defect, but because the two
+curricula overload one column with two different meanings, the same
+disease the `curriculum` column on `specializations`/`sections` exists to
+treat one level up. This is still fully **blocked on Part 6/Q1** exactly as
+below — nothing here is buildable until the school answers whether Grade
+11 electives are chosen per section or per learner.
 
 **Why this is currently invisible:** only two STEM electives
 (Pre-Calculus, General Biology 1) have ever been imported in this

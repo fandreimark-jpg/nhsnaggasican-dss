@@ -101,6 +101,29 @@ class TransmutationServiceTest extends TestCase
         $this->assertSame('do8_2015', $this->service->schemeFor(11, '2025-2026'));
     }
 
+    /**
+     * "ECR alignment" work order, PART 3a — curriculum, when given, is what
+     * actually decides the scheme now, not grade level: an 'sshs' section
+     * resolves to do015_2026 even in a year the grade-level inference alone
+     * would call do8_2015 — this is the actual point of the column, a
+     * transition cohort running differently than "Grade 11 = new curriculum."
+     */
+    public function test_sshs_curriculum_wins_even_when_the_year_alone_would_say_otherwise(): void
+    {
+        $this->assertSame('do015_2026', $this->service->schemeFor(11, '2020-2021', 'sshs'));
+    }
+
+    public function test_k12_2013_curriculum_wins_even_for_grade_11_in_sy_2026_2027(): void
+    {
+        $this->assertSame('do8_2015', $this->service->schemeFor(11, '2026-2027', 'k12_2013'));
+    }
+
+    public function test_null_curriculum_falls_back_to_the_original_grade_level_inference_unchanged(): void
+    {
+        $this->assertSame('do015_2026', $this->service->schemeFor(11, '2026-2027', null));
+        $this->assertSame('do8_2015', $this->service->schemeFor(12, '2026-2027', null));
+    }
+
     public function test_transmute_with_availability_reports_unavailable_for_a_grade_outside_do015_2026s_0_to_100_range(): void
     {
         // do015_2026 is now fully seeded 0.00-100.00 (Do015TransmutationSeeder)

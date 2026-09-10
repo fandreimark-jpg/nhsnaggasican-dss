@@ -142,8 +142,12 @@ class DashboardAnalyticsService
     private function computeAssessmentEvidenceTrend(string $schoolYear): array
     {
         $subjectGroups = Subject::pluck('subject_group', 'id');
-        $sectionSchemes = Section::pluck('grade_level', 'id')
-            ->map(fn($gradeLevel) => (new TransmutationService())->schemeFor((int) $gradeLevel, $schoolYear));
+        // "ECR alignment" work order, PART 3a — curriculum, not just grade
+        // level, decides the scheme now; see TransmutationService::schemeFor().
+        $sectionSchemes = Section::select('id', 'grade_level', 'curriculum')->get()
+            ->mapWithKeys(fn($section) => [
+                $section->id => (new TransmutationService())->schemeFor((int) $section->grade_level, $schoolYear, $section->curriculum),
+            ]);
 
         // (scheme, subject_group) -> SubjectGroupWeight, resolved once per
         // distinct pair actually seen below rather than per row.

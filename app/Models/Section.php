@@ -22,6 +22,7 @@ class Section extends Model
     protected $fillable = [
         'name',               // Section name e.g. 'Narraa', 'Alber'
         'grade_level',        // 11 or 12
+        'curriculum',         // 'sshs' or 'k12_2013' — what TransmutationService::schemeFor() actually reads now; null falls back to grade-level inference
         'track_id',           // Academic or TechPro track
         'specialization_id',  // e.g. HUMSS, STEM, ICT
         'adviser_id',         // Assigned adviser (nullable — can be unassigned)
