@@ -19,6 +19,23 @@
         'work_immersion'       => 'Work Immersion',
     ];
     $subjectGroupLabel = fn($group) => $subjectGroupLabels[$group] ?? ucwords(str_replace('_', ' ', $group ?? ''));
+
+    // "ECR alignment" work order, PART 4c — what each group actually
+    // COVERS, not just its slug. core_academic is genuinely three
+    // different DepEd clusters sharing one weight (Core, STEM, Business &
+    // Entrepreneurship) — an admin reading only "Core Academic" will leave
+    // this blank on an academic elective and be right by accident, then do
+    // the same on a Sports elective and be wrong. Derived from the Part 2
+    // catalog's actual membership per weight pattern.
+    $subjectGroupCovers = [
+        'core_academic'        => 'Core Subjects and Other Academic Electives',
+        'field_exposure'       => 'Field Experience and Apprenticeship Electives',
+        'arts_sports_wellness' => 'Arts, Social Sciences, Humanities, and Sports/Wellness Electives',
+        'research_innovation'  => 'Research and Innovation Electives',
+        'techpro'              => 'Tech-Vocational-Livelihood (Tech-Pro) Electives',
+        'work_immersion'       => 'Work Immersion',
+    ];
+    $subjectGroupCoverText = fn($group) => $subjectGroupCovers[$group] ?? null;
 @endphp
 
 @include('partials.import-result')
@@ -80,7 +97,12 @@
                     @endif
                 </td>
                 <td>Grade {{ $subject->grade_level }}</td>
-                <td>{{ $subjectGroupLabel($subject->subject_group) }}</td>
+                <td>
+                    {{ $subjectGroupLabel($subject->subject_group) }}
+                    @if($subjectGroupCoverText($subject->subject_group))
+                        <span class="block text-xs text-gray-400">{{ $subjectGroupCoverText($subject->subject_group) }}</span>
+                    @endif
+                </td>
                 <td>{{ $subject->track->name ?? '—' }}</td>
                 <td>{{ $subject->specialization->name ?? '—' }}</td>
                 <td class="text-right">
@@ -174,7 +196,7 @@
                 <select name="subject_group" id="subjectGroupField" required
                         class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
                     @foreach($subjectGroups as $group)
-                        <option value="{{ $group }}">{{ $subjectGroupLabel($group) }}</option>
+                        <option value="{{ $group }}">{{ $subjectGroupLabel($group) }}{{ $subjectGroupCoverText($group) ? ' — covers ' . $subjectGroupCoverText($group) : '' }}</option>
                     @endforeach
                 </select>
             </div>

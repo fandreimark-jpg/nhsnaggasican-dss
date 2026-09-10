@@ -50,14 +50,16 @@
     $c4 = $dataHealth['subjectsWithNoAssessments']->count();
     $c5 = $dataHealth['duplicateLrns']->count();
     $c6 = $dataHealth['usersNeverLoggedIn']->count();
+    $c7 = $dataHealth['subjectsWithSuspectGroup']->count();
     $ok1 = $c1 === 0;
     $ok2 = $c2 === 0;
     $ok3 = $c3 === 0;
     $ok4 = !$dataHealth['openTermForAssessmentCheck'] || $c4 === 0;
     $ok5 = $c5 === 0;
     $ok6 = $c6 === 0;
-    $passingCount = collect([$ok1, $ok2, $ok3, $ok4, $ok5, $ok6])->filter()->count();
-    $totalChecks = 6;
+    $ok7 = $c7 === 0;
+    $passingCount = collect([$ok1, $ok2, $ok3, $ok4, $ok5, $ok6, $ok7])->filter()->count();
+    $totalChecks = 7;
     $allPassing = $passingCount === $totalChecks;
 @endphp
 <x-panel class="mb-4">
@@ -147,6 +149,20 @@
                 <a href="{{ route('admin.users') }}" class="text-xs text-brand-700 hover:underline shrink-0">Review users →</a>
             </div>
             @endif
+            @if(!$ok7)
+            <div class="px-4 py-2 flex items-center justify-between gap-3">
+                <div class="flex items-center gap-2 min-w-0">
+                    <span class="w-2 h-2 rounded-full bg-yellow-500 shrink-0"></span>
+                    <p class="text-sm text-gray-700">
+                        <span class="font-semibold">{{ $c7 }}</span> subject{{ $c7 === 1 ? '' : 's' }} may have the wrong grading weight
+                        <span class="block text-xs text-gray-400">
+                            {{ $dataHealth['subjectsWithSuspectGroup']->pluck('name')->implode(', ') }} — an elective still on the Core Academic default, or linked to a DepEd catalog row implying different weights than stored. Across the full 141-subject catalog, 101 of 139 subjects get the wrong weights under this silent default.
+                        </span>
+                    </p>
+                </div>
+                <a href="{{ route('admin.subjects', ['subject_group_check' => 1]) }}" class="text-xs text-brand-700 hover:underline shrink-0">Review subjects →</a>
+            </div>
+            @endif
 
             {{-- Passing checks after --}}
             @if($ok1)
@@ -188,6 +204,12 @@
             <div class="px-4 py-2 flex items-center gap-2">
                 <span class="w-2 h-2 rounded-full bg-green-500 shrink-0"></span>
                 <p class="text-sm text-gray-700">Every account has logged in at least once</p>
+            </div>
+            @endif
+            @if($ok7)
+            <div class="px-4 py-2 flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-green-500 shrink-0"></span>
+                <p class="text-sm text-gray-700">Every subject's stored grading weight matches its group or catalog link</p>
             </div>
             @endif
         </div>

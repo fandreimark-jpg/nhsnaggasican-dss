@@ -42,13 +42,19 @@ class SubjectController extends Controller
     }
 
     /**
-     * Show all subjects with optional type filter (core/elective).
-     * URL: /admin/subjects?type=core or ?type=elective
+     * Show all subjects with optional type filter (core/elective), or
+     * filtered to the "may have the wrong grading weight" set the Admin
+     * dashboard's Data Health check links to — see Subject::
+     * withSuspectSubjectGroup() ("ECR alignment" work order, PART 4b), the
+     * one place that query exists so this filter and the dashboard count
+     * can never drift apart.
+     * URL: /admin/subjects?type=core or ?type=elective or ?subject_group_check=1
      */
     public function index()
     {
         $subjects = Subject::with(['track', 'specialization'])
             ->when(request('type'), fn($q) => $q->where('type', request('type')))
+            ->when(request('subject_group_check'), fn($q) => $q->whereIn('id', Subject::withSuspectSubjectGroup()->pluck('id')))
             ->orderBy('grade_level')
             ->orderBy('type') // core subjects first
             ->orderBy('name')
@@ -114,6 +120,18 @@ class SubjectController extends Controller
 
         $failures = $import->failures();
 
+        // "ECR alignment" work order, PART 4a — every row whose
+        // subject_group cell was blank/absent fell back to core_academic
+        // silently; report it by name via the import-result panel's
+        // existing (previously unused) import_warnings notice channel
+        // rather than leaving the fallback invisible. Set on both branches
+        // below — a row can default its group and still import cleanly.
+        $importWarnings = [];
+        if (!empty($import->defaultedSubjectGroupNames)) {
+            $importWarnings[] = count($import->defaultedSubjectGroupNames) . ' subject(s) had no subject_group in the file and defaulted to Core Academic (20/50/30): '
+                . implode(', ', $import->defaultedSubjectGroupNames) . '.';
+        }
+
         if ($failures->count() > 0) {
             $result = $this->summarizeImportFailures($failures, $import);
 
@@ -127,7 +145,8 @@ class SubjectController extends Controller
             return redirect()->route('admin.subjects')
                 ->with('warning', $import->importedCount . ' subject(s) imported. ' . $result['skippedCount'] . ' row(s) were skipped:')
                 ->with('import_errors', $result['rowMessages'])
-                ->with('import_header_hint', $result['headerHint']);
+                ->with('import_header_hint', $result['headerHint'])
+                ->with('import_warnings', $importWarnings);
         }
 
         LogActivity::log(
@@ -138,7 +157,8 @@ class SubjectController extends Controller
         );
 
         return redirect()->route('admin.subjects')
-            ->with('success', $import->importedCount . ' subject(s) imported successfully!');
+            ->with('success', $import->importedCount . ' subject(s) imported successfully!')
+            ->with('import_warnings', $importWarnings);
     }
 
     /** Update an existing subject. */

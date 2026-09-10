@@ -43,6 +43,15 @@ class SubjectsImport implements ToModel, WithHeadingRow, WithValidation, SkipsOn
 
     public int $importedCount = 0;
 
+    /**
+     * "ECR alignment" work order, PART 4a — names of every row whose
+     * subject_group cell was blank or absent and fell back to
+     * core_academic, so Admin\SubjectController::import() can report this
+     * by name instead of the fallback happening invisibly. Populated in
+     * model() below.
+     */
+    public array $defaultedSubjectGroupNames = [];
+
     /** "name|grade_level" pairs already seen during this import run, across every chunk. */
     private array $seen = [];
 
@@ -80,6 +89,10 @@ class SubjectsImport implements ToModel, WithHeadingRow, WithValidation, SkipsOn
         $this->importedCount++;
 
         $subjectGroup = trim((string) ($row['subject_group'] ?? ''));
+
+        if ($subjectGroup === '') {
+            $this->defaultedSubjectGroupNames[] = trim($row['name']);
+        }
 
         return new Subject([
             'name'              => trim($row['name']),

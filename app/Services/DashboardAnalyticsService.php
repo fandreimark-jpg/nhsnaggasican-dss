@@ -310,6 +310,10 @@ class DashboardAnalyticsService
             ->orderBy('name')
             ->get(['id', 'name', 'email', 'role']);
 
+        // "ECR alignment" work order, PART 4b — see Subject::
+        // withSuspectSubjectGroup()'s own docblock for what this flags and why.
+        $subjectsWithSuspectGroup = Subject::withSuspectSubjectGroup();
+
         return [
             'sectionsWithoutAdviser'     => $sectionsWithoutAdviser,
             'learnersWithoutSection'     => $learnersWithoutSection,
@@ -318,6 +322,7 @@ class DashboardAnalyticsService
             'openTermForAssessmentCheck' => $openTerm,
             'subjectsWithNoAssessments'  => $subjectsWithNoAssessments,
             'usersNeverLoggedIn'         => $usersNeverLoggedIn,
+            'subjectsWithSuspectGroup'   => $subjectsWithSuspectGroup,
         ];
     }
 

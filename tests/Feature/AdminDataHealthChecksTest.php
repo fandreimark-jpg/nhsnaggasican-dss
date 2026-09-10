@@ -195,4 +195,71 @@ class AdminDataHealthChecksTest extends TestCase
         $this->assertFalse($checks['usersNeverLoggedIn']->pluck('id')->contains($adviser->id));
         $this->assertFalse($checks['usersNeverLoggedIn']->pluck('id')->contains($admin->id));
     }
+
+    /**
+     * "ECR alignment" work order, PART 4b — an elective still sitting on
+     * the silent core_academic default is the plainest signal something
+     * was never actually set.
+     */
+    public function test_an_elective_still_on_the_core_academic_default_is_detected(): void
+    {
+        $this->healthySection();
+        Subject::factory()->create(['type' => 'elective', 'grade_level' => 11, 'name' => 'SuspectElective', 'subject_group' => 'core_academic']);
+        $admin = User::factory()->admin()->create();
+
+        $response = $this->actingAs($admin)->get('/admin/dashboard');
+
+        $response->assertOk();
+        $response->assertSee('may have the wrong grading weight');
+        $response->assertSee('SuspectElective');
+        $response->assertSee(route('admin.subjects', ['subject_group_check' => 1]), false);
+    }
+
+    /**
+     * A subject linked to a DepEd catalog row whose weights disagree with
+     * the subject's own stored subject_group -- the catalog already wins
+     * in GradingEngine when linked, so this isn't a grading error, it's a
+     * stale subject_group value that no longer describes what's actually
+     * driving the grade. "Broadband Installation" is a real Tech-Pro
+     * catalog row (15/65/20), deliberately linked here to a subject still
+     * stamped core_academic (20/50/30) to force a real disagreement.
+     */
+    public function test_a_catalog_linked_subject_whose_stored_group_disagrees_is_detected(): void
+    {
+        $this->healthySection();
+        $catalogRow = \App\Models\DepedSubjectCatalog::where('course_title', 'Broadband Installation')->firstOrFail();
+        Subject::factory()->create([
+            'type' => 'core', 'grade_level' => 11, 'name' => 'MismatchedSubject',
+            'subject_group' => 'core_academic', 'catalog_id' => $catalogRow->id,
+        ]);
+        $admin = User::factory()->admin()->create();
+
+        $response = $this->actingAs($admin)->get('/admin/dashboard');
+
+        $response->assertOk();
+        $response->assertSee('may have the wrong grading weight');
+        $response->assertSee('MismatchedSubject');
+    }
+
+    public function test_a_catalog_linked_subject_whose_stored_group_agrees_is_not_flagged(): void
+    {
+        $this->healthySection();
+        // General Mathematics' real catalog row: 20/50/30, identical to
+        // core_academic -- linking it must NOT trip this check.
+        $catalogRow = \App\Models\DepedSubjectCatalog::where('course_title', 'General Mathematics')->firstOrFail();
+        Subject::factory()->create([
+            'type' => 'core', 'grade_level' => 11, 'name' => 'AgreeingSubject',
+            'subject_group' => 'core_academic', 'catalog_id' => $catalogRow->id,
+        ]);
+        $admin = User::factory()->admin()->create();
+
+        $response = $this->actingAs($admin)->get('/admin/dashboard');
+
+        $response->assertOk();
+        // The apostrophe in this static Blade text is never passed through
+        // {{ }} (it's literal markup, not an interpolated value), so it's
+        // unescaped in the actual response -- assertSee's default escaping
+        // would look for &#039; and never find it. Compare raw.
+        $response->assertSee("Every subject's stored grading weight matches its group or catalog link", false);
+    }
 }

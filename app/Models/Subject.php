@@ -94,4 +94,56 @@ class Subject extends Model
                     });
             });
     }
+
+    /**
+     * "ECR alignment" work order, PART 4b — every subject whose stored
+     * `subject_group` looks suspect, by one of two independent signals:
+     *
+     *  1. An elective still sitting on `core_academic` — the silent
+     *     import/column default. `core_academic` is meant for core subjects
+     *     (and, per the catalog, a handful of academic electives that
+     *     genuinely are 20/50/30) — an elective landing there almost always
+     *     means nobody ever set it.
+     *  2. A subject linked to a DepEd catalog row (`catalog_id` set) whose
+     *     own weights disagree with what `SubjectGroupWeight::resolve()`
+     *     gives for the subject's STORED `subject_group`. The catalog
+     *     already wins in `GradingEngine` when linked (see that class), so
+     *     this isn't a grading error — it's a stale/misleading `subject_group`
+     *     value that no longer describes what's actually driving the grade.
+     *
+     * The comparison is weights-to-weights, not slug-to-slug:
+     * `DepedSubjectCatalog` has no `subject_group`-equivalent field, so
+     * there is no "catalog implies this slug" mapping to check against —
+     * only whether the two sources of weight actually agree. Shared by
+     * `DashboardAnalyticsService::getDataHealthChecks()` (the count) and
+     * `Admin\SubjectController::index()`'s `?subject_group_check=1` filter
+     * (the list) — one method, one place, so they can't drift apart the
+     * way the "Awaiting Your Decision" duplicate once did.
+     *
+     * See CLAUDE.md for the real scale of this: 101 of 139 comparable
+     * subjects in the full DepEd catalog disagree with the silent
+     * `core_academic` default.
+     */
+    public static function withSuspectSubjectGroup(): \Illuminate\Support\Collection
+    {
+        $electivesOnDefault = static::where('type', 'elective')->where('subject_group', 'core_academic')->get();
+
+        $catalogLinked = static::whereNotNull('catalog_id')->with('catalog')->get();
+        $mismatched = $catalogLinked->filter(function (self $subject) {
+            $catalog = $subject->catalog;
+            if (!$catalog || $catalog->teacher_supplied) {
+                return false;
+            }
+
+            $stored = SubjectGroupWeight::resolve('do015_2026', $subject->subject_group);
+            $catalogEx = $catalog->ex_weight !== null ? (float) $catalog->ex_weight : null;
+            $storedEx = $stored->ex_weight !== null ? (float) $stored->ex_weight : null;
+
+            return (float) $catalog->ww_weight !== (float) $stored->ww_weight
+                || (float) $catalog->pt_weight !== (float) $stored->pt_weight
+                || $catalogEx !== $storedEx;
+        });
+
+        return $electivesOnDefault->merge($mismatched)->unique('id')->values();
+    }
 }
