@@ -1289,6 +1289,29 @@ a person decided. The DSS produces the recommendation text, the focus area,
 and the risk classification that inform the Principal's judgment. It does not
 create, approve, or close intervention records.
 
+## A new specialization can silently fall out of the curriculum split
+
+`specializations.curriculum` (Part 3a) is nullable, deliberately — three live
+creation paths, `Admin\SpecializationController::store()` and the
+`SpecializationsImport`/`TracksImport` bulk-import classes, have no
+curriculum concept in their form or file format at all, so making the column
+`NOT NULL` would have meant fabricating a classification rather than honestly
+recording "not yet known." That was the right call for the 13 existing rows,
+which are all correctly backfilled. It has a cost going forward: **any
+specialization created through any of those three paths from today onward
+gets `curriculum = null` and silently falls out of the very split Part 3
+exists to make** — nothing warns an admin that the row they just created
+isn't classified, and nothing stops the same ambiguity (an SSHS cluster or a
+2013 strand sharing a code) from recurring one row at a time.
+
+This is the same shape as the `subject_group` default Part 4 addresses for
+`subjects`: a nullable column, no UI to set it, quietly defaulting instead of
+asking. Part 4 makes that default visible for subjects; this one is not yet
+fixed the same way for `curriculum` on newly-created specializations — no
+data-health check, no import-panel notice, nothing surfacing it today. See
+`ECR_ALIGNMENT_WORK_ORDER.md` Part 7, which requires `curriculum` to be set
+explicitly on every specialization it touches, alongside `sections.curriculum`.
+
 ## Recommendations for future work
 
 Three items from the "COMPLETE WORK ORDER" (Parts 7-9) were deliberately deferred

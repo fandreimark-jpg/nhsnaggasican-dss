@@ -507,6 +507,15 @@ and Part 3a's own documentation in `CLAUDE.md` says so explicitly. A section
 created here with `curriculum` left null would compute correctly today only
 by the same coincidence — set it on purpose instead of relying on it twice.
 
+**Same requirement for `specializations.curriculum`** on any specialization
+row this part touches or creates (e.g. if Grade 12's ABM/HUMSS/STEM sections
+need a specialization row that doesn't already exist as `k12_2013`). That
+column is nullable for the same reason `sections.curriculum` is — no
+existing creation path could answer the question — and every specialization
+created since Part 3a without an explicit value has silently fallen out of
+the curriculum split. See `CLAUDE.md`, "A new specialization can silently
+fall out of the curriculum split."
+
 Existing Molave data is not deleted. Decide explicitly whether it becomes one
 of the real sections or stays as demonstration data, and write the decision
 into `CLAUDE.md`. Do not resolve this by migration.
