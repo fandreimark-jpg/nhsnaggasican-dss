@@ -27,12 +27,23 @@
     // this blank on an academic elective and be right by accident, then do
     // the same on a Sports elective and be wrong. Derived from the Part 2
     // catalog's actual membership per weight pattern.
+    // field_exposure, techpro corrected 2026-09-10: the FIELD EXPERIENCE
+    // catalog cluster actually splits across THREE slugs by weight pattern
+    // (field_exposure 15/70/15, research_innovation 40/60 for Research 1/2
+    // and Design and Innovation, work_immersion 20/80 for Work Immersion
+    // for Academic Track) — naming the whole cluster here would send an
+    // admin to file Research 1 under field_exposure. And "Tech-Vocational-
+    // Livelihood" is DO 8/2013 vocabulary; SSHS calls this track Tech-Pro —
+    // Part 3 just spent a migration keeping those two taxonomies apart.
     $subjectGroupCovers = [
         'core_academic'        => 'Core Subjects and Other Academic Electives',
-        'field_exposure'       => 'Field Experience and Apprenticeship Electives',
+        'field_exposure'       => 'Field Exposure and Arts Apprenticeship Electives',
         'arts_sports_wellness' => 'Arts, Social Sciences, Humanities, and Sports/Wellness Electives',
         'research_innovation'  => 'Research and Innovation Electives',
-        'techpro'              => 'Tech-Vocational-Livelihood (Tech-Pro) Electives',
+        'techpro'              => 'Tech-Pro Track Electives',
+        // Covers both the Academic Track's Work Immersion for Academic
+        // Track subject and Tech-Pro's five Work Immersion variants — same
+        // 20/80 pattern, one slug.
         'work_immersion'       => 'Work Immersion',
     ];
     $subjectGroupCoverText = fn($group) => $subjectGroupCovers[$group] ?? null;
