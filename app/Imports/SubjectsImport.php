@@ -104,10 +104,19 @@ class SubjectsImport implements ToModel, WithHeadingRow, WithValidation, SkipsOn
         ]);
     }
 
-    /** Every subject_group actually seeded (excluding do8_2015's 'all' fallback bucket, never a real per-subject value). */
+    /**
+     * Every do015_2026 subject_group actually seeded (excluding its 'all'
+     * fallback bucket, never a real per-subject value). Scoped to
+     * do015_2026 the same way Admin\SubjectController::
+     * availableSubjectGroups() is: the five do8_* rows are computed by
+     * GradingEngine::resolveDo8GroupKey(), never typed by a human, so a
+     * file column carrying one must be rejected here exactly as it is on
+     * the manual form -- before this fix this query was unscoped and
+     * would have silently accepted a do8_* value from a file.
+     */
     private function validSubjectGroups(): array
     {
-        return SubjectGroupWeight::where('subject_group', '!=', 'all')->distinct()->pluck('subject_group')->all();
+        return SubjectGroupWeight::where('scheme', 'do015_2026')->where('subject_group', '!=', 'all')->distinct()->pluck('subject_group')->all();
     }
 
     private function findTrack(string $needle): ?Track

@@ -55,4 +55,41 @@ class AdminSubjectGroupTest extends TestCase
 
         $this->assertSame('techpro', $subject->fresh()->subject_group);
     }
+
+    /**
+     * "ECR alignment" work order, bug found in testing — the five do8_*
+     * subject_group_weights rows (Part 2) are computed by
+     * GradingEngine::resolveDo8GroupKey() from a section's track and a
+     * subject's type; a subject's own subject_group column isn't even
+     * read for the do8_2015 scheme. A human must never be able to pick
+     * one directly -- doing so would put DO 8 weights on a DO 015
+     * subject, silently.
+     */
+    public function test_the_subject_form_never_offers_a_do8_subject_group(): void
+    {
+        $admin = User::factory()->admin()->create();
+
+        $response = $this->actingAs($admin)->get(route('admin.subjects'));
+
+        $response->assertOk();
+        $subjectGroups = $response->viewData('subjectGroups');
+
+        $this->assertNotEmpty($subjectGroups, 'Sanity check: the do015_2026 groups must still be offered.');
+        foreach ($subjectGroups as $group) {
+            $this->assertStringStartsNotWith('do8_', $group, "'{$group}' is a do8_* slug and must not be selectable.");
+        }
+        $this->assertStringNotContainsString('do8_', $response->getContent());
+    }
+
+    public function test_a_do8_subject_group_is_rejected_on_create_not_silently_accepted(): void
+    {
+        $admin = User::factory()->admin()->create();
+
+        $this->actingAs($admin)->post(route('admin.subjects.store'), [
+            'name' => 'Sneaky Do8 Subject', 'type' => 'core', 'grade_level' => 12,
+            'subject_group' => 'do8_core',
+        ])->assertSessionHasErrors('subject_group');
+
+        $this->assertDatabaseMissing('subjects', ['name' => 'Sneaky Do8 Subject']);
+    }
 }

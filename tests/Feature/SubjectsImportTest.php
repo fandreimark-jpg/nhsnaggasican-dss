@@ -187,6 +187,30 @@ class SubjectsImportTest extends TestCase
         $this->assertDatabaseHas('subjects', ['name' => 'Empowerment Technologies']);
     }
 
+    /**
+     * "ECR alignment" work order, bug found in testing — validSubjectGroups()
+     * was unscoped and would have accepted a do8_* slug from a file column,
+     * the same way the Admin form's dropdown accepted it before that fix.
+     * The five do8_* subject_group_weights rows are computed by
+     * GradingEngine::resolveDo8GroupKey(), never typed by a human or a
+     * file, in either place.
+     */
+    public function test_a_do8_subject_group_in_the_file_is_rejected(): void
+    {
+        // importCsv()'s default header has no subject_group column, so
+        // build the CSV directly here instead.
+        $csv = "name,type,grade_level,subject_group,track,specialization\n";
+        $csv .= "Sneaky Do8 Subject,core,12,do8_core,,\n";
+        $path = tempnam(sys_get_temp_dir(), 'subjects_import_') . '.csv';
+        file_put_contents($path, $csv);
+        $import = new SubjectsImport();
+        Excel::import($import, $path);
+        @unlink($path);
+
+        $this->assertCount(1, $import->failures());
+        $this->assertDatabaseMissing('subjects', ['name' => 'Sneaky Do8 Subject']);
+    }
+
     public function test_adviser_cannot_import_subjects(): void
     {
         $adviser = User::factory()->create();

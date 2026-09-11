@@ -29,13 +29,19 @@ class SubjectController extends Controller
      * Which subject_group a subject can be assigned — read from
      * subject_group_weights itself rather than hardcoded, so a future
      * scheme's different group list is a seeded row, never a code
-     * change. 'all' is excluded: that's do8_2015's scheme-wide fallback
-     * bucket (see SubjectGroupWeight::resolve()), never a real group a
-     * subject is actually assigned.
+     * change. Scoped to 'do015_2026': the five do8_* rows are resolved
+     * automatically by GradingEngine::resolveDo8GroupKey() from a
+     * section's track and a subject's type, never chosen by a human — a
+     * subject's own subject_group column isn't even read for the
+     * do8_2015 scheme. Offering them here would let an admin put DO 8
+     * weights on a DO 015 subject, silently. 'all' is also excluded:
+     * that's do8_2015's scheme-wide fallback bucket, never a real group
+     * a subject is actually assigned.
      */
     private function availableSubjectGroups()
     {
-        return SubjectGroupWeight::where('subject_group', '!=', 'all')
+        return SubjectGroupWeight::where('scheme', 'do015_2026')
+            ->where('subject_group', '!=', 'all')
             ->distinct()
             ->orderBy('subject_group')
             ->pluck('subject_group');
