@@ -20,15 +20,45 @@ class DraftRosterExtractionTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function filledFixturePath(): string
+    /**
+     * Builds a throwaway filled copy of the real checked-in blank template
+     * (same technique as tests/Support/BuildsEcrFixture) so this test is
+     * self-contained -- no dependency on any file outside the repo or the
+     * test run itself. Covers every edge case the name-split rule needs:
+     * a normal "Last, First Middle" name, a name with no LRN, a malformed
+     * name with no comma at all, and both a two-word and three-word
+     * remainder after the comma.
+     */
+    private function buildFilledRosterFixture(): string
     {
-        return 'C:\\Users\\kimbe\\AppData\\Local\\Temp\\claude\\filled_ecr_for_roster_test.xlsx';
+        $source = base_path('tests/Fixtures/SSHS-E-Class-Record-SY-2026-2027.xlsx');
+        $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($source);
+        $reader->setReadDataOnly(true);
+        $spreadsheet = $reader->load($source);
+        $inputData = $spreadsheet->getSheetByName('INPUT DATA');
+
+        $inputData->setCellValue('N11', '110000000001');
+        $inputData->setCellValueExplicit('O11', 'Dela Cruz, Juan Miguel Reyes', \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+        $inputData->setCellValueExplicit('O12', 'Reyes, Juan', \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING); // no LRN
+        $inputData->setCellValue('N13', '110000000003');
+        $inputData->setCellValueExplicit('O13', 'NOCOMMANAME', \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING); // malformed, no comma
+
+        $inputData->setCellValue('R11', '110000000004');
+        $inputData->setCellValueExplicit('S11', 'Santos, Maria Clara', \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+        $inputData->setCellValue('R12', '110000000005');
+        $inputData->setCellValueExplicit('S12', 'Bautista, Ana Lopez Cruz', \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+
+        $path = tempnam(sys_get_temp_dir(), 'draft_roster_fixture_') . '.xlsx';
+        (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet))->save($path);
+
+        return $path;
     }
 
     public function test_extraction_from_a_filled_ecr_produces_the_expected_csv(): void
     {
         $admin = User::factory()->admin()->create();
-        $file = new UploadedFile($this->filledFixturePath(), 'filled.xlsx', null, null, true);
+        $fixturePath = $this->buildFilledRosterFixture();
+        $file = new UploadedFile($fixturePath, 'filled.xlsx', null, null, true);
 
         $response = $this->actingAs($admin)->post(route('admin.students.extract-roster'), ['file' => $file]);
 
@@ -56,11 +86,7 @@ class DraftRosterExtractionTest extends TestCase
         // Session cleared once downloaded.
         $this->assertNull(session('roster_extraction'));
 
-        // Save the real CSV to disk so it can be inspected/reported verbatim.
-        file_put_contents(
-            'C:\\Users\\kimbe\\AppData\\Local\\Temp\\claude\\draft_roster_downloaded.csv',
-            $csv
-        );
+        @unlink($fixturePath);
     }
 
     /**
@@ -96,12 +122,7 @@ class DraftRosterExtractionTest extends TestCase
 
         $errors = session('import_errors');
         $this->assertNotNull($errors);
-
-        // Save the real messages so they can be reported verbatim.
-        file_put_contents(
-            'C:\\Users\\kimbe\\AppData\\Local\\Temp\\claude\\import_rejection_messages.txt',
-            "warning: " . session('warning') . "\n\n" . implode("\n", $errors)
-        );
+        $this->assertStringContainsString('The lrn field is required.', implode("\n", $errors));
 
         // The other 3 valid rows imported; the blank-LRN row did not.
         $this->assertSame(3, Student::count());

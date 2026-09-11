@@ -370,6 +370,49 @@ convention alone. If the panel's wording changes, this paragraph should
 change with it — the two are one statement now, not two that happen to
 agree.
 
+## mimes: MIME-sniffing rejects the official DepEd ECR
+
+The real official SSHS E-Class Record's actual bytes sniff as
+`application/octet-stream`, not a recognised spreadsheet MIME type —
+confirmed directly (`mime_content_type()` on `tests/Fixtures/SSHS-E-Class-
+Record-SY-2026-2027.xlsx`), and via `Validator::make(['file' => <the real
+fixture>], ['file' => 'mimes:xlsx,xls'])->passes()` returning `false`.
+Laravel's `mimes:` rule checks the file's actual sniffed content against an
+extension-to-MIME map, not the extension alone, so `mimes:xlsx,xls,csv,txt`
+rejects the exact file the upload exists to accept — found first in
+`Adviser\AssessmentController::detect()` (`app/Http/Controllers/Adviser/
+AssessmentController.php`, the validation rule that used to sit at line
+239), the shipped Part 5 upload path every adviser actually uses. Fixed by
+validating the **extension** instead (`$file->getClientOriginalExtension()`
+against an allow-list), with real content verified immediately after by
+`EcrProfileDetector` (for a genuine ECR) or `AssessmentColumnClassifier`'s
+own header parsing (for the flat CSV/XLSX path) — the extension check only
+needs to keep out something that obviously isn't one of the accepted file
+types at all; it was never the thing actually guaranteeing the file's real
+shape.
+
+**Why this survived through all of Part 5 undetected**: every ECR test
+written for Part 5 called `EcrReaderService`/`EcrProfileDetector` directly
+or went through `dss:ecr-dry-run` — none of them ever pushed the real
+checked-in fixture through the HTTP route and its `mimes:` validation layer.
+The bug lived entirely in a layer nothing was testing. `tests/Feature/
+EcrHttpUploadValidationTest.php` closes exactly that gap: it posts the real
+fixture to `/adviser/assessments/detect` over HTTP, the same request a real
+adviser's browser sends, specifically so a future validation-rule change on
+this route can't reintroduce the same class of bug without a test noticing.
+
+**The same `mimes:xlsx,xls,csv,txt` rule appears in six more places**,
+found by grepping rather than assuming the ECR route was the only one:
+`Admin\SectionController` (114), `Admin\SpecializationController` (69),
+`Admin\SubjectController` (121), `Admin\TrackController` (69), `Adviser\
+GradeController` (156), and `Admin\StudentController` (98 — the existing
+Import Students route the "draft roster" CSV feeds into). None of these
+are known to have actually failed against a real file the way the ECR
+route did — their imports are typically admin-authored spreadsheets, not
+exports from whatever tool produced the official DepEd template — but the
+same latent risk exists in all six and none has been changed. Not fixed in
+this pass; flagged so it isn't rediscovered by accident.
+
 ## Implementation — `curriculum` on `specializations` and `sections` ("ECR alignment" work order, PART 3a)
 
 `specializations` mixed two DepEd taxonomies on one row with nothing to tell
