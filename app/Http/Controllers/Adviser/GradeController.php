@@ -8,6 +8,7 @@ use App\Models\Subject;
 use App\Models\Grade;
 use App\Models\Section;
 use App\Models\AcademicTerm;
+use App\Http\Controllers\Concerns\ValidatesSpreadsheetUpload;
 use App\Imports\GradesImport;
 use App\Helpers\LogActivity;
 use App\Services\GradingEngine;
@@ -26,6 +27,8 @@ use Maatwebsite\Excel\Facades\Excel;
  */
 class GradeController extends Controller
 {
+    use ValidatesSpreadsheetUpload;
+
     public function __construct(private GradingEngine $gradingEngine = new GradingEngine())
     {
     }
@@ -153,7 +156,7 @@ class GradeController extends Controller
         }
 
         $request->validateWithBag('gradeImport', [
-            'file' => 'required|mimes:xlsx,xls,csv,txt|max:2048',
+            'file' => $this->spreadsheetFileRule(),
         ]);
 
         $subjects = Subject::forSection($section)->orderBy('type')->orderBy('name')->get();

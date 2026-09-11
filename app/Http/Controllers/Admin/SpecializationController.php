@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Specialization;
 use App\Models\Track;
 use App\Http\Controllers\Concerns\SummarizesImportFailures;
+use App\Http\Controllers\Concerns\ValidatesSpreadsheetUpload;
 use App\Imports\SpecializationsImport;
 use App\Helpers\LogActivity;
 use Illuminate\Http\Request;
@@ -22,6 +23,7 @@ use Maatwebsite\Excel\Facades\Excel;
 class SpecializationController extends Controller
 {
     use SummarizesImportFailures;
+    use ValidatesSpreadsheetUpload;
 
     /** Show all specializations with their parent track. */
     public function index()
@@ -66,7 +68,7 @@ class SpecializationController extends Controller
     public function import(Request $request)
     {
         $request->validateWithBag('import', [
-            'file' => 'required|mimes:xlsx,xls,csv,txt|max:2048',
+            'file' => $this->spreadsheetFileRule(),
         ]);
 
         $import = new SpecializationsImport();

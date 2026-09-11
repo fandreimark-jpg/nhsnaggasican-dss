@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Student;
 use App\Models\Section;
 use App\Http\Controllers\Concerns\SummarizesImportFailures;
+use App\Http\Controllers\Concerns\ValidatesSpreadsheetUpload;
 use App\Imports\StudentsImport;
 use App\Services\EcrProfileDetector;
 use App\Services\EcrReaderService;
@@ -24,6 +25,7 @@ use Illuminate\Http\Response;
 class StudentController extends Controller
 {
     use SummarizesImportFailures;
+    use ValidatesSpreadsheetUpload;
 
     /**
      * Show all students with optional section filter.
@@ -95,7 +97,7 @@ class StudentController extends Controller
     {
         $request->validateWithBag('import', [
             'section_id' => 'required|exists:sections,id',
-            'file'       => 'required|mimes:xlsx,xls,csv,txt|max:2048',
+            'file'       => $this->spreadsheetFileRule(),
         ]);
 
         $import = new StudentsImport((int) $request->section_id);
@@ -188,26 +190,17 @@ class StudentController extends Controller
      * clear message instead of EcrReaderService guessing at a shape that
      * isn't there.
      *
-     * Validated by EXTENSION, not `mimes:` (MIME-sniffing) — confirmed
-     * directly against the real official DepEd template
-     * (tests/Fixtures/SSHS-E-Class-Record-SY-2026-2027.xlsx) that its
-     * actual bytes sniff as `application/octet-stream`, not a recognised
-     * spreadsheet MIME type, so `mimes:xlsx,xls` would reject a genuine
-     * ECR file — exactly the file this feature exists to read. Content is
-     * verified for real immediately after by EcrProfileDetector, which
-     * checks actual workbook structure (sheet names, a marker cell, a
-     * version tag), not a guess from bytes — the extension check here only
-     * needs to keep out something that obviously isn't a spreadsheet at
-     * all.
+     * Validated by EXTENSION, not `mimes:` (MIME-sniffing) — see
+     * ValidatesSpreadsheetUpload and CLAUDE.md, "mimes: MIME-sniffing
+     * rejects the official DepEd ECR." Content is verified for real
+     * immediately after by EcrProfileDetector, which checks actual
+     * workbook structure (sheet names, a marker cell, a version tag), not
+     * a guess from bytes.
      */
     public function extractRosterPreview(Request $request)
     {
         $request->validateWithBag('extractRoster', [
-            'file' => ['required', 'file', 'max:10240', function ($attribute, $value, $fail) {
-                if (!in_array(strtolower($value->getClientOriginalExtension()), ['xlsx', 'xls'], true)) {
-                    $fail('The file must be an .xlsx or .xls file.');
-                }
-            }],
+            'file' => $this->spreadsheetFileRule(['xlsx', 'xls'], 10240),
         ]);
 
         $path = $request->file('file')->getRealPath();

@@ -10,6 +10,7 @@ use App\Models\Subject;
 use App\Models\User;
 use App\Helpers\LogActivity;
 use App\Http\Controllers\Concerns\SummarizesImportFailures;
+use App\Http\Controllers\Concerns\ValidatesSpreadsheetUpload;
 use App\Imports\SectionsImport;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -25,6 +26,7 @@ use Maatwebsite\Excel\Facades\Excel;
 class SectionController extends Controller
 {
     use SummarizesImportFailures;
+    use ValidatesSpreadsheetUpload;
 
     /**
      * Show all sections with their related data.
@@ -111,7 +113,7 @@ class SectionController extends Controller
     public function import(Request $request)
     {
         $request->validateWithBag('import', [
-            'file' => 'required|mimes:xlsx,xls,csv,txt|max:2048',
+            'file' => $this->spreadsheetFileRule(),
         ]);
 
         $import = new SectionsImport();

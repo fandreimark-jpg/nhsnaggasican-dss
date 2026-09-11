@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Track;
 use App\Http\Controllers\Concerns\SummarizesImportFailures;
+use App\Http\Controllers\Concerns\ValidatesSpreadsheetUpload;
 use App\Imports\TracksImport;
 use App\Helpers\LogActivity;
 use Illuminate\Http\Request;
@@ -20,6 +21,7 @@ use Maatwebsite\Excel\Facades\Excel;
 class TrackController extends Controller
 {
     use SummarizesImportFailures;
+    use ValidatesSpreadsheetUpload;
 
     /** Show all tracks with their specializations. */
     public function index()
@@ -66,7 +68,7 @@ class TrackController extends Controller
     public function import(Request $request)
     {
         $request->validateWithBag('import', [
-            'file' => 'required|mimes:xlsx,xls,csv,txt|max:2048',
+            'file' => $this->spreadsheetFileRule(),
         ]);
 
         $import = new TracksImport();

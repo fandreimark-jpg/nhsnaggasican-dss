@@ -13,6 +13,7 @@ use App\Models\AssessmentUpload;
 use App\Models\Grade;
 use App\Models\Student;
 use App\Helpers\LogActivity;
+use App\Http\Controllers\Concerns\ValidatesSpreadsheetUpload;
 use App\Services\AssessmentUploadService;
 use App\Services\InTermStatusService;
 use App\Services\PerformanceAnalysisService;
@@ -45,6 +46,8 @@ use Illuminate\Validation\Rule;
  */
 class AssessmentController extends Controller
 {
+    use ValidatesSpreadsheetUpload;
+
     private const TEMP_DIR = 'temp_assessment_uploads';
 
     private const COMPONENT_LABELS = [
@@ -234,23 +237,14 @@ class AssessmentController extends Controller
         $section = Section::where('adviser_id', auth()->id())->firstOrFail();
         $gradingPeriod = (int) $request->input('grading_period', 1);
 
-        // Validated by EXTENSION, not `mimes:` (MIME-sniffing) — the real
-        // official DepEd SSHS E-Class Record's actual bytes sniff as
-        // application/octet-stream, not a recognised spreadsheet MIME, so
-        // `mimes:xlsx,xls,csv,txt` rejected the exact file this route
-        // exists to accept (see CLAUDE.md, "mimes: MIME-sniffing rejects
-        // the official DepEd ECR"). Content is verified for real
+        // Validated by EXTENSION, not `mimes:` (MIME-sniffing) — see
+        // ValidatesSpreadsheetUpload and CLAUDE.md, "mimes: MIME-sniffing
+        // rejects the official DepEd ECR." Content is verified for real
         // immediately after by EcrProfileDetector for a genuine ECR, and by
-        // AssessmentColumnClassifier's own header parsing otherwise — the
-        // extension check here only needs to keep out something that
-        // obviously isn't one of the accepted file types at all.
+        // AssessmentColumnClassifier's own header parsing otherwise.
         $request->validate([
             'subject_id' => 'required|exists:subjects,id',
-            'file'       => ['required', 'file', 'max:2048', function ($attribute, $value, $fail) {
-                if (!in_array(strtolower($value->getClientOriginalExtension()), ['xlsx', 'xls', 'csv', 'txt'], true)) {
-                    $fail('The file must be an .xlsx, .xls, .csv, or .txt file.');
-                }
-            }],
+            'file'       => $this->spreadsheetFileRule(),
         ]);
 
         $subject = Subject::forSection($section)->where('id', $request->subject_id)->first();

@@ -8,6 +8,7 @@ use App\Models\SubjectGroupWeight;
 use App\Models\Track;
 use App\Models\Specialization;
 use App\Http\Controllers\Concerns\SummarizesImportFailures;
+use App\Http\Controllers\Concerns\ValidatesSpreadsheetUpload;
 use App\Imports\SubjectsImport;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Helpers\LogActivity;
@@ -24,6 +25,7 @@ use Illuminate\Validation\Rule;
 class SubjectController extends Controller
 {
     use SummarizesImportFailures;
+    use ValidatesSpreadsheetUpload;
 
     /**
      * Which subject_group a subject can be assigned — read from
@@ -118,7 +120,7 @@ class SubjectController extends Controller
     public function import(Request $request)
     {
         $request->validateWithBag('import', [
-            'file' => 'required|mimes:xlsx,xls,csv,txt|max:2048',
+            'file' => $this->spreadsheetFileRule(),
         ]);
 
         $import = new SubjectsImport();
