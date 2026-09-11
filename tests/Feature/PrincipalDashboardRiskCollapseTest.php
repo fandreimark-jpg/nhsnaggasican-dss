@@ -140,4 +140,53 @@ class PrincipalDashboardRiskCollapseTest extends TestCase
         $after->assertSee('Low Risk');
         $after->assertSee('riskDonutChart', false);
     }
+
+    /**
+     * "UI legibility pass" — the Risk Level heading must name which term(s)
+     * it's actually drawn from (MASTER_PROMPT.md Part 0.8's "name the term"
+     * rule, already applied on Admin/Principal Reports's per-row "as of
+     * Term N"), not just say "submitted term reports" and leave the reader
+     * to guess when a later term is unsubmitted.
+     */
+    public function test_the_risk_level_heading_names_the_term_it_is_as_of(): void
+    {
+        $principal = User::factory()->principal()->create();
+        $section = Section::factory()->create(['school_year' => '2026-2027']);
+        $student = Student::factory()->create(['section_id' => $section->id]);
+        RiskResult::create([
+            'student_id' => $student->id, 'grading_period' => 2, 'average_grade' => 92,
+            'risk_level' => 'low', 'school_year' => '2026-2027', 'generated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($principal)->get('/principal/dashboard');
+
+        $response->assertSee('Risk Level — submitted term reports (as of Term 2)');
+    }
+
+    /**
+     * A real possibility, not just a hypothetical: sections can submit on
+     * different schedules, so two students' MOST RECENT risk results can
+     * legitimately be different terms. The heading must report both terms
+     * it's drawn from rather than silently picking one.
+     */
+    public function test_the_risk_level_heading_names_every_term_present_when_they_differ(): void
+    {
+        $principal = User::factory()->principal()->create();
+        $sectionA = Section::factory()->create(['school_year' => '2026-2027']);
+        $sectionB = Section::factory()->create(['school_year' => '2026-2027']);
+        $studentA = Student::factory()->create(['section_id' => $sectionA->id]);
+        $studentB = Student::factory()->create(['section_id' => $sectionB->id]);
+        RiskResult::create([
+            'student_id' => $studentA->id, 'grading_period' => 1, 'average_grade' => 92,
+            'risk_level' => 'low', 'school_year' => '2026-2027', 'generated_at' => now(),
+        ]);
+        RiskResult::create([
+            'student_id' => $studentB->id, 'grading_period' => 2, 'average_grade' => 92,
+            'risk_level' => 'low', 'school_year' => '2026-2027', 'generated_at' => now(),
+        ]);
+
+        $response = $this->actingAs($principal)->get('/principal/dashboard');
+
+        $response->assertSee('Risk Level — submitted term reports (as of Term 1, 2)');
+    }
 }

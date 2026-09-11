@@ -42,7 +42,9 @@
                     @endif
                 </div>
                 <p class="text-xs text-gray-400 mt-1">
-                    @if($term->completion['complete'])
+                    @if(!$term->completion['has_anything_expected'])
+                        No section has both students and subjects assigned yet — nothing to encode.
+                    @elseif($term->completion['complete'])
                         All sections fully encoded for this term.
                     @else
                         Not fully encoded:

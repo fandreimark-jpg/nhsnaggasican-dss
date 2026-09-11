@@ -226,4 +226,61 @@ class AcademicTermTest extends TestCase
         $term1ClosedAtAfterTerm3 = AcademicTerm::where('school_year', '2026-2027')->where('term', 1)->value('closed_at');
         $this->assertEquals($term1ClosedAtAfterTerm2, $term1ClosedAtAfterTerm3);
     }
+
+    /**
+     * "UI legibility pass" — completionStatus()'s 'complete' flag is
+     * vacuously true when there is nothing to encode at all (empty()
+     * over an empty $incomplete array), which used to read on the
+     * Academic Terms page as "All sections fully encoded for this term"
+     * on a fresh install with zero sections — a false claim of
+     * completion, not an honest "nothing here yet." has_anything_expected
+     * distinguishes the two so the page can tell them apart.
+     */
+    public function test_completion_status_reports_nothing_expected_when_no_section_has_students_and_subjects(): void
+    {
+        $status = AcademicTerm::completionStatus('2026-2027', 1);
+
+        $this->assertTrue($status['complete']); // vacuously true — unchanged behavior
+        $this->assertFalse($status['has_anything_expected']); // but this is what actually distinguishes it
+    }
+
+    public function test_completion_status_reports_something_expected_once_a_section_has_students_and_subjects(): void
+    {
+        $section = Section::factory()->create(['school_year' => '2026-2027']);
+        $student = Student::factory()->create(['section_id' => $section->id]);
+        $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
+        $this->fullyEncodeTerm($section, $student, $subject, 1);
+
+        $status = AcademicTerm::completionStatus('2026-2027', 1);
+
+        $this->assertTrue($status['complete']);
+        $this->assertTrue($status['has_anything_expected']);
+    }
+
+    public function test_academic_terms_page_does_not_claim_completion_when_there_is_nothing_to_encode(): void
+    {
+        $admin = User::factory()->admin()->create();
+        \App\Models\AcademicTerm::ensureExistFor('2026-2027');
+
+        $response = $this->actingAs($admin)->get('/admin/academic-terms');
+
+        $response->assertOk();
+        $response->assertSee('No section has both students and subjects assigned yet');
+        $response->assertDontSee('All sections fully encoded for this term');
+    }
+
+    public function test_academic_terms_page_still_claims_completion_once_it_is_genuinely_true(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $section = Section::factory()->create(['school_year' => '2026-2027']);
+        $student = Student::factory()->create(['section_id' => $section->id]);
+        $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
+        $this->fullyEncodeTerm($section, $student, $subject, 1);
+
+        $response = $this->actingAs($admin)->get('/admin/academic-terms');
+
+        $response->assertOk();
+        $response->assertSee('All sections fully encoded for this term');
+        $response->assertDontSee('No section has both students and subjects assigned yet');
+    }
 }

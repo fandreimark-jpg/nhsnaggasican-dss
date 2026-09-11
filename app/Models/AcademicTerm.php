@@ -62,6 +62,12 @@ class AcademicTerm extends Model
     {
         $sections = Section::where('school_year', $schoolYear)->get();
         $incomplete = [];
+        // "UI legibility pass" — distinguishes genuine 100% completion from
+        // the vacuous case (zero sections, or every section with nothing
+        // expected yet). Without this, $incomplete stays empty() in both
+        // cases and a first-time install reads "All sections fully encoded
+        // for this term" when there is nothing to encode at all.
+        $hasAnythingExpected = false;
 
         foreach ($sections as $section) {
             $studentCount = Student::where('section_id', $section->id)->count();
@@ -70,6 +76,8 @@ class AcademicTerm extends Model
 
             // Nothing to require yet (no students or no subjects assigned) — skip.
             if ($expected === 0) continue;
+
+            $hasAnythingExpected = true;
 
             $actual = Grade::where('section_id', $section->id)
                 ->where('grading_period', $term)
@@ -86,8 +94,9 @@ class AcademicTerm extends Model
         }
 
         return [
-            'complete'            => empty($incomplete),
-            'incomplete_sections' => $incomplete,
+            'complete'              => empty($incomplete),
+            'has_anything_expected' => $hasAnythingExpected,
+            'incomplete_sections'   => $incomplete,
         ];
     }
 

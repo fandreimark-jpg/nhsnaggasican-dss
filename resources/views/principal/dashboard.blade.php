@@ -250,8 +250,24 @@
 {{-- Risk cards — moved below In-Term Status. See DssComponentIntegrationTest
      etc.: Risk Level comes from the submitted term report + classifier,
      never from assessment evidence alone. --}}
+@php
+    // "UI legibility pass" — MASTER_PROMPT.md Part 0.8's "name the term"
+    // rule, already applied on Admin/Principal Reports (per-row "as of
+    // Term N"), extended to this dashboard-wide heading. $riskLevelTerms
+    // (DashboardAnalyticsService::getSummaryData()) is the distinct,
+    // sorted set of terms behind the counts below -- usually one, but a
+    // real possibility of more than one if sections submit on different
+    // schedules (see that variable's own docblock), reported honestly
+    // rather than collapsed to just the latest.
+    $riskLevelTermsList = $riskLevelTerms ?? [];
+    $riskLevelTermSuffix = match (count($riskLevelTermsList)) {
+        0       => '',
+        1       => ' (as of Term ' . $riskLevelTermsList[0] . ')',
+        default => ' (as of Term ' . implode(', ', $riskLevelTermsList) . ')',
+    };
+@endphp
 <div class="mb-1">
-    <h3 class="text-sm font-semibold text-gray-800">Risk Level — submitted term reports</h3>
+    <h3 class="text-sm font-semibold text-gray-800">Risk Level — submitted term reports{{ $riskLevelTermSuffix }}</h3>
 </div>
 @if($hasRiskData)
 {{-- TASK 6d of "correctness and interface pass" — Moderate/High link to

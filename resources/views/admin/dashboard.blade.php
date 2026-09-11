@@ -222,7 +222,7 @@
         <a href="{{ route('admin.activity.logs') }}" class="text-brand-700 hover:underline">View all →</a>
     </x-slot:action>
     @if($recentActivity->isEmpty())
-        <x-empty-state message="No activity recorded yet." class="py-6 text-xs" />
+        <x-empty-state message="No activity recorded yet." hint="Every create, update, and delete across the system is recorded here as it happens." class="py-6 text-xs" />
     @else
         <div class="divide-y divide-gray-50 -mx-4 -mb-4">
             @foreach($recentActivity as $log)

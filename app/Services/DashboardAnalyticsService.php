@@ -63,6 +63,16 @@ class DashboardAnalyticsService
         $moderateRisk = $latestPerStudent->where('risk_level', 'moderate')->count();
         $highRisk     = $latestPerStudent->where('risk_level', 'high')->count();
 
+        // "UI legibility pass" — which term(s) the Risk Level summary above
+        // is actually drawn from. Each student's contribution is their own
+        // MOST RECENT submitted report, so this can legitimately be more
+        // than one term if sections submit on different schedules — e.g.
+        // one section's Term 2 report is in while another's Term 3 isn't
+        // yet. Reported as a distinct, sorted list rather than collapsed
+        // into "latest term," so the dashboard never implies more terms
+        // are accounted for than actually are.
+        $riskLevelTerms = $latestPerStudent->pluck('grading_period')->unique()->sort()->values()->all();
+
         $sections = Section::with([
             'students.riskResults' => fn($q) => $q->where('school_year', $schoolYear),
             'adviser',
@@ -106,6 +116,7 @@ class DashboardAnalyticsService
             'lowRisk'         => $lowRisk,
             'moderateRisk'    => $moderateRisk,
             'highRisk'        => $highRisk,
+            'riskLevelTerms'  => $riskLevelTerms,
             'sections'        => $sections,
             'termTrends'      => $termTrends,
             'sectionRiskData' => $sectionRiskData,
