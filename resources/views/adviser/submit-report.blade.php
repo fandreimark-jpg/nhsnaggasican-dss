@@ -34,7 +34,11 @@
                 <p class="text-xs text-gray-400 mt-0.5">
                     {{ $gradeCount }}/{{ $totalExpected }} grades encoded
                 </p>
-                @if($evidence['has_any_evidence'])
+                @if(!($evidence['configured'] ?? true))
+                    <p class="text-xs mt-0.5 text-orange-500" title="This section's electives have not been assigned yet — contact the admin.">
+                        <i class="bi bi-exclamation-circle"></i> Electives not yet assigned
+                    </p>
+                @elseif($evidence['has_any_evidence'])
                     <p class="text-xs mt-0.5 {{ $evidence['ready'] ? 'text-green-600' : 'text-orange-500' }}"
                        title="Students with a complete Written Work + Performance Task + Examination computed grade — informational only, does not block submission">
                         <i class="bi bi-clipboard-data"></i>

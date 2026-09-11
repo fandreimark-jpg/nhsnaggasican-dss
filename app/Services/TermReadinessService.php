@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Models\Section;
 use App\Models\Student;
-use App\Models\Subject;
 
 /**
  * CLAUDE.md's "Term Readiness" check, extended to also cover assessment
@@ -25,16 +24,35 @@ use App\Models\Subject;
  */
 class TermReadinessService
 {
-    public function __construct(private GradingEngine $gradingEngine = new GradingEngine())
-    {
+    public function __construct(
+        private GradingEngine $gradingEngine = new GradingEngine(),
+        private SectionElectiveStatus $electiveStatus = new SectionElectiveStatus()
+    ) {
     }
 
     /**
-     * @return array{expected: int, complete: int, incomplete: int, ready: bool, has_any_evidence: bool}
+     * "ECR alignment" work order, PART 6 — $subjects now comes from
+     * SectionElectiveStatus::expectedSubjectsForTerm(), the one shared
+     * place every "how many grades should exist" consumer reads from,
+     * instead of Subject::forSection() directly (which would count every
+     * SSHS elective assigned to this section for EVERY term, not just the
+     * ones it's actually assigned to run in). A section whose SSHS
+     * electives haven't been assigned yet reports not-configured rather
+     * than a core-only expected count that would read as achievable
+     * completion.
+     *
+     * @return array{expected: int, complete: int, incomplete: int, ready: bool, has_any_evidence: bool, configured: bool}
      */
     public function assessmentEvidenceStatus(Section $section, int $gradingPeriod): array
     {
-        $subjects = Subject::forSection($section)->get();
+        if (!$this->electiveStatus->isFullyConfigured($section)) {
+            return [
+                'expected' => 0, 'complete' => 0, 'incomplete' => 0,
+                'ready' => false, 'has_any_evidence' => false, 'configured' => false,
+            ];
+        }
+
+        $subjects = $this->electiveStatus->expectedSubjectsForTerm($section, $gradingPeriod);
         $students = Student::where('section_id', $section->id)->get();
 
         $expected = $students->count() * $subjects->count();
@@ -61,6 +79,7 @@ class TermReadinessService
             'incomplete'       => $expected - $complete,
             'ready'            => $expected > 0 && $complete >= $expected,
             'has_any_evidence' => $hasAnyEvidence,
+            'configured'       => true,
         ];
     }
 }

@@ -49,7 +49,13 @@
                     @else
                         Not fully encoded:
                         @foreach($term->completion['incomplete_sections'] as $s)
-                            {{ $s['section'] }} ({{ $s['encoded'] }}/{{ $s['expected'] }})@if(!$loop->last), @endif
+                            {{ $s['section'] }}
+                            @if(isset($s['reason']))
+                                ({{ $s['reason'] }})
+                            @else
+                                ({{ $s['encoded'] }}/{{ $s['expected'] }})
+                            @endif
+                            @if(!$loop->last), @endif
                         @endforeach
                     @endif
                 </p>

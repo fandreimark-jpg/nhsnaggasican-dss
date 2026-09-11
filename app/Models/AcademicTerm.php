@@ -56,6 +56,17 @@ class AcademicTerm extends Model
      * "Fully encoded" = every student in every section has a grade for
      * every subject applicable to their section, in this term.
      *
+     * "ECR alignment" work order, PART 6 — "expected" now comes from
+     * SectionElectiveStatus, the one shared place every "how many grades
+     * should exist" consumer reads from, instead of a flat
+     * students-times-subjects multiply. A section whose SSHS electives
+     * exist but haven't been assigned yet (SectionElectiveStatus::
+     * isFullyConfigured() === false) is reported incomplete with no
+     * `expected` figure at all — reporting a core-only expected count
+     * here would read as "complete" the moment core grades are in, which
+     * would be exactly the silent-zero bug this part exists to fix, one
+     * level up.
+     *
      * Returns ['complete' => bool, 'incomplete_sections' => [...]]
      */
     public static function completionStatus(string $schoolYear, int $term): array
@@ -68,13 +79,32 @@ class AcademicTerm extends Model
         // cases and a first-time install reads "All sections fully encoded
         // for this term" when there is nothing to encode at all.
         $hasAnythingExpected = false;
+        $electiveStatus = new \App\Services\SectionElectiveStatus();
 
         foreach ($sections as $section) {
             $studentCount = Student::where('section_id', $section->id)->count();
-            $subjectCount = Subject::forSection($section)->count();
-            $expected     = $studentCount * $subjectCount;
 
-            // Nothing to require yet (no students or no subjects assigned) — skip.
+            // Nothing to require yet (no students assigned) — skip.
+            if ($studentCount === 0) continue;
+
+            if (!$electiveStatus->isFullyConfigured($section)) {
+                $hasAnythingExpected = true;
+                $actual = Grade::where('section_id', $section->id)
+                    ->where('grading_period', $term)
+                    ->where('school_year', $schoolYear)
+                    ->count();
+                $incomplete[] = [
+                    'section'  => $section->name . ' — Grade ' . $section->grade_level,
+                    'encoded'  => $actual,
+                    'expected' => null,
+                    'reason'   => 'Electives not yet assigned for this section.',
+                ];
+                continue;
+            }
+
+            $expected = $electiveStatus->expectedGradeCount($section, $term);
+
+            // Nothing to require yet (no subjects resolved) — skip.
             if ($expected === 0) continue;
 
             $hasAnythingExpected = true;

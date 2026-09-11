@@ -12,6 +12,7 @@ use App\Models\ReportSubmission;
 use App\Models\AcademicTerm;
 use App\Helpers\LogActivity;
 use App\Services\RiskFeatureExtractor;
+use App\Services\SectionElectiveStatus;
 use App\Services\TermReadinessService;
 use Illuminate\Http\Request;
 
@@ -26,7 +27,8 @@ class ReportController extends Controller
 {
     public function __construct(
         private RiskFeatureExtractor $riskFeatures = new RiskFeatureExtractor(),
-        private TermReadinessService $termReadiness = new TermReadinessService()
+        private TermReadinessService $termReadiness = new TermReadinessService(),
+        private SectionElectiveStatus $electiveStatus = new SectionElectiveStatus()
     ) {
     }
 
@@ -52,10 +54,14 @@ class ReportController extends Controller
             ]);
         }
 
-        $subjects = $this->getSectionSubjects($section);
+        $subjects = Subject::forSection($section)->get();
         $students = Student::where('section_id', $section->id)->orderBy('last_name')->get();
 
-        // Total expected grades = students × subjects per term
+        // Not read by adviser.submit-report.blade.php — the view derives
+        // its own per-term $totalExpected from $termStatus[$period]['expected']
+        // below (see the @php block near the top of that file). Kept here,
+        // unused, only because compact() below already names it and
+        // removing the key is a bigger change than this part's scope.
         $totalExpected = $students->count() * $subjects->count();
 
         // Load all submissions for this section — keyed by grading_period
@@ -91,15 +97,23 @@ class ReportController extends Controller
             ];
         });
 
-        // Build term status for each of the 3 terms
+        // Build term status for each of the 3 terms. "ECR alignment" work
+        // order, PART 6 — expected is now computed PER TERM via
+        // SectionElectiveStatus (an elective doesn't necessarily run every
+        // term), and a section whose SSHS electives aren't assigned yet
+        // reports 0 expected / not complete rather than a core-only figure
+        // that would read as achievable.
         $termStatus = [];
+        $isConfigured = $this->electiveStatus->isFullyConfigured($section);
         foreach ([1, 2, 3] as $term) {
-            $encoded = $allGrades->where('grading_period', $term)->count();
+            $encoded  = $allGrades->where('grading_period', $term)->count();
+            $expected = $isConfigured ? $this->electiveStatus->expectedGradeCount($section, $term) : 0;
 
             $termStatus[$term] = [
                 'encoded'            => $encoded,
-                'expected'           => $totalExpected,
-                'complete'           => $totalExpected > 0 && $encoded >= $totalExpected,
+                'expected'           => $expected,
+                'complete'           => $isConfigured && $expected > 0 && $encoded >= $expected,
+                'configured'         => $isConfigured,
                 'submitted'          => isset($submissions[$term]),
                 'submission'         => $submissions[$term] ?? null,
                 // Informational only — see TermReadinessService's doc
@@ -157,9 +171,18 @@ class ReportController extends Controller
             }
         }
 
-        $subjects      = $this->getSectionSubjects($section);
+        // "ECR alignment" work order, PART 6 — a section whose SSHS
+        // electives haven't been assigned yet must not be submittable at
+        // all; there's no honest "expected" figure to check completeness
+        // against yet.
+        if (!$this->electiveStatus->isFullyConfigured($section)) {
+            return back()->with('error',
+                'This section\'s electives have not been assigned yet. Contact the admin before submitting Term ' . $gradingPeriod . '.'
+            );
+        }
+
         $students      = Student::where('section_id', $section->id)->get();
-        $totalExpected = $students->count() * $subjects->count();
+        $totalExpected = $this->electiveStatus->expectedGradeCount($section, $gradingPeriod);
 
         $encoded = Grade::where('section_id', $section->id)
             ->where('grading_period', $gradingPeriod)
@@ -400,25 +423,4 @@ class ReportController extends Controller
         return $rank[$floor] > $rank[$mlRiskLevel] ? $floor : $mlRiskLevel;
     }
 
-    /**
-     * Get subjects for a section based on grade level, track, and specialization.
-     * Core subjects appear for all sections of the same grade level.
-     * Elective subjects are filtered by track and specialization.
-     */
-    private function getSectionSubjects(Section $section)
-    {
-        return Subject::where('grade_level', $section->grade_level)
-            ->where(function ($query) use ($section) {
-                $query->where('type', 'core')
-                    ->orWhere(function ($q) use ($section) {
-                        $q->where('type', 'elective')
-                          ->where('track_id', $section->track_id)
-                          ->where(function ($q2) use ($section) {
-                              $q2->whereNull('specialization_id')
-                                 ->orWhere('specialization_id', $section->specialization_id);
-                          });
-                    });
-            })
-            ->get();
-    }
 }

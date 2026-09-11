@@ -75,12 +75,51 @@ class Subject extends Model
 
     /**
      * Get the subjects applicable to a given section — core subjects for
-     * that grade level, plus elective subjects matching the section's
-     * track/specialization. Shared logic used by both grade encoding
-     * AND the term-completion check, so both always count the same set.
+     * that grade level, plus electives. Shared logic used by grade
+     * encoding, the term-completion check, and everywhere else that needs
+     * "what does this section take," so they all always count the same
+     * set. Returns a query builder, not a collection — every caller
+     * appends ->get()/->pluck()/->count()/etc. itself.
+     *
+     * "ECR alignment" work order, PART 6 — the elective half now branches
+     * on curriculum, and the two branches answer genuinely different
+     * questions (see CLAUDE.md, "Elective selection is per-cluster, not
+     * per-learner"):
+     *
+     *   - curriculum = 'sshs': a section has no specialization to have
+     *     chosen (SSHS has no strands), so "every elective matching the
+     *     track" was never a real answer — it returns every elective in
+     *     the whole track. Electives now come from section_subject
+     *     instead: exactly what this section has actually been assigned,
+     *     nothing more. A section with zero section_subject rows
+     *     correctly gets zero electives here — see
+     *     SectionElectiveStatus::isFullyConfigured() for the SEPARATE
+     *     question of whether that zero is because there was nothing to
+     *     assign, or because nobody has assigned it yet.
+     *   - k12_2013 (or null/unrecognised curriculum, the same fallback
+     *     TransmutationService::schemeFor() already uses): UNCHANGED,
+     *     byte-identical to before this part. A section's
+     *     specialization_id there legitimately means "the strand this
+     *     section chose" — that mechanism is not broken and must not be
+     *     touched here.
      */
     public static function forSection(Section $section)
     {
+        if ($section->curriculum === 'sshs') {
+            $electiveSubjectIds = SectionSubject::where('section_id', $section->id)
+                ->where('school_year', $section->school_year)
+                ->pluck('subject_id');
+
+            return static::where('grade_level', $section->grade_level)
+                ->where(function ($query) use ($electiveSubjectIds) {
+                    $query->where('type', 'core')
+                        ->orWhere(function ($q) use ($electiveSubjectIds) {
+                            $q->where('type', 'elective')
+                              ->whereIn('id', $electiveSubjectIds);
+                        });
+                });
+        }
+
         return static::where('grade_level', $section->grade_level)
             ->where(function ($query) use ($section) {
                 $query->where('type', 'core')

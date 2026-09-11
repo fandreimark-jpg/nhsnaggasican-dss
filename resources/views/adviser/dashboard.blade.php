@@ -135,7 +135,7 @@
          is the count across ALL 3 terms, not one term; a reader could
          otherwise mistake it for "this term's" count. --}}
     <x-stat-card label="Grades Encoded" :value="$totalGradesEncoded" accent="count-8"
-        :note="'of '.($totalExpectedPerTerm * 3).' across 3 terms'" />
+        :note="'of '.$totalExpectedAcrossTerms.' across 3 terms'" />
     <x-stat-card label="Pending Submission" :value="$pendingCount" accent="count-8" />
     <x-stat-card label="Terms Submitted" :value="$submissions->count()" accent="count-8" />
 </div>
@@ -156,7 +156,8 @@
             2 => $term2Count,
             3 => $term3Count,
         };
-        $isComplete  = $totalExpectedPerTerm > 0 && $termCount >= $totalExpectedPerTerm;
+        $termExpected = $expectedPerTerm[$term];
+        $isComplete  = $termExpected > 0 && $termCount >= $termExpected;
         $isSubmitted = $submission !== null;
     @endphp
     <div class="bg-white rounded-lg shadow-sm p-4 border-t-4
@@ -171,6 +172,10 @@
                 <span class="text-xs px-2 py-1 rounded-full bg-brand-100 text-brand-700 font-medium">
                     Ready
                 </span>
+            @elseif(!$isConfigured)
+                <span class="text-xs px-2 py-1 rounded-full bg-orange-100 text-orange-700 font-medium">
+                    Not Configured
+                </span>
             @else
                 <span class="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-500 font-medium">
                     Incomplete
@@ -178,7 +183,11 @@
             @endif
         </div>
         <p class="text-xs text-gray-400 tabular-nums">
-            {{ $termCount }}/{{ $totalExpectedPerTerm }} grades encoded
+            @if(!$isConfigured)
+                Electives not yet assigned for this section
+            @else
+                {{ $termCount }}/{{ $termExpected }} grades encoded
+            @endif
         </p>
         <p class="text-xs text-gray-400 mt-1">
             @if($isSubmitted)

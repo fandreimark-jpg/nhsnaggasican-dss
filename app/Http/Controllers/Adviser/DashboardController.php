@@ -11,6 +11,7 @@ use App\Models\Grade;
 use App\Models\Section;
 use App\Models\ReportSubmission;
 use App\Services\InTermStatusService;
+use App\Services\SectionElectiveStatus;
 use App\Services\TransmutationService;
 use Illuminate\Support\Collection;
 
@@ -24,7 +25,8 @@ use Illuminate\Support\Collection;
 class DashboardController extends Controller
 {
     public function __construct(
-        private InTermStatusService $inTermStatus = new InTermStatusService()
+        private InTermStatusService $inTermStatus = new InTermStatusService(),
+        private SectionElectiveStatus $electiveStatus = new SectionElectiveStatus()
     ) {
     }
 
@@ -45,8 +47,25 @@ class DashboardController extends Controller
             ? Subject::forSection($section)->get()
             : collect();
 
-        // Total grades expected per term = students × subjects
-        $totalExpectedPerTerm = $totalStudents * $subjects->count();
+        // "ECR alignment" work order, PART 6 — expected grades now come
+        // from SectionElectiveStatus PER TERM (an elective doesn't
+        // necessarily run every term), the same shared source of truth
+        // AcademicTerm::completionStatus(), ReportController, and
+        // TermReadinessService all read from — not a flat students-times-
+        // subjects figure reused for all three terms, which is what this
+        // used to be. A section whose SSHS electives aren't assigned yet
+        // reports 0 expected in every term rather than a core-only figure
+        // that would read as achievable.
+        $isConfigured = $section ? $this->electiveStatus->isFullyConfigured($section) : true;
+        $expectedPerTerm = [];
+        foreach ([1, 2, 3] as $term) {
+            $expectedPerTerm[$term] = ($section && $isConfigured)
+                ? $this->electiveStatus->expectedGradeCount($section, $term)
+                : 0;
+        }
+        // Still used by the "Grades Encoded ... of N across 3 terms" card —
+        // the real per-term sum, not a flat multiply-by-3.
+        $totalExpectedAcrossTerms = array_sum($expectedPerTerm);
 
         // Count grades encoded per term — used for progress tracking
         $term1Count = $section ? Grade::where('section_id', $section->id)
@@ -80,7 +99,7 @@ class DashboardController extends Controller
                 2 => $term2Count,
                 3 => $term3Count,
             };
-            $isComplete  = $totalExpectedPerTerm > 0 && $termCount >= $totalExpectedPerTerm;
+            $isComplete  = $expectedPerTerm[$term] > 0 && $termCount >= $expectedPerTerm[$term];
             $isSubmitted = isset($submissions[$term]);
             if ($isComplete && !$isSubmitted) {
                 $pendingCount++;
@@ -215,7 +234,7 @@ class DashboardController extends Controller
         return view('adviser.dashboard', compact(
             'section', 'totalStudents', 'totalGradesEncoded',
             'pendingCount', 'submissions', 'students', 'trends',
-            'totalExpectedPerTerm',
+            'expectedPerTerm', 'totalExpectedAcrossTerms', 'isConfigured',
             'term1Count', 'term2Count', 'term3Count',
             'staleRiskTerms', 'openTerm', 'inTermRows', 'allInTermRows', 'inTermStatusCounts', 'unacknowledgedInterventions',
             'acknowledgedNotDelivered', 'subjectsWithIncompleteEvidence', 'gradesComputedNotVerified',
