@@ -42,11 +42,17 @@ Mathematics, Oral Communication), 3 terms.
 5. **Examinations:** ST1 30% / ST2 30% / Term Exam 40%. A fourth examination
    item onward carries no role.
 
-   **AMENDED.** The official SSHS E-Class Record assigns the split per subject.
-   Nine Academic subjects — six Field Experience, two STEM, one Work Immersion —
-   carry Term Exam at 100 with no summative tests. 30/30/40 is the common case,
-   not the rule. See `CLAUDE.md`, "The Examination role split is per subject,
-   not universal."
+   **AMENDED, then corrected 2026-09-12.** The official SSHS E-Class Record
+   assigns the split per subject. An earlier version of this note said nine
+   subjects carry Term Exam at 100 with no summative tests, folding Work
+   Immersion in with the TE-only group — wrong: Work Immersion has no
+   Examination component at all, not a TE-only one. Verified directly
+   against the seeded catalog: **eight subjects are TE-only** (six Field
+   Experience, two STEM), and a separate **nine subjects have no
+   Examination component at all** (Design and Innovation, Research 1,
+   Research 2, and six Work Immersion variants). 30/30/40 is the common
+   case, not the rule. See `CLAUDE.md`, "The Examination role split is per
+   subject, not universal," for the full corrected breakdown.
 
 6. **The DSS recommends; the Principal decides.** No intervention is ever
    created, approved, or closed automatically.
@@ -99,8 +105,32 @@ Mathematics, Oral Communication), 3 terms.
 ## OPERATIONAL RULES
 
 - **Always back up before any migration:**
-  `mysqldump -u root naggasican_dss > backup_$(date +%Y%m%d_%H%M).sql`
+  `mysqldump -u root naggasican_dss --result-file=backup_$(date +%Y%m%d_%H%M).sql`
   Data has been lost once already, and MySQL has crashed once.
+
+  **Use `--result-file=`, never `>`.** `mysqldump ... > backup.sql` lets the
+  shell decide the file's encoding, and PowerShell's `>` redirect defaults
+  to UTF-16LE — unlike Bash's `>`, which defaults to UTF-8. A backup taken
+  from PowerShell with `>` is silently unrestorable: `mysql < that_file.sql`
+  reads UTF-16 bytes as UTF-8/Latin1, every statement comes through
+  corrupted, and the import fails immediately on the first statement.
+  `--result-file=` has mysqldump write the file itself in the correct
+  encoding, sidestepping the shell entirely — it cannot be got wrong by
+  whoever is holding the terminal, which `>` demonstrably can be. This cost
+  a full day on 2026-09-11: a backup taken with PowerShell's `>` looked like
+  a normal ~1MB dump, restored with exit code 0 and no errors, and loaded
+  nothing — the database read as freshly truncated. Confirmed via `file` /
+  `xxd` on the actual bytes: `fffe` (UTF-16LE BOM) where every other backup
+  in this project starts with `-- MariaDB dump`.
+
+  **A restore is not verified by the absence of an error.** `mysql < file.sql`
+  exits 0 whether it loaded 240 grades or loaded nothing at all. Verify by
+  counting rows in the tables that matter (students, grades, and whatever
+  else the restore was supposed to bring back) against the number you expect
+  — never by the command finishing cleanly. This is the same principle
+  `dss:check-integrity` and `migrate:status` already apply to schema state;
+  it applies to a restore's actual data too.
+
 - Run `npm run build` after JS or Blade-with-JS changes. `php artisan
   view:clear` alone is not enough in this project.
 - Python is called via `exec()`, not Laravel's Process facade, because of a
@@ -110,16 +140,31 @@ Mathematics, Oral Communication), 3 terms.
 
 ---
 
-## THE CLIENT'S REAL STRUCTURE
+## THE CLIENT'S REAL STRUCTURE — NOT CONFIRMED ROSTER DATA
+
+**Correction, 2026-09-11.** Everything below — the section names Shakespeare
+and Curie, and the Grade 12 counts 22/39/20 — came from a screenshot and
+from sample files generated for testing, not from the school. The school
+has not sent a real roster. Treat this section as a working assumption for
+shaping the schema (curriculum split, two-grading-orders handling), never
+as confirmed enrollment data. `ECR_ALIGNMENT_WORK_ORDER.md` Part 7 is
+blocked on this exact gap — loading anything under these names now would
+be fabrication, not data entry.
 
 Grade 11, Strengthened SHS under DO 015: sections **Shakespeare** and
-**Curie**, 42 learners each, no specialization.
+**Curie**, 42 learners each, no specialization — as communicated, not
+verified.
 
 Grade 12, 2013 curriculum under DO 8: **ABM** 22, **HUMSS** 39, **STEM** 20.
-Academic Track only.
+Academic Track only — as communicated, not verified; Q2 in
+`ECR_ALIGNMENT_WORK_ORDER.md` (how many actual Grade 12 sections exist) is
+still open specifically because these are specialization counts, not
+section counts.
 
-165 learners, one school, two curricula, two grading orders at the same time.
-Molave is not one of these sections.
+165 learners, one school, two curricula, two grading orders at the same
+time — the SHAPE of the client's situation is real and drives the schema
+(the `curriculum` column, DO 8 vs DO 015 handling). The specific names and
+numbers above are not. Molave is not one of these sections.
 
 ---
 

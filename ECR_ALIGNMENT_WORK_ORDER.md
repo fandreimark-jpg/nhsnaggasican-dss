@@ -452,6 +452,18 @@ a student silently from an assessment upload. A learner in the file but not in
 the section, or in the section but not the file, is a finding the adviser
 must see before importing.
 
+**Known gap, as implemented in this pass — the file-to-section direction only.**
+`EcrReaderService`/`AssessmentUploadService` catch a learner who appears in the
+uploaded file but has no matching enrolled student (the same check the flat
+CSV/XLSX path already had). They do not catch the reverse: a student enrolled
+in the section who never appears anywhere in the ECR file at all. That
+direction matters more here than the one that's covered, because it fails
+silently downstream rather than loudly at upload time — the student simply
+has no grade for that subject/term, and Term Readiness, Submit Report, and the
+risk classifier all proceed as if nothing were missing rather than flagging an
+incomplete import. Not built in this pass. See CLAUDE.md's Known Limitations
+for the same note in the form future work should find it in.
+
 ## 5f — Weight cross-check
 
 Compare the weights the file carries against what the system resolves for that
