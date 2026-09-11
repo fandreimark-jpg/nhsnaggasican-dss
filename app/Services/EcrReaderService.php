@@ -259,6 +259,107 @@ class EcrReaderService
     }
 
     /**
+     * "Draft roster from an E-Class Record" feature — same "Last, First
+     * Middle" convention as splitName() above, one level further: of the
+     * words after the comma, the LAST word is the middle name and
+     * everything before it is the first name. This is a convention, not a
+     * rule (a compound middle name, or a first name that's genuinely the
+     * last word, both defeat it silently) — the admin reviews and corrects
+     * the exported CSV before import, this never writes to the database
+     * directly, and the export UI states the rule so there's something
+     * concrete to check against.
+     *
+     * @return array{0: string, 1: string, 2: string} [last_name, first_name, middle_name]
+     */
+    private function splitNameWithMiddle(string $fullName): array
+    {
+        if (!str_contains($fullName, ',')) {
+            return [$fullName, '', ''];
+        }
+
+        [$last, $remainder] = array_map('trim', explode(',', $fullName, 2));
+
+        if ($remainder === '') {
+            return [$last, '', ''];
+        }
+
+        $words = preg_split('/\s+/', $remainder);
+        if (count($words) === 1) {
+            return [$last, $words[0], ''];
+        }
+
+        $middle = array_pop($words);
+        return [$last, implode(' ', $words), $middle];
+    }
+
+    /**
+     * "Draft roster from an E-Class Record" feature — reads INPUT DATA's
+     * roster (male N/O, female R/S, rows 11-60) and produces rows in the
+     * exact shape Admin > Students > Import already accepts: lrn,
+     * last_name, first_name, middle_name, gender, birthdate. Exports a
+     * draft only; never touches the database. birthdate is always blank —
+     * it isn't in the ECR at all. A row with a name but no LRN still
+     * exports with lrn blank rather than an invented one; a row that is
+     * entirely empty (no LRN, no name) is skipped and counted, never
+     * emitted as a blank row.
+     *
+     * @return array{
+     *     rows: array<int, array{lrn: string, last_name: string, first_name: string, middle_name: string, gender: string, birthdate: string}>,
+     *     skipped_empty: int,
+     *     missing_lrn_count: int,
+     * }
+     */
+    public function extractDraftRoster(string $filePath): array
+    {
+        $spreadsheet = $this->load($filePath);
+        $inputData = $spreadsheet->getSheetByName('INPUT DATA');
+
+        if (!$inputData) {
+            return ['rows' => [], 'skipped_empty' => 0, 'missing_lrn_count' => 0];
+        }
+
+        $rows = [];
+        $skippedEmpty = 0;
+        $missingLrn = 0;
+
+        $blocks = [
+            'male'   => [self::COL_MALE_LRN, self::COL_MALE_NAME],
+            'female' => [self::COL_FEMALE_LRN, self::COL_FEMALE_NAME],
+        ];
+
+        foreach ($blocks as $gender => [$lrnCol, $nameCol]) {
+            for ($i = 0; $i < self::ROSTER_SLOTS; $i++) {
+                $inputRow = self::ROSTER_FIRST_ROW + $i;
+
+                $lrn = trim((string) $inputData->getCell($lrnCol . $inputRow)->getValue());
+                $name = trim((string) $inputData->getCell($nameCol . $inputRow)->getValue());
+
+                if ($lrn === '' && $name === '') {
+                    $skippedEmpty++;
+                    continue;
+                }
+
+                if ($lrn === '') {
+                    $missingLrn++;
+                }
+
+                [$last, $first, $middle] = $name !== '' ? $this->splitNameWithMiddle($name) : ['', '', ''];
+
+                $rows[] = [
+                    'lrn'         => $lrn,
+                    'last_name'   => $last,
+                    'first_name'  => $first,
+                    'middle_name' => $middle,
+                    'gender'      => $gender,
+                    'birthdate'   => '',
+                ];
+            }
+        }
+
+        return ['rows' => $rows, 'skipped_empty' => $skippedEmpty, 'missing_lrn_count' => $missingLrn];
+    }
+
+    /**
      * "ECR alignment" work order, PART 5c/5d — the template ships 10 WW,
      * 10 PT, and 3 EX slots whether or not a teacher used them. A column
      * whose header number exists but holds no score in ANY learner row is

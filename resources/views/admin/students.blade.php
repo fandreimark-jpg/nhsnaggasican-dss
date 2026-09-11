@@ -7,6 +7,40 @@
 
 @include('partials.import-result')
 
+{{-- "Draft roster from an E-Class Record" feature — shows once, right after
+     the upload, then clears itself the moment the CSV is downloaded (see
+     StudentController::downloadRosterExtraction()). Export only: nothing
+     here has created a student. --}}
+@if(session('roster_extraction'))
+    @php $rx = session('roster_extraction'); @endphp
+    <div class="bg-blue-50 border border-blue-200 text-blue-800 text-sm p-4 rounded-lg mb-4">
+        <p class="font-medium mb-1">
+            <i class="bi bi-file-earmark-spreadsheet"></i>
+            Draft roster from "{{ $rx['source_filename'] }}" — {{ count($rx['rows']) }} row(s) extracted.
+        </p>
+        <ul class="list-disc list-inside mb-2">
+            <li>{{ $rx['skipped_empty'] }} empty row(s) skipped (no LRN and no name).</li>
+            @if($rx['missing_lrn_count'] > 0)
+                <li class="font-medium">
+                    {{ $rx['missing_lrn_count'] }} row(s) have a name but no LRN — fill those in before importing;
+                    Import Students will reject a blank LRN by name, not silently skip it.
+                </li>
+            @else
+                <li>Every row has an LRN.</li>
+            @endif
+        </ul>
+        <p class="text-xs text-blue-700 mb-3">
+            Name split: everything before the comma is the last name; after it, the last word is taken as the
+            middle name and the rest as the first name. This is a convention, not a rule — check names with a
+            multi-word middle name (e.g. Spanish-style double surnames) before importing.
+        </p>
+        <a href="{{ route('admin.students.extract-roster.download') }}"
+           class="inline-flex items-center gap-1 bg-brand-700 text-white px-4 py-2 rounded-lg text-xs font-medium hover:bg-brand-800">
+            <i class="bi bi-download"></i> Download CSV
+        </a>
+    </div>
+@endif
+
 <div class="bg-white rounded-xl shadow-sm mb-0">
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 px-6 py-4 border-b">
         <div>
@@ -32,6 +66,10 @@
                     class="border rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 w-56">
                 <i class="bi bi-search absolute left-3 top-2.5 text-gray-400 text-sm"></i>
             </div>
+            <button type="button" onclick="openExtractRosterModal()"
+                class="bg-white border border-brand-700 text-brand-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-50 whitespace-nowrap">
+                <i class="bi bi-file-earmark-spreadsheet"></i> Extract Roster from E-Class Record
+            </button>
             <button type="button" onclick="openImportStudentsModal()"
                 class="bg-white border border-brand-700 text-brand-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-50 whitespace-nowrap">
                 <i class="bi bi-upload"></i> Import Students
@@ -388,6 +426,57 @@
                 <button type="submit"
                         class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium">
                     Upload & Import
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{{-- EXTRACT ROSTER FROM E-CLASS RECORD MODAL — export only, never creates a
+     student. See StudentController::extractRosterPreview(). --}}
+<div id="extractRosterModal"
+     class="{{ $errors->extractRoster->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
+    <div class="modal-box {{ $errors->extractRoster->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
+
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold text-gray-800">Extract Roster from E-Class Record</h3>
+            <button type="button" onclick="closeExtractRosterModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
+        </div>
+
+        @if($errors->extractRoster->any())
+            <div class="bg-red-100 text-red-700 text-sm p-3 rounded-lg mb-4">
+                <ul class="list-disc list-inside">
+                    @foreach($errors->extractRoster->all() as $error)
+                        <li>{{ $error }}</li>
+                    @endforeach
+                </ul>
+            </div>
+        @endif
+
+        <p class="text-sm text-gray-500 mb-2">
+            Upload an official SSHS E-Class Record (.xlsx). This reads the roster from its <strong>INPUT DATA</strong>
+            sheet and produces a downloadable draft CSV in the same shape Import Students already accepts —
+            it does <strong>not</strong> create any student.
+        </p>
+        <p class="text-xs text-gray-400 mb-4">
+            Name split: everything before the comma is the last name; after it, the last word becomes the middle
+            name and the rest becomes the first name. Gender comes from which block (male/female) the row is in.
+            Birthdate is always left blank — it isn't in the E-Class Record. Review the CSV before importing it.
+        </p>
+
+        <form method="POST" action="{{ route('admin.students.extract-roster') }}"
+              enctype="multipart/form-data" class="space-y-4">
+            @csrf
+
+            <input type="file" name="file" accept=".xlsx,.xls" required
+                   class="w-full border rounded-lg px-3 py-2 text-sm">
+
+            <div class="flex justify-end gap-3 pt-2">
+                <button type="button" onclick="closeExtractRosterModal()"
+                        class="px-4 py-2 text-sm text-gray-500">Cancel</button>
+                <button type="submit"
+                        class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium">
+                    Upload & Extract
                 </button>
             </div>
         </form>

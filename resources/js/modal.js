@@ -365,6 +365,15 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     // =============================================
+    // ADMIN — EXTRACT ROSTER FROM E-CLASS RECORD MODAL
+    // =============================================
+    if (document.getElementById("extractRosterModal")) {
+        window.openExtractRosterModal = () => window.showModal("extractRosterModal");
+        window.closeExtractRosterModal = () => window.hideModal("extractRosterModal");
+        window.bindModalOverlayClose("extractRosterModal");
+    }
+
+    // =============================================
     // ADMIN — TRACK MANAGEMENT MODAL
     // =============================================
     const trackForm = document.getElementById("trackForm");

@@ -189,6 +189,11 @@ Route::middleware(['auth', 'role:admin'])
         Route::post('/students/import', [StudentController::class, 'import'])->name('students.import');
         Route::put('/students/{id}',    [StudentController::class, 'update'])->name('students.update');
         Route::delete('/students/{id}', [StudentController::class, 'destroy'])->name('students.destroy');
+        // "Draft roster from an E-Class Record" feature — export only, never
+        // creates a student; the admin reviews/corrects the CSV and imports
+        // it through students.import above, unchanged.
+        Route::post('/students/extract-roster',          [StudentController::class, 'extractRosterPreview'])->name('students.extract-roster');
+        Route::get('/students/extract-roster/download',  [StudentController::class, 'downloadRosterExtraction'])->name('students.extract-roster.download');
 
         // Reports
         Route::get('/reports', [ReportController::class, 'index'])->name('reports');

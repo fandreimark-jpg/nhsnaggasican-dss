@@ -7,9 +7,12 @@ use App\Models\Student;
 use App\Models\Section;
 use App\Http\Controllers\Concerns\SummarizesImportFailures;
 use App\Imports\StudentsImport;
+use App\Services\EcrProfileDetector;
+use App\Services\EcrReaderService;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Helpers\LogActivity;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 
 /**
  * StudentController (Admin)
@@ -172,5 +175,105 @@ class StudentController extends Controller
 
         return redirect()->route('admin.students')
             ->with('success', 'Student removed successfully!');
+    }
+
+    /**
+     * "Draft roster from an E-Class Record" feature — reads the uploaded
+     * workbook's roster and stores a DRAFT csv (session only, never the
+     * database) for the admin to download, correct, and import through
+     * students.import above, unchanged. No student is created here.
+     *
+     * Reuses the existing ECR profile detector before reading anything —
+     * a file that isn't a real SSHS E-Class Record falls through with a
+     * clear message instead of EcrReaderService guessing at a shape that
+     * isn't there.
+     *
+     * Validated by EXTENSION, not `mimes:` (MIME-sniffing) — confirmed
+     * directly against the real official DepEd template
+     * (tests/Fixtures/SSHS-E-Class-Record-SY-2026-2027.xlsx) that its
+     * actual bytes sniff as `application/octet-stream`, not a recognised
+     * spreadsheet MIME type, so `mimes:xlsx,xls` would reject a genuine
+     * ECR file — exactly the file this feature exists to read. Content is
+     * verified for real immediately after by EcrProfileDetector, which
+     * checks actual workbook structure (sheet names, a marker cell, a
+     * version tag), not a guess from bytes — the extension check here only
+     * needs to keep out something that obviously isn't a spreadsheet at
+     * all.
+     */
+    public function extractRosterPreview(Request $request)
+    {
+        $request->validateWithBag('extractRoster', [
+            'file' => ['required', 'file', 'max:10240', function ($attribute, $value, $fail) {
+                if (!in_array(strtolower($value->getClientOriginalExtension()), ['xlsx', 'xls'], true)) {
+                    $fail('The file must be an .xlsx or .xls file.');
+                }
+            }],
+        ]);
+
+        $path = $request->file('file')->getRealPath();
+        $originalName = $request->file('file')->getClientOriginalName();
+
+        $version = (new EcrProfileDetector())->detect($path);
+        if ($version === null) {
+            return redirect()->route('admin.students')
+                ->with('error', "\"{$originalName}\" does not look like an SSHS E-Class Record — profile not detected. Nothing was extracted.");
+        }
+
+        $extraction = (new EcrReaderService())->extractDraftRoster($path);
+
+        if (empty($extraction['rows'])) {
+            return redirect()->route('admin.students')
+                ->with('error', "\"{$originalName}\" was recognised as an E-Class Record ({$version}), but INPUT DATA's roster is empty — nothing to extract.");
+        }
+
+        // Session only — this is a draft export, never written to the
+        // database. Cleared once downloaded (see downloadRosterExtraction()).
+        session([
+            'roster_extraction' => [
+                'rows'              => $extraction['rows'],
+                'source_filename'   => $originalName,
+                'skipped_empty'     => $extraction['skipped_empty'],
+                'missing_lrn_count' => $extraction['missing_lrn_count'],
+            ],
+        ]);
+
+        LogActivity::log(
+            action:      'extract_roster',
+            description: 'Extracted a draft roster (' . count($extraction['rows']) . ' row(s)) from E-Class Record: ' . $originalName,
+            tableName:   'students',
+            recordId:    null
+        );
+
+        return redirect()->route('admin.students')
+            ->with('success', 'Draft roster extracted from "' . $originalName . '" — review the summary below and download the CSV.');
+    }
+
+    /** Streams the CSV built from the last extractRosterPreview() result, then clears it. */
+    public function downloadRosterExtraction(): Response
+    {
+        $extraction = session('roster_extraction');
+        abort_if(!$extraction, 404, 'No draft roster extraction is pending — upload an E-Class Record first.');
+
+        $csv = "lrn,last_name,first_name,middle_name,gender,birthdate\n";
+        foreach ($extraction['rows'] as $row) {
+            $csv .= implode(',', array_map(function ($value) {
+                $value = (string) $value;
+                return str_contains($value, ',') || str_contains($value, '"')
+                    ? '"' . str_replace('"', '""', $value) . '"'
+                    : $value;
+            }, [
+                $row['lrn'], $row['last_name'], $row['first_name'],
+                $row['middle_name'], $row['gender'], $row['birthdate'],
+            ])) . "\n";
+        }
+
+        session()->forget('roster_extraction');
+
+        $downloadName = 'draft_roster_' . pathinfo($extraction['source_filename'], PATHINFO_FILENAME) . '.csv';
+
+        return response($csv, 200, [
+            'Content-Type'        => 'text/csv',
+            'Content-Disposition' => 'attachment; filename="' . $downloadName . '"',
+        ]);
     }
 }
