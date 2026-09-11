@@ -423,7 +423,7 @@
                              existed); 'system' is reserved for a future DSS-
                              generated source and would mean something else. --}}
                         @if(!$iv->isSystemGenerated())
-                            <span class="text-xs text-gray-300">Not applicable — recorded from in-term evidence, so there is no term-report baseline to compare against.</span>
+                            <span class="text-xs text-gray-300">Term-over-term comparison applies only to interventions raised from a submitted term report — this one was raised from in-term evidence.</span>
                         @else
                             <span class="text-xs text-gray-300">No term-report baseline is linked to this recommendation.</span>
                         @endif

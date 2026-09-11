@@ -1289,6 +1289,61 @@ a person decided. The DSS produces the recommendation text, the focus area,
 and the risk classification that inform the Principal's judgment. It does not
 create, approve, or close intervention records.
 
+## Term-over-Term Progress depends on the order a Principal acted in, permanently
+
+`Intervention::risk_result_id` is resolved once, at creation
+(`Principal\InterventionController::store()`/`storeBulk()`), by looking up a
+`RiskResult` for the same student/term/school year at that moment. It is
+never re-resolved afterward — no job, no term-submission hook, nothing
+revisits it. If no `RiskResult` existed yet when the intervention was
+recorded, the column stays null forever, and
+`ProgressMonitoringService::compare()` returns `'not_applicable'` for that
+intervention permanently, no matter how many term reports get submitted
+after the fact.
+
+This is deliberate, not an oversight — the same "captured once, never
+recomputed" choice this codebase already made for `focus_component`, and for
+the same reason: a value that could silently change out from under a
+Principal's original decision is worse than one that stays fixed to what the
+Principal actually had in front of them when they acted. Re-resolving
+`risk_result_id` at read time was considered and rejected: it would collapse
+the distinction `ProgressMonitoringService`'s `'not_applicable'` status was
+built to preserve (`Part 1: Term-over-Term Progress says why, not just "not
+yet"`) — "recorded from in-term evidence, never had a baseline" versus
+"recorded from a term report" — and would make the compared component
+silently drift the same way `focus_component` was deliberately frozen to
+prevent.
+
+**The consequence a Principal cannot see:** recording an intervention from
+in-term evidence *before* submitting that term's report costs term-over-term
+comparison for that intervention forever — not "not yet," permanently. The
+Interventions page's Term-over-Term Progress column says so plainly once you
+look ("Term-over-term comparison applies only to interventions raised from a
+submitted term report — this one was raised from in-term evidence"), but
+nothing says so at the moment of recording, before the choice is made.
+
+**A record-time warning in the record-intervention modal was considered and
+rejected.** The real pilot data settles it: every intervention ever recorded
+in this database — 29 of 29 as of the commit that built the honest-status
+column, 6 of 6 recorded the night this gap was found — has a null
+`risk_result_id`. Recording from in-term evidence, before that term's report
+exists, isn't the edge case such a note would be warning about; it is
+effectively the only case that happens in practice, since Submit Report is an
+end-of-term action and interventions get recorded during the term precisely
+because a Principal doesn't want to wait. A note that fires on ~100% of
+recordings stops functioning as information — it becomes wallpaper the
+Principal stops reading within the first few uses, and the genuinely rare
+case where waiting costs nothing gets buried in the same noise as the normal
+case. Worse, even carefully worded, it reads as a nudge toward delay, which
+fights the system's own stance that in-term evidence is already enough
+reason to act (see `InterventionController::store()`'s own docblock). If this
+is revisited, the one version that might be defensible is conditional, not
+constant — show it only when a `RiskResult` doesn't yet exist for this
+student/term but an earlier term this school year already has one, so it
+appears only for a Principal who has demonstrably had the option, not
+universally. Not built; flagged so a future session finds the reasoning
+already made rather than re-deriving it.
+
 ## A new specialization can silently fall out of the curriculum split
 
 `specializations.curriculum` (Part 3a) is nullable, deliberately — three live
