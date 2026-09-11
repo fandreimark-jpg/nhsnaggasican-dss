@@ -357,6 +357,19 @@ to check against and zero Grade 12 subjects exist in this database yet (Part
 7 is blocked on the school's answer to Q2) — this is a stopgap, and it is
 built to look like one.
 
+This "advisory, not an error" severity is the same distinction the Admin
+dashboard's Data Health panel draws with its red/yellow dots (`admin/
+dashboard.blade.php`) — red blocks the academic workflow (no adviser on a
+section, a learner in no roster), yellow is worth a look but nothing is
+actually broken (this keyword-match routing, accounts that have never
+logged in, a subject on the silent `subject_group` default). "UI legibility
+pass" item 4 put that distinction in the panel's own subtitle ("Yellow is
+worth reviewing but not blocking. Red blocks the academic workflow.") so a
+first-time reader isn't left guessing what yellow means from color
+convention alone. If the panel's wording changes, this paragraph should
+change with it — the two are one statement now, not two that happen to
+agree.
+
 ## Implementation — `curriculum` on `specializations` and `sections` ("ECR alignment" work order, PART 3a)
 
 `specializations` mixed two DepEd taxonomies on one row with nothing to tell
@@ -1407,6 +1420,33 @@ dedicated test pass on a clean database caught it. Checking an empty-state
 hint's actual rendered output requires testing against a fresh/empty
 database, not the pilot one — a populated table will never exercise this
 code path at all.
+
+## The biggest first-time-reader question is already answered twice, deliberately, not duplicated a third time
+
+"UI legibility pass" item 4 checked whether a first-time reader (a thesis
+panel, someone new to the system) could tell what each dashboard is showing
+them within about thirty seconds. The single most likely point of confusion
+— what's the difference between In-Term Status and Risk Level, the two
+numbers that look like they should be the same thing and aren't — is
+already solved, in two different but deliberate ways, and neither needed
+changing:
+
+- **Principal dashboard**: `partials/in-term-vs-risk-help.blade.php` is
+  included *always visible*, near the top of the page, not behind a
+  `<details>` — two short paragraphs, one per signal, shared with the
+  Adviser dashboard so the wording can never drift between them.
+- **Adviser dashboard**: the same partial is included, but behind a
+  collapsed `<details>` ("What's the difference between In-Term Status and
+  Risk Level?") — deliberately different from the Principal's
+  always-visible placement, because the Adviser dashboard leads with a
+  "What Needs Your Attention Now" action list and inline explanatory
+  sentences above its own status table; the terminology question is one
+  click away rather than competing with what the adviser is there to do.
+
+If a future legibility pass finds this question still unanswered somewhere,
+the fix is almost certainly wiring in the existing shared partial, not
+writing a third explanation — a fourth place explaining the same
+distinction is exactly the kind of drift this partial exists to prevent.
 
 ## Status colour is reserved for the four DSS states
 

@@ -62,7 +62,8 @@
     $totalChecks = 7;
     $allPassing = $passingCount === $totalChecks;
 @endphp
-<x-panel class="mb-4">
+<x-panel class="mb-4"
+    subtitle="Yellow is worth reviewing but not blocking. Red blocks the academic workflow.">
     <x-slot:title>
         Data Health
         <span class="ml-1 font-normal {{ $allPassing ? 'text-status-ontrack' : 'text-status-risk' }}">— {{ $passingCount }} of {{ $totalChecks }} checks passing</span>

@@ -126,6 +126,12 @@
      the current term. A term with no evidence yet renders as an empty
      (all-grey) bar, not a hidden one — absence is itself informative here. --}}
 <x-panel title="Term-over-Term Trend" subtitle="On Track / Needs Attention / At Risk, across every subject, per term." class="mb-4">
+    {{-- "UI legibility pass" item 4 — the per-term numbers below are
+         abbreviated (OT/NA/AR) to fit three counts on one line; the
+         legend states the mapping once, in words, rather than relying on
+         the reader carrying it over from the stacked bar's colours or
+         this panel's own subtitle. --}}
+    <p class="text-[11px] text-gray-400 mb-2">OT = On Track, NA = Needs Attention, AR = At Risk</p>
     <div class="grid grid-cols-3 gap-3">
         @foreach($inTermStatusTrend as $t)
         <div>
@@ -136,7 +142,7 @@
                 @if($t['needsAttention'] > 0)<span class="bg-status-attention" style="flex-grow: {{ $t['needsAttention'] }}" title="Needs Attention: {{ $t['needsAttention'] }}"></span>@endif
                 @if($t['atRisk'] > 0)<span class="bg-status-risk" style="flex-grow: {{ $t['atRisk'] }}" title="At Risk: {{ $t['atRisk'] }}"></span>@endif
             </div>
-            <p class="text-[11px] text-gray-400 mt-1 tabular-nums">{{ $t['onTrack'] }} &middot; {{ $t['needsAttention'] }} &middot; {{ $t['atRisk'] }}</p>
+            <p class="text-[11px] text-gray-400 mt-1 tabular-nums">{{ $t['onTrack'] }} OT &middot; {{ $t['needsAttention'] }} NA &middot; {{ $t['atRisk'] }} AR</p>
             @else
             <div class="h-4 rounded-full bg-gray-100"></div>
             <p class="text-[11px] text-gray-300 mt-1">No evidence yet</p>

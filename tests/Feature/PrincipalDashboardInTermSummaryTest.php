@@ -199,6 +199,30 @@ class PrincipalDashboardInTermSummaryTest extends TestCase
         $this->assertSame($byTerm[$summary['inTermTerm']]['onTrack'], $summary['inTermOnTrack']);
     }
 
+    /**
+     * "UI legibility pass" item 4 — the Term-over-Term Trend panel's
+     * per-term counts are abbreviated (OT/NA/AR) to fit on one line; a
+     * legend stating the mapping in words must appear once on the panel
+     * so a first-time reader isn't left inferring it from the stacked
+     * bar's colours or the panel's own subtitle.
+     */
+    public function test_term_over_term_trend_shows_a_legend_and_labels_its_counts(): void
+    {
+        $principal = User::factory()->principal()->create();
+        $section = Section::factory()->create(['grade_level' => 11, 'school_year' => '2026-2027']);
+        $subject = Subject::factory()->create(['grade_level' => 11, 'type' => 'core']);
+        $student = Student::factory()->create(['section_id' => $section->id]);
+        // All three components well above target -> On Track (0 below).
+        $this->score($section, $subject, $student, 'written_work', 90);
+        $this->score($section, $subject, $student, 'performance_task', 90);
+        $this->score($section, $subject, $student, 'examination', 90);
+
+        $response = $this->actingAs($principal)->get('/principal/dashboard');
+
+        $response->assertSee('OT = On Track, NA = Needs Attention, AR = At Risk');
+        $response->assertSee('1 OT', false);
+    }
+
     public function test_in_term_summary_never_appears_under_a_risk_heading(): void
     {
         $principal = User::factory()->principal()->create();

@@ -67,6 +67,22 @@ class AdminDataHealthChecksTest extends TestCase
         $response->assertSee('No duplicate LRNs found');
     }
 
+    /**
+     * "UI legibility pass" item 4 — the red/yellow/green dots next to each
+     * check had no on-panel legend; yellow's meaning (advisory, not
+     * blocking) previously lived only in CLAUDE.md. Yellow stated first,
+     * per the same reasoning: it's the half nobody can guess by convention.
+     */
+    public function test_data_health_panel_states_what_yellow_and_red_mean(): void
+    {
+        $admin = User::factory()->admin()->create();
+
+        $response = $this->actingAs($admin)->get('/admin/dashboard');
+
+        $response->assertOk();
+        $response->assertSee('Yellow is worth reviewing but not blocking. Red blocks the academic workflow.');
+    }
+
     public function test_section_without_an_adviser_is_detected(): void
     {
         Section::factory()->create(['adviser_id' => null, 'name' => 'NoAdviserSection']);
