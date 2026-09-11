@@ -256,15 +256,25 @@ rather than treating it like any other subject.
 Where the catalog and Table 10 disagree, report it. Do not reconcile it
 silently. Two authorities disagreeing is a finding.
 
-## The client's real structure
+## The client's real structure — NOT CONFIRMED ROSTER DATA
+
+**Correction, 2026-09-11.** The section names and counts below came from a
+screenshot and from sample files generated for testing — not from the
+school, which has not sent a real roster. The two-curricula/two-grading-
+order SHAPE this describes is real and is what the `curriculum` column and
+DO 8/DO 015 split exist to handle; the specific names Shakespeare/Curie and
+counts 22/39/20 are not confirmed and must not be treated as real
+enrollment data anywhere (a data-loading pass, a report, a paper claim).
+See `HANDOFF.md`'s matching correction and `ECR_ALIGNMENT_WORK_ORDER.md`
+Part 7, blocked on the real roster for exactly this reason.
 
 Grade 11 runs the Strengthened SHS curriculum under DO 015: sections
 **Shakespeare** and **Curie**, 42 learners each, no specialization, because
-SSHS has no strands.
+SSHS has no strands — as communicated, not verified.
 
 Grade 12 remains on the 2013 curriculum under DO 8: **ABM** 22, **HUMSS** 39,
 **STEM** 20. Academic Track only — no TVL, Sports, or Arts and Design, so
-three of DO 8's five weighting columns apply.
+three of DO 8's five weighting columns apply — as communicated, not verified.
 
 165 learners, one school, two curricula, two grading orders, running at the
 same time. The pilot section Molave is not one of these and carries
@@ -370,48 +380,103 @@ convention alone. If the panel's wording changes, this paragraph should
 change with it — the two are one statement now, not two that happen to
 agree.
 
-## mimes: MIME-sniffing rejects the official DepEd ECR
+## The five do8_* rows must never be human-selectable — and, until commit 39c64d2, one upload path silently accepted one anyway
+
+The five `do8_*` `subject_group_weights` rows above are computed by
+`GradingEngine::resolveDo8GroupKey()` from a section's track and a
+subject's type — a human never picks one directly, and a subject's own
+`subject_group` column isn't even read for the `do8_2015` scheme. Selecting
+one on a Grade 11 SSHS subject would put DO 8 weights on a DO 015 subject,
+silently.
+
+`Admin\SubjectController::availableSubjectGroups()` (the Admin subject
+form's dropdown and validation) and `SubjectsImport::validSubjectGroups()`
+(the bulk-import validation) both queried `subject_group_weights` filtered
+only to exclude the scheme-wide `all` fallback bucket — neither scoped to
+`scheme = 'do015_2026'`, so both listed all five `do8_*` rows as valid
+choices. The dropdown bug was visible (an admin could see and pick a wrong
+option on screen). **The import bug was not**: confirmed directly, before
+the fix, that `Validator::make(['subject_group' => 'do8_core'], ['subject_group'
+=> Rule::in($this->validSubjectGroups())])` passed — a `do8_core` value
+typed into an uploaded file's `subject_group` column would have been
+silently accepted and created a subject silently mis-weighted, with
+nothing on screen to catch it. Fixed in `39c64d2` by scoping both queries
+to `scheme = 'do015_2026'`; regression tests assert no `do8_` slug appears
+in the form's rendered HTML or view data, and that a `do8_core` value is
+rejected both from the manual form and from an uploaded file.
+
+## mimes: MIME-sniffing rejects the official DepEd ECR — fixed everywhere it appeared
 
 The real official SSHS E-Class Record's actual bytes sniff as
 `application/octet-stream`, not a recognised spreadsheet MIME type —
-confirmed directly (`mime_content_type()` on `tests/Fixtures/SSHS-E-Class-
-Record-SY-2026-2027.xlsx`), and via `Validator::make(['file' => <the real
-fixture>], ['file' => 'mimes:xlsx,xls'])->passes()` returning `false`.
-Laravel's `mimes:` rule checks the file's actual sniffed content against an
-extension-to-MIME map, not the extension alone, so `mimes:xlsx,xls,csv,txt`
-rejects the exact file the upload exists to accept — found first in
-`Adviser\AssessmentController::detect()` (`app/Http/Controllers/Adviser/
-AssessmentController.php`, the validation rule that used to sit at line
-239), the shipped Part 5 upload path every adviser actually uses. Fixed by
-validating the **extension** instead (`$file->getClientOriginalExtension()`
-against an allow-list), with real content verified immediately after by
-`EcrProfileDetector` (for a genuine ECR) or `AssessmentColumnClassifier`'s
-own header parsing (for the flat CSV/XLSX path) — the extension check only
-needs to keep out something that obviously isn't one of the accepted file
-types at all; it was never the thing actually guaranteeing the file's real
-shape.
+confirmed directly (`mime_content_type()` and `file --mime-type` on
+`tests/Fixtures/SSHS-E-Class-Record-SY-2026-2027.xlsx`, both agree; the file
+genuinely starts with a valid `PK\x03\x04` zip signature, so this is a
+libmagic recognition gap, not a corrupt file), and via
+`Validator::make(['file' => <the real fixture>], ['file' =>
+'mimes:xlsx,xls'])->passes()` returning `false`. Laravel's `mimes:` rule
+checks the file's actual sniffed content against an extension-to-MIME map,
+not the extension alone, so `mimes:xlsx,xls,csv,txt` rejected the exact file
+the upload exists to accept.
+
+**Found first** in `Adviser\AssessmentController::detect()` — the shipped
+Part 5 upload path every adviser actually uses — proved at the real HTTP
+layer before being fixed: a test posting the real fixture to `/adviser/
+assessments/detect` failed with the literal browser-facing message *"The
+file field must be a file of type: xlsx, xls, csv, txt"* against the
+unfixed code, then reached real controller processing after.
+
+**The standing rule now: validate by EXTENSION, never by `mimes:`
+(content-sniffing), for any spreadsheet/CSV upload.** Real content is
+verified immediately after by whatever actually reads the file —
+`EcrProfileDetector` for a genuine ECR, `AssessmentColumnClassifier`'s own
+header parsing for the flat path, or a Maatwebsite import's own row
+validation — the extension check only ever needs to keep out something
+that obviously isn't one of the accepted file types at all; `mimes:` was
+never the thing actually guaranteeing a file's real shape, only an
+accident of whether libmagic happened to recognise it.
+
+One place this now lives: `App\Http\Controllers\Concerns\
+ValidatesSpreadsheetUpload::spreadsheetFileRule(array $extensions =
+['xlsx','xls','csv','txt'], int $maxKb = 2048)`. Every route that used to
+carry its own `mimes:` copy uses it instead — `Adviser\
+AssessmentController::detect()`, `Admin\StudentController::import()` and
+`::extractRosterPreview()`, `Admin\SectionController::import()`, `Admin\
+SpecializationController::import()`, `Admin\SubjectController::import()`,
+`Admin\TrackController::import()`, and `Adviser\GradeController::
+importGrades()` — eight call sites that had each carried an independent
+copy of the same rule. Do not add a ninth; extend the trait instead.
 
 **Why this survived through all of Part 5 undetected**: every ECR test
 written for Part 5 called `EcrReaderService`/`EcrProfileDetector` directly
 or went through `dss:ecr-dry-run` — none of them ever pushed the real
-checked-in fixture through the HTTP route and its `mimes:` validation layer.
+checked-in fixture through an HTTP route and its `mimes:` validation layer.
 The bug lived entirely in a layer nothing was testing. `tests/Feature/
-EcrHttpUploadValidationTest.php` closes exactly that gap: it posts the real
-fixture to `/adviser/assessments/detect` over HTTP, the same request a real
-adviser's browser sends, specifically so a future validation-rule change on
-this route can't reintroduce the same class of bug without a test noticing.
+EcrHttpUploadValidationTest.php` and `tests/Feature/
+MimesFixSixMoreRoutesTest.php` close that gap for all eight routes — real
+HTTP POSTs with a real file that reproduces the actual sniffing bug, not a
+service-layer or CLI call, specifically so a future validation-rule change
+on any of these routes can't reintroduce the same class of bug without a
+test noticing.
 
-**The same `mimes:xlsx,xls,csv,txt` rule appears in six more places**,
-found by grepping rather than assuming the ECR route was the only one:
-`Admin\SectionController` (114), `Admin\SpecializationController` (69),
-`Admin\SubjectController` (121), `Admin\TrackController` (69), `Adviser\
-GradeController` (156), and `Admin\StudentController` (98 — the existing
-Import Students route the "draft roster" CSV feeds into). None of these
-are known to have actually failed against a real file the way the ECR
-route did — their imports are typically admin-authored spreadsheets, not
-exports from whatever tool produced the official DepEd template — but the
-same latent risk exists in all six and none has been changed. Not fixed in
-this pass; flagged so it isn't rediscovered by accident.
+**A separate, unrelated gap this surfaced**: the six generic importers
+(Sections/Specializations/Subjects/Tracks/Students/Grades) call
+`Excel::import()` without `setReadDataOnly(true)` — unlike `EcrReaderService`
+and `EcrProfileDetector`, which learned this lesson in Part 5 (see "The
+subject catalog" section above: ~42s and heavy memory for this workbook
+without the flag, ~2s with it). Pushing the real 434KB ECR fixture through
+one of these six as a test upload exhausted PHP's memory limit entirely —
+not a validation failure, a fatal error, during Maatwebsite's own row
+reading, well after the `mimes:` fix had already let the file through
+correctly. These six importers were never built to expect a file this
+heavy (nobody uploads a full E-Class Record to "Import Tracks"), so this
+isn't urgent, but it is real and unfixed: a genuinely large or complex
+spreadsheet uploaded to any of these six could exhaust memory the same
+way. `tests/Feature/MimesFixSixMoreRoutesTest.php` uses a 64KB truncated
+copy of the same real fixture instead (`tests/Fixtures/
+octet-stream-sniffing-truncated.xlsx` — still genuinely sniffs as
+`application/octet-stream`, confirmed the same way) specifically to prove
+the `mimes:` fix without hitting this separate, pre-existing memory gap.
 
 ## Implementation — `curriculum` on `specializations` and `sections` ("ECR alignment" work order, PART 3a)
 
@@ -463,6 +528,30 @@ luck and must not be trusted to stay true**: `ECR_ALIGNMENT_WORK_ORDER.md`
 Part 7 (loading Shakespeare, Curie, ABM, HUMSS, STEM) now requires
 `curriculum` to be set explicitly on every section it creates, rather than
 relying on this same inference a second time.
+
+**Two real migration bugs surfaced and were caught during development of
+this part** — both against a fresh test environment, before either ever
+reached a committed migration, never by editing one that had already run:
+
+1. MySQL refuses to drop `specializations_track_id_code_unique` while it's
+   the only index satisfying the `specializations.track_id` foreign key
+   (which needs SOME index with `track_id` as its leftmost column at all
+   times). Fixed by creating the replacement `(track_id, code,
+   curriculum)` index first, then dropping the old one — see
+   `2026_09_10_000004_add_curriculum_to_specializations_table.php`'s own
+   `up()`, which does exactly this in that order.
+2. The original migration made `curriculum` `NOT NULL`, which broke three
+   live creation paths that have no curriculum concept in their form or
+   file format at all (`Admin\SpecializationController::store()`, and the
+   `SpecializationsImport`/`TracksImport` bulk-import classes) — they'd
+   have to fabricate a value to satisfy the constraint. Fixed by leaving
+   the column nullable, which is also the correct semantic choice (see
+   "A new specialization can silently fall out of the curriculum split"
+   below) — not merely a workaround for the bug.
+
+Neither bug reached a committed migration; both were caught locally against
+a fresh SQLite/test environment and fixed before commit `fc473c4`, via
+rollback, exactly as this file's own database-safety rules require.
 
 ---
 
@@ -1178,9 +1267,32 @@ silently.
 ## The Examination role split is per subject, not universal
 
 ST1 30 / ST2 30 / TE 40 is the common case, not the rule. The official SSHS
-E-Class Record catalog assigns the split per subject, and nine subjects — all
-of them in the Academic Track — carry Term Exam at 100 with no summative tests
-at all: six in Field Experience, two in STEM, one Work Immersion.
+E-Class Record catalog assigns the split per subject.
+
+**Corrected count** (an earlier version of this note said nine TE-only
+subjects and separately implied eight with no Examination component at
+all — both wrong, and the same error: Work Immersion for Academic Track
+was being counted in the TE-only group when it actually has no
+Examination component at all). Verified directly against the seeded
+catalog via `DepedSubjectCatalog::rowsFromCsv()`, not assumed from either
+count:
+
+- **Eight subjects are TE-only** — Term Exam at 100 with no summative
+  tests, but an Examination component still exists: Arts Apprenticeship
+  (Music, Theater Arts, Traditional Cultural Expressions, Visual Arts),
+  Field Exposure (Off Campus), In-Campus Field Exposure for Sports (six
+  Field Experience cluster rows), plus Advanced Mathematics and Basic
+  Calculus (two STEM rows).
+- **Nine subjects have no Examination component at all** (`ex_weight`
+  null, not just `st1_share`/`st2_share` null) — Design and Innovation,
+  Research 1, Research 2, Work Immersion for Academic Track, and the five
+  Work Immersion for Tech-Pro Track variants (320h, 540h/1 term, 640h/1
+  term, 540h/2 terms, 640h/2 terms). Two further rows, one per track's
+  `OTHER ELECTIVE / SPECIAL CURRICULAR PROGRAM` placeholder, also carry
+  `ex_weight` null in the catalog — these are structurally different
+  (the teacher-typed weight comes from `INPUT DATA` at import time, not
+  the catalog row) and are counted separately, not folded into either
+  group above.
 
 A subject whose catalog row has a null `st1_share` must not expect ST1 or ST2
 evidence. This is the same distinction a null `ex_weight` already makes, one
@@ -1266,18 +1378,104 @@ The same over-counting would show up in `ReportController::submit()`'s
 `totalExpected` check (blocking Submit Report the same way) and in
 `getSectionSubjects()`'s duplicate copy of this same query.
 
-**The fix (not built in this pass):** a `section_subject` pivot table
-recording exactly which electives a given section has chosen for the
-current school year, with `Subject::forSection()`,
-`AcademicTerm::completionStatus()`, `ReportController::getSectionSubjects()`,
-the grade-encoding screen, and the subjects import format all updated
-together to read from it instead of "every matching elective." This
-needs the user's decision on how a section's electives get assigned
-(picked when the section is created? per-student? via a new admin
-screen?) before it can be built, which is why it is deliberately out
-of scope here — see
-`tests/Feature/ElectiveClusterLimitationTest.php` (marked skipped)
-for the assertion this will need to satisfy once the pivot exists.
+**BUILT, "ECR alignment" work order PART 6 — mechanism only, still blocked
+on Q1 for actually assigning any electives.** A `section_subject` pivot
+table now records exactly which electives a given section has chosen for
+a school year, and `Subject::forSection()`, `AcademicTerm::
+completionStatus()`, `TermReadinessService`, `Adviser\ReportController`,
+and `Adviser\DashboardController` all read from it instead of "every
+matching elective" — see the two sections below for how. The pivot ships
+empty; there is still nothing to assign until the school answers Q1 and
+sends a real roster.
+`tests/Feature/ElectiveClusterLimitationTest.php`, previously marked
+skipped specifically to document the assertion this pivot would need to
+satisfy, is now un-skipped and passing for real — the historical gap it
+documented no longer exists.
+
+**Why `section_subject`, not `student_subject`: a choice made under
+uncertainty, not a finding.** Q1 (does every learner in a Grade 11 section
+take the same electives, or does each learner choose?) is still open — the
+school hasn't answered it. `section_subject` was chosen as the starting
+build specifically because it is the smaller, extensible option — not
+because anything observed about the school suggests it works that way.
+If Q1's answer turns out to be "per learner," `section_subject` →
+`student_subject` is an addition on top of what exists (a section-level
+pivot narrows `forSection()`'s candidate set; a student-level pivot narrows
+it further, per student), not a reversal of a wrong guess. Recorded here in
+exactly these terms so a panel question about why this shape was picked has
+an honest answer — a decision made under uncertainty, not a claim that this
+is how the school actually assigns electives.
+
+## A zero from Subject::forSection() means two different things, and only one of them is "complete"
+
+`Subject::forSection()` returning zero electives for a section is
+ambiguous on its own — it could mean either of two genuinely different
+situations, and collapsing them into one "zero" was exactly the bug PART
+6 exists to fix, one level up from where it started:
+
+- **Correct-zero**: this section's track has no elective subjects at all
+  to offer. There is nothing to assign, so zero `section_subject` rows is
+  the right, final answer — the same way this pilot database reads zero
+  today, because zero elective `Subject` rows exist in it at all.
+- **Unconfigured-zero**: this section's track *does* have electives
+  available, but nobody has assigned any of them to this section yet.
+  Zero `section_subject` rows here is not an answer, it's an absence of
+  one — every section will sit in exactly this state until the school
+  uploads a real roster and its elective choices, so this is the ordinary
+  condition for a genuinely real section, not an edge case.
+
+`SectionElectiveStatus::isFullyConfigured(Section $section): bool`
+(`app/Services/SectionElectiveStatus.php`) is the one place this
+distinction is drawn — `k12_2013` sections are always considered
+configured (their specialization-based elective match was never broken,
+see above), an `sshs` section with no electives available in its track is
+correct-zero, and an `sshs` section with electives available but zero
+`section_subject` rows is unconfigured-zero. Every consumer of "how many
+grades should exist" (below) treats unconfigured-zero as **NOT READY** —
+never as a core-only "complete," which would silently repeat the original
+bug at the completion-checking layer instead of the subject-listing layer.
+A future session reading "this section shows 0 expected electives" should
+check which of these two states it actually is before assuming either one.
+
+## "How many grades should exist" is one shared computation now, not four independent copies
+
+Before PART 6, four call sites each computed `students->count() *
+subjects->count()` independently: `AcademicTerm::completionStatus()`,
+`TermReadinessService::assessmentEvidenceStatus()`, `Adviser\
+ReportController::show()`/`submit()` (which also carried its own
+byte-identical THIRD copy of `Subject::forSection()`'s query in a private
+`getSectionSubjects()` method — removed, not updated in parallel; it now
+calls `Subject::forSection()` directly), and `Adviser\
+DashboardController::index()` — this last one is the consumer a
+first-draft list of "the four consumers" missed, found only by grepping
+for every `forSection()`/`totalExpected` call site rather than trusting
+the list. All four, plus the view template `adviser/dashboard.blade.php`
+itself (which had grown a FIFTH copy of the same arithmetic, recomputing
+`$isComplete` from a flat per-term figure passed in from the controller),
+now call `SectionElectiveStatus::expectedSubjectsForTerm()`/
+`expectedGradeCount()` — one shared source of truth, not four (or five)
+parallel copies kept in sync by hand. A change to what "expected" means
+happens once, the same reason `InTermStatusService::
+overallStatusForSection()` and `Intervention::scopeUndecided()` exist
+above.
+
+## ECR roster reconciliation only catches one direction
+
+`EcrReaderService`/`AssessmentUploadService` (ECR alignment work order,
+PART 5e) report a learner who appears in an uploaded E-Class Record but has
+no matching enrolled student — the same check the flat CSV/XLSX path
+already had. They do **not** report the reverse: a student enrolled in the
+section who never appears anywhere in the uploaded file at all.
+
+This is the direction that matters more, because it fails silently rather
+than loudly. A learner missing from the file simply ends up with no grade
+for that subject and term, and nothing at upload time says so — Term
+Readiness, Submit Report, and the risk classifier all proceed as though the
+student's record for that subject were complete rather than absent, the
+same "missing means incomplete, not zero" failure mode design decision 1
+above exists to prevent one level down (a subject with zero scored items),
+just one level up (a student with zero rows at all). Not built in this
+pass; see `ECR_ALIGNMENT_WORK_ORDER.md` Part 5e for the full note.
 
 ## Attendance is not part of any grade
 
