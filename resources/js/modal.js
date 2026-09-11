@@ -347,6 +347,15 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     // =============================================
+    // ADMIN — ADD STUDENTS CHOOSER MODAL
+    // =============================================
+    if (document.getElementById("addStudentsChooserModal")) {
+        window.openAddStudentsChooserModal = () => window.showModal("addStudentsChooserModal");
+        window.closeAddStudentsChooserModal = () => window.hideModal("addStudentsChooserModal");
+        window.bindModalOverlayClose("addStudentsChooserModal");
+    }
+
+    // =============================================
     // ADMIN — ADD STUDENT MODAL
     // =============================================
     if (document.getElementById("addStudentModal")) {

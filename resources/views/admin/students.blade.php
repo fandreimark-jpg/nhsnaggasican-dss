@@ -14,6 +14,9 @@
 @if(session('roster_extraction'))
     @php $rx = session('roster_extraction'); @endphp
     <div class="bg-blue-50 border border-blue-200 text-blue-800 text-sm p-4 rounded-lg mb-4">
+        <p class="text-xs font-medium text-blue-600 mb-1">
+            <i class="bi bi-2-circle-fill"></i> Step 2 of 3 — Correct this draft, then Import Students below.
+        </p>
         <p class="font-medium mb-1">
             <i class="bi bi-file-earmark-spreadsheet"></i>
             Draft roster from "{{ $rx['source_filename'] }}" — {{ count($rx['rows']) }} row(s) extracted.
@@ -66,17 +69,14 @@
                     class="border rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 w-56">
                 <i class="bi bi-search absolute left-3 top-2.5 text-gray-400 text-sm"></i>
             </div>
-            <button type="button" onclick="openExtractRosterModal()"
-                class="bg-white border border-brand-700 text-brand-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-50 whitespace-nowrap">
-                <i class="bi bi-file-earmark-spreadsheet"></i> Extract Roster from E-Class Record
-            </button>
-            <button type="button" onclick="openImportStudentsModal()"
-                class="bg-white border border-brand-700 text-brand-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-50 whitespace-nowrap">
-                <i class="bi bi-upload"></i> Import Students
-            </button>
-            <button type="button" onclick="openAddStudentModal()"
+            {{-- "One entry point" pass — a single primary action opening a
+                 chooser, instead of three equal-weight buttons that hid the
+                 real order (extract is step 1 of a flow; import is step 3;
+                 neither can do the other's job). See addStudentsChooserModal
+                 below and CLAUDE.md's note on this restructure. --}}
+            <button type="button" onclick="openAddStudentsChooserModal()"
                 class="bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-800 whitespace-nowrap">
-                <i class="bi bi-plus-lg"></i> Add Student
+                <i class="bi bi-plus-lg"></i> Add Students
             </button>
         </div>
     </div>
@@ -275,10 +275,56 @@
     </div>
 </div>
 
+{{-- ADD STUDENTS CHOOSER MODAL — "one entry point" pass. The single door;
+     each option below opens one of the three existing, unchanged modals.
+     No new capability, no capability removed — this only changes how an
+     admin gets to the one they already need. --}}
+<div id="addStudentsChooserModal"
+     class="hidden opacity-0 fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
+    <div class="modal-box scale-95 opacity-0 bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold text-gray-800">Add Students</h3>
+            <button type="button" onclick="closeAddStudentsChooserModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
+        </div>
+
+        <div class="space-y-3">
+            <button type="button" onclick="closeAddStudentsChooserModal(); openExtractRosterModal();"
+                class="w-full text-left border rounded-lg p-4 hover:bg-gray-50 hover:border-brand-300 transition-colors">
+                <p class="font-medium text-gray-800">
+                    <i class="bi bi-file-earmark-spreadsheet text-brand-700"></i> From an E-Class Record
+                </p>
+                <p class="text-xs text-gray-500 mt-1.5">
+                    <span class="font-medium text-gray-600">1. Extract</span> the roster
+                    <i class="bi bi-arrow-right mx-1 text-gray-300"></i>
+                    <span class="font-medium text-gray-600">2. Correct</span> the draft
+                    <i class="bi bi-arrow-right mx-1 text-gray-300"></i>
+                    <span class="font-medium text-gray-600">3. Import</span> it below
+                </p>
+            </button>
+
+            <button type="button" onclick="closeAddStudentsChooserModal(); openImportStudentsModal();"
+                class="w-full text-left border rounded-lg p-4 hover:bg-gray-50 hover:border-brand-300 transition-colors">
+                <p class="font-medium text-gray-800">
+                    <i class="bi bi-upload text-brand-700"></i> I already have a CSV
+                </p>
+                <p class="text-xs text-gray-500 mt-1.5">Import a roster file directly — lrn, last_name, first_name, middle_name, gender, birthdate.</p>
+            </button>
+
+            <button type="button" onclick="closeAddStudentsChooserModal(); openAddStudentModal();"
+                class="w-full text-left border rounded-lg p-4 hover:bg-gray-50 hover:border-brand-300 transition-colors">
+                <p class="font-medium text-gray-800">
+                    <i class="bi bi-person-plus text-brand-700"></i> One at a time
+                </p>
+                <p class="text-xs text-gray-500 mt-1.5">Add a single student by hand.</p>
+            </button>
+        </div>
+    </div>
+</div>
+
 {{-- ADD STUDENT MODAL --}}
 <div id="addStudentModal"
-     class="{{ $errors->any() && !$errors->import->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box {{ $errors->any() && !$errors->import->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
+     class="{{ $errors->any() && !$errors->import->any() && !$errors->extractRoster->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
+    <div class="modal-box {{ $errors->any() && !$errors->import->any() && !$errors->extractRoster->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
 
         <div class="flex justify-between items-center mb-4">
             <h3 class="text-lg font-semibold text-gray-800">Add Student</h3>
@@ -286,7 +332,7 @@
                     aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
-        @if($errors->any() && !$errors->import->any())
+        @if($errors->any() && !$errors->import->any() && !$errors->extractRoster->any())
             <div class="bg-red-100 text-red-700 text-sm p-3 rounded-lg mb-4">
                 <ul class="list-disc list-inside">
                     @foreach($errors->all() as $error)
@@ -438,10 +484,13 @@
      class="{{ $errors->extractRoster->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
     <div class="modal-box {{ $errors->extractRoster->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
 
-        <div class="flex justify-between items-center mb-4">
+        <div class="flex justify-between items-center mb-1">
             <h3 class="text-lg font-semibold text-gray-800">Extract Roster from E-Class Record</h3>
             <button type="button" onclick="closeExtractRosterModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
+        <p class="text-xs font-medium text-brand-700 mb-3">
+            <i class="bi bi-1-circle-fill"></i> Step 1 of 3 — Extract, then correct the CSV, then Import Students.
+        </p>
 
         @if($errors->extractRoster->any())
             <div class="bg-red-100 text-red-700 text-sm p-3 rounded-lg mb-4">
