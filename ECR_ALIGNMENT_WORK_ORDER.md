@@ -363,9 +363,11 @@ subjects. Two outcomes result, both still real:
   a grade for all of them from every student and the term can never
   complete.
 
-The pilot hides this because Molave carries `specialization = ABM`, a value
-that should not exist on an SSHS section at all — and because zero elective
-subjects exist in this database at all as of Part 2/3.
+The pilot hid this, as of Part 2/3, because Molave carried `specialization
+= ABM`, a value that should not exist on an SSHS section at all — and
+because zero elective subjects exist in this database at all as of Part
+2/3. (Corrected 2026-09-11, after Part 6: `specialization_id` on Molave is
+now `NULL`. See `CLAUDE.md`'s "client's real structure" section.)
 
 An SSHS section needs its own resolution path, and that path is where the
 elective assignment from Part 6 will be read. See `CLAUDE.md`, "Elective

@@ -130,7 +130,9 @@ rather than verified enrollment data, wherever they appear.
 end-to-end, use the pilot section **Molave** instead (Grade 11, 40 real
 learners, General Mathematics and Oral Communication, three real terms of
 assessment evidence) — this is real, loaded, exercised data, not a
-placeholder. Note for accuracy if citing it: `specialization = ABM` on
-Molave is a leftover value from an earlier curriculum assumption and
-doesn't correctly describe an SSHS section (SSHS has no strands) — worth a
-one-line caveat if the paper describes Molave's setup in any detail.
+placeholder. Historical note, not a live caveat: Molave carried
+`specialization = ABM`, a leftover value from an earlier curriculum
+assumption that didn't correctly describe an SSHS section (SSHS has no
+strands); this was corrected (set to `NULL`) on 2026-09-11, after the
+"ECR alignment" work order's Part 6 elective-assignment mechanism made it
+safe to do so. Nothing about Molave's setup needs a caveat if citing it now.

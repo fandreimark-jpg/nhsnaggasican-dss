@@ -277,8 +277,22 @@ Grade 12 remains on the 2013 curriculum under DO 8: **ABM** 22, **HUMSS** 39,
 three of DO 8's five weighting columns apply — as communicated, not verified.
 
 165 learners, one school, two curricula, two grading orders, running at the
-same time. The pilot section Molave is not one of these and carries
-`specialization = ABM`, a value that cannot correctly exist on an SSHS section.
+same time. The pilot section Molave is not one of these.
+
+**Corrected, 2026-09-11.** Molave (`curriculum = sshs`) carried
+`specialization_id` pointing at `ABM` — a value that cannot correctly exist
+on an SSHS section, since SSHS has no strands. Set to `NULL` after PART 6
+made it safe to do so: the SSHS branch of `Subject::forSection()` no longer
+reads `specialization_id` for electives at all (it reads the
+`section_subject` pivot instead), so nulling this column no longer changes
+which subjects Molave's grading resolves against. Before PART 6 this same
+change would have silently emptied Molave's elective list, since the old
+specialization-matching query was the only thing selecting electives for
+every section, `curriculum` notwithstanding. Backed up first
+(`backups/backup_20260911_2350_pre_molave_fix.sql`), verified via
+`dss:check-integrity` (clean before and after) and `dss:recompute-grades`
+on all three terms (0 of 80 verified grades affected, checksum 20439.00
+unchanged).
 
 ## Implementation — `deped_subject_catalog` ("ECR alignment" work order, PART 2)
 
@@ -1306,19 +1320,26 @@ share is wrong rather than fatal.
 
 This amends `HANDOFF.md` design decision 5, which stated the split as universal.
 
-## Elective selection is per-cluster, not per-learner
+## RESOLVED (mechanism) — elective selection can now return a subset; WHICH electives get assigned is still blocked on Q1
 
-`Subject::forSection()` returns EVERY elective subject matching a
-section's track and specialization — it has no way to return a
-SUBSET. Under the Strengthened SHS curriculum a Grade 11 learner
-picks two electives from a cluster, not the whole cluster (e.g. a
-STEM section offering Pre-Calculus, General Biology 1, and Physics
-might have some students taking Pre-Calc + Biology and others taking
-Pre-Calc + Physics). There is no `section_subject` (or
-`student_subject`) pivot table anywhere in the schema to record which
-electives a given section — let alone a given student — actually
-takes, so `forSection()` cannot distinguish "offered to this
-track/specialization" from "actually taken."
+**This was an open item in Known Limitations from before the "ECR
+alignment" work order started. The mechanism half is closed as of PART 6**
+(`section_subject` pivot, below) — `Subject::forSection()` can now return a
+genuine SUBSET of a track's electives instead of always the whole cluster,
+and every consumer of "how many grades should exist" agrees with it. What
+remains open is not a limitation of this codebase, it's a question only the
+school can answer (Q1, below) — nothing here is waiting on more code.
+
+Before PART 6, `Subject::forSection()` returned EVERY elective subject
+matching a section's track and specialization — it had no way to return a
+SUBSET. Under the Strengthened SHS curriculum a Grade 11 learner picks two
+electives from a cluster, not the whole cluster (e.g. a STEM section
+offering Pre-Calculus, General Biology 1, and Physics might have some
+students taking Pre-Calc + Biology and others taking Pre-Calc + Physics).
+There was no `section_subject` (or `student_subject`) pivot table anywhere
+in the schema to record which electives a given section — let alone a given
+student — actually takes, so `forSection()` could not distinguish "offered
+to this track/specialization" from "actually taken."
 
 **Correction, "ECR alignment" work order PART 3b — there is no SQL bug
 here.** An earlier draft of `ECR_ALIGNMENT_WORK_ORDER.md` described this as
@@ -1367,38 +1388,47 @@ cluster, "every elective in the cluster" and "the two electives this
 section takes" happen to be the same set by coincidence — there is
 nothing to distinguish because there is no third option to leave out.
 
-**What breaks when a third elective is added:** `Subject::forSection()`
-will return all three, so `AcademicTerm::completionStatus()` (which
-expects a grade for every subject `forSection()` returns, for every
-student in the section) will require grades for all three electives
-from every student — including the one they didn't take. No student
-can ever supply that third grade, so `expected` permanently exceeds
-what `actual` can reach and the term can never be marked complete.
-The same over-counting would show up in `ReportController::submit()`'s
+**What used to break when a third elective was added:** `Subject::
+forSection()` would return all three, so `AcademicTerm::completionStatus()`
+(which expects a grade for every subject `forSection()` returns, for every
+student in the section) would require grades for all three electives from
+every student — including the one they didn't take. No student could ever
+supply that third grade, so `expected` would permanently exceed what
+`actual` could reach and the term could never be marked complete. The same
+over-counting would have shown up in `ReportController::submit()`'s
 `totalExpected` check (blocking Submit Report the same way) and in
-`getSectionSubjects()`'s duplicate copy of this same query.
+`getSectionSubjects()`'s duplicate copy of this same query. This was never
+observed live — only two STEM electives ever existed in this database's
+fixtures/demo data, so "every elective in the cluster" and "the two
+electives this section takes" happened to be the same set by coincidence.
+It is now fixed by construction, not by continued luck: see PART 6 below.
 
-**BUILT, "ECR alignment" work order PART 6 — mechanism only, still blocked
-on Q1 for actually assigning any electives.** A `section_subject` pivot
-table now records exactly which electives a given section has chosen for
-a school year, and `Subject::forSection()`, `AcademicTerm::
-completionStatus()`, `TermReadinessService`, `Adviser\ReportController`,
-and `Adviser\DashboardController` all read from it instead of "every
-matching elective" — see the two sections below for how. The pivot ships
-empty; there is still nothing to assign until the school answers Q1 and
-sends a real roster.
+**CLOSED, "ECR alignment" work order PART 6 — the mechanism.** A
+`section_subject` pivot table now records exactly which electives a given
+section has chosen for a school year, and `Subject::forSection()`,
+`AcademicTerm::completionStatus()`, `TermReadinessService`, `Adviser\
+ReportController`, and `Adviser\DashboardController` all read from it
+instead of "every matching elective" — see the two sections below for how.
 `tests/Feature/ElectiveClusterLimitationTest.php`, previously marked
 skipped specifically to document the assertion this pivot would need to
-satisfy, is now un-skipped and passing for real — the historical gap it
-documented no longer exists.
+satisfy, is un-skipped and passing for real as of PART 6 — the historical
+gap it documented no longer exists.
+
+**STILL OPEN — not a code limitation, a question for the school.** The
+pivot ships empty on purpose: there is nothing to assign until the school
+answers **Q1** (does every learner in a Grade 11 section take the same
+electives, or does each learner choose individually?) and sends a real
+roster with real elective choices. Nobody should read the empty pivot as
+unfinished work — see "A zero from `Subject::forSection()` means two
+different things," below, for why an empty pivot on a section whose track
+has electives available is correctly reported as `NOT READY`, not silently
+treated as complete, until that data arrives.
 
 **Why `section_subject`, not `student_subject`: a choice made under
-uncertainty, not a finding.** Q1 (does every learner in a Grade 11 section
-take the same electives, or does each learner choose?) is still open — the
-school hasn't answered it. `section_subject` was chosen as the starting
+uncertainty, not a finding.** `section_subject` was chosen as the starting
 build specifically because it is the smaller, extensible option — not
-because anything observed about the school suggests it works that way.
-If Q1's answer turns out to be "per learner," `section_subject` →
+because anything observed about the school suggests it works that way. If
+Q1's answer turns out to be "per learner," `section_subject` →
 `student_subject` is an addition on top of what exists (a section-level
 pivot narrows `forSection()`'s candidate set; a student-level pivot narrows
 it further, per student), not a reversal of a wrong guess. Recorded here in
@@ -1458,6 +1488,22 @@ parallel copies kept in sync by hand. A change to what "expected" means
 happens once, the same reason `InTermStatusService::
 overallStatusForSection()` and `Intervention::scopeUndecided()` exist
 above.
+
+**A warning about where duplicated logic actually hides.** Going in, three
+consumers were named. Grepping `app/` for `forSection(`/`totalExpected`
+found a fourth (`DashboardController::index()`). Neither of those two steps
+found the fifth — it was sitting inside `resources/views/adviser/
+dashboard.blade.php` itself, recomputing `$isComplete` from a flat figure
+the controller had already handed it, rather than in any controller or
+service at all. **A duplicate-logic sweep that only greps `app/` will miss
+copies that live in `resources/views/`.** Blade files can carry their own
+arithmetic on data a controller already computed differently, and nothing
+about a `.blade.php` extension makes that less likely than a `.php`
+controller file — if anything, `compact()`-passed raw figures make it
+easier, since the view has direct access to the same inputs and no
+enforced reason to call back into a shared service instead of just doing
+the sum itself. The next duplicate-computation sweep in this codebase
+should grep `resources/views/` too, not just `app/`.
 
 ## ECR roster reconciliation only catches one direction
 
@@ -1629,13 +1675,18 @@ exposes any of them, and none touches grading, risk, or authorization logic, so
 none blocks demonstrating the system as it stands. If the school decides to run
 this beyond the pilot, they become the next engineering pass, in this order:
 
-1. **The elective pivot** (`section_subject` table) — see "Elective selection is
-   per-cluster, not per-learner" above. Needs the school's answer to "does every
-   learner in a section take the same subjects?" before any code is written; the
-   answer changes whether the pivot is per-section or per-student.
-2. **Transmutation table verification** — see "The `do015_2026` transmutation
-   table is not yet confirmed against the signed order" above. Research, not
-   code: download DO 015, s. 2026 from deped.gov.ph and check all 41 bands.
+1. **Assigning real electives** — the `section_subject` pivot itself is built
+   (PART 6; see "RESOLVED (mechanism)" above). What's left is data, not code:
+   the school's answer to Q1 ("does every learner in a section take the same
+   subjects, or does each learner choose individually?") followed by a real
+   roster with real elective choices to populate the pivot. If Q1's answer is
+   "per learner," `section_subject` → `student_subject` is an addition on top
+   of what exists, not a rebuild.
+2. **Transmutation table verification against the signed order** — see "The
+   `do015_2026` transmutation table is confirmed against DepEd's own
+   instrument" above: confirmed against the operational ECR workbook, not yet
+   against the signed PDF of DO 015, s. 2026 itself. Research, not code:
+   download the signed order from deped.gov.ph and check all 41 bands.
 3. **Subject teachers** — `sections.adviser_id` is a single user who encodes
    every subject in the section; a real SHS assigns one teacher per subject,
    with the class adviser compiling. Invisible in the pilot (one section, two
