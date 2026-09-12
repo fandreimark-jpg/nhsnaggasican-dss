@@ -22,9 +22,24 @@
     <div id="sidebarOverlay" onclick="closeSidebar()"
          class="hidden md:hidden fixed inset-0 bg-black/50 z-30"></div>
 
-    <div class="flex min-h-screen">
+    {{-- Fixed/sticky sidebar layout — mobile keeps its existing off-canvas
+         drawer (`fixed inset-y-0 -translate-x-full`) completely
+         unchanged below `md`; only the `md:` desktop behavior changes.
+         `h-screen overflow-hidden` here (was `min-h-screen`, which let
+         the whole document grow taller than the viewport and scroll as
+         one page — sidebar included) caps this wrapper at exactly the
+         viewport height and stops the BODY itself from ever scrolling.
+         With that cap in place, <aside>'s `md:static` (unchanged) plus
+         the new `md:h-screen md:overflow-y-auto` below makes it occupy
+         exactly one viewport height with its own scrollbar if its menu
+         ever grows taller than that — and <main>'s pre-existing
+         `overflow-y-auto` (see below) now actually engages, since it's
+         a flex sibling in a height-capped row instead of an
+         unconstrained one. No `position: fixed`/manual width offset
+         needed — the sidebar never has to leave normal flex flow. --}}
+    <div class="flex h-screen overflow-hidden">
         <aside id="sidebar"
-               class="w-64 bg-brand-900 text-white flex flex-col fixed md:static inset-y-0 left-0 z-40 -translate-x-full md:translate-x-0 transition-transform duration-200 ease-in-out">
+               class="w-64 bg-brand-900 text-white flex flex-col fixed md:static inset-y-0 left-0 z-40 -translate-x-full md:translate-x-0 transition-transform duration-200 ease-in-out overflow-y-auto md:h-screen md:shrink-0">
             <div class="p-6 border-b border-brand-700 flex items-start justify-between">
                 <div>
                     <h1 class="text-lg font-bold leading-tight">Naggasican NHS</h1>
