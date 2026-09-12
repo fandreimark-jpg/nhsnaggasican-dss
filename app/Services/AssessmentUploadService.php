@@ -71,7 +71,9 @@ class AssessmentUploadService
     public function __construct(
         private AssessmentColumnClassifier $classifier = new AssessmentColumnClassifier(),
         private EcrProfileDetector $ecrProfile = new EcrProfileDetector(),
-        private EcrReaderService $ecrReader = new EcrReaderService()
+        private EcrReaderService $ecrReader = new EcrReaderService(),
+        private Grade12EcrProfileDetector $grade12Profile = new Grade12EcrProfileDetector(),
+        private Grade12EcrReaderService $grade12Reader = new Grade12EcrReaderService()
     ) {
     }
 
@@ -84,19 +86,93 @@ class AssessmentUploadService
     private ?string $lastEcrProfileVersion = null;
 
     /**
+     * Which real ECR template the last readRows() call recognised, if any
+     * -- 'sshs', 'grade12', or null (flat CSV/XLSX, no template detected).
+     * Distinct from lastEcrProfileVersion above (SSHS-only, carries its
+     * version tag) since Grade 12's template has no published version
+     * string to report -- see Grade12EcrProfileDetector's own docblock.
+     */
+    private ?string $lastDetectedFormat = null;
+
+    public function lastDetectedFormat(): ?string
+    {
+        return $this->lastDetectedFormat;
+    }
+
+    /**
+     * Names unmatched to an existing student in the target section on the
+     * last readRows() call that used the Grade 12 reader -- see
+     * Grade12EcrReaderService::unresolvedNames() for why a row is excluded
+     * rather than given a fabricated LRN.
+     */
+    public function lastUnresolvedLearnerNames(): array
+    {
+        return $this->grade12Reader->unresolvedNames();
+    }
+
+    /**
      * "ECR alignment" work order, PART 5f — passthrough so the controller
      * doesn't need its own EcrReaderService dependency. Returns null (no
      * notice) for a non-ECR file, a subject the weights agree with, or a
      * subject not yet resolved — see EcrReaderService::checkWeightMismatch()
-     * for the actual comparison and the OTHER ELECTIVE exception.
+     * for the actual comparison and the OTHER ELECTIVE exception. Also
+     * covers the Grade 12 template: its per-term weight fractions are
+     * compared against the same SubjectGroupWeight-resolved figure a real
+     * grade would compute with, not hardcoded 20/60/20.
      */
-    public function checkEcrWeightMismatch(string $filePath, ?Subject $subject): ?string
+    public function checkEcrWeightMismatch(string $filePath, ?Subject $subject, ?int $gradingPeriod = null, ?Section $section = null): ?string
     {
-        if ($this->ecrProfile->detect($filePath) === null) {
+        if ($this->ecrProfile->detect($filePath) !== null) {
+            return $this->ecrReader->checkWeightMismatch($filePath, $subject);
+        }
+
+        if ($gradingPeriod !== null && $section !== null && $this->grade12Profile->detect($filePath)) {
+            return $this->checkGrade12WeightMismatch($filePath, $subject, $gradingPeriod, $section);
+        }
+
+        return null;
+    }
+
+    /**
+     * Grade 12's real curriculum (do8_2015) weights by TRACK, not
+     * subject_group — GradingEngine::resolveDo8GroupKey() is the one
+     * place that mapping exists (see CLAUDE.md, "a subject's own
+     * subject_group column isn't even read for the do8_2015 scheme"), so
+     * this reuses it rather than a second, subject_group-based guess that
+     * would resolve the wrong bucket for this scheme.
+     */
+    private function checkGrade12WeightMismatch(string $filePath, ?Subject $subject, int $gradingPeriod, Section $section): ?string
+    {
+        if (!$subject) {
             return null;
         }
 
-        return $this->ecrReader->checkWeightMismatch($filePath, $subject);
+        $fileWeights = $this->grade12Reader->extractComponentWeights($filePath, $gradingPeriod);
+        if ($fileWeights['written_work'] === null && $fileWeights['performance_task'] === null && $fileWeights['examination'] === null) {
+            return null;
+        }
+
+        try {
+            $groupKey = (new GradingEngine())->resolveDo8GroupKey($section, $subject);
+            $resolved = \App\Models\SubjectGroupWeight::resolve(\App\Services\TransmutationService::DEFAULT_SCHEME, $groupKey);
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        $fileWw = $fileWeights['written_work']; $filePt = $fileWeights['performance_task']; $fileEx = $fileWeights['examination'];
+        $dssWw = (float) $resolved->ww_weight / 100; $dssPt = (float) $resolved->pt_weight / 100; $dssEx = $resolved->ex_weight !== null ? (float) $resolved->ex_weight / 100 : null;
+
+        $mismatch = ($fileWw !== null && abs($fileWw - $dssWw) > 0.001)
+            || ($filePt !== null && abs($filePt - $dssPt) > 0.001)
+            || ($fileEx !== null && $dssEx !== null && abs($fileEx - $dssEx) > 0.001);
+
+        if (!$mismatch) {
+            return null;
+        }
+
+        $fmt = fn(?float $v) => $v === null ? '—' : round($v * 100, 1) . '%';
+        return "Weight mismatch for {$subject->name}: file has WW={$fmt($fileWw)}/PT={$fmt($filePt)}/EX={$fmt($fileEx)}, "
+            . "the system resolves WW={$fmt($dssWw)}/PT={$fmt($dssPt)}/EX={$fmt($dssEx)} — review before importing.";
     }
 
     /**
@@ -120,9 +196,9 @@ class AssessmentUploadService
      *     max_row_errors: array<string, string>,
      * }
      */
-    public function detectColumns(string $filePath, ?int $gradingPeriod = null): array
+    public function detectColumns(string $filePath, ?int $gradingPeriod = null, ?Section $section = null): array
     {
-        $rows = $this->readRows($filePath, $gradingPeriod);
+        $rows = $this->readRows($filePath, $gradingPeriod, $section);
 
         if (empty($rows)) {
             return ['columns' => [], 'row_count' => 0, 'max_row_present' => false, 'max_row_errors' => []];
@@ -272,7 +348,7 @@ class AssessmentUploadService
      */
     public function previewRows(string $filePath, array $columnMapping, Section $section, ?int $gradingPeriod = null): array
     {
-        $rows = $this->readRows($filePath, $gradingPeriod);
+        $rows = $this->readRows($filePath, $gradingPeriod, $section);
 
         if (empty($rows)) {
             return ['rows' => [], 'total_rows' => 0, 'matched_rows' => 0, 'total_valid_cells' => 0, 'total_invalid_cells' => 0, 'column_stats' => []];
@@ -383,12 +459,12 @@ class AssessmentUploadService
         ?int $uploaderId,
         AssessmentUpload $upload
     ): array {
-        $rows = $this->readRows($filePath, $gradingPeriod);
+        $rows = $this->readRows($filePath, $gradingPeriod, $section);
         $errors = [];
         $importedCount = 0;
 
         if (empty($rows)) {
-            return ['imported' => 0, 'errors' => ['The uploaded file is empty.'], 'ecr_profile_version' => $this->lastEcrProfileVersion];
+            return ['imported' => 0, 'errors' => ['The uploaded file is empty.'], 'ecr_profile_version' => $this->lastEcrProfileVersion, 'detected_format' => $this->lastDetectedFormat];
         }
 
         ['header' => $header, 'maxRow' => $maxRow, 'dataRows' => $dataRows] = $this->splitRows($rows);
@@ -476,7 +552,7 @@ class AssessmentUploadService
             }
         }
 
-        return ['imported' => $importedCount, 'errors' => $errors, 'ecr_profile_version' => $this->lastEcrProfileVersion];
+        return ['imported' => $importedCount, 'errors' => $errors, 'ecr_profile_version' => $this->lastEcrProfileVersion, 'detected_format' => $this->lastDetectedFormat];
     }
 
     /**
@@ -579,15 +655,26 @@ class AssessmentUploadService
      *
      * @return array<int, array<int, mixed>>
      */
-    private function readRows(string $filePath, ?int $gradingPeriod = null): array
+    private function readRows(string $filePath, ?int $gradingPeriod = null, ?Section $section = null): array
     {
         $this->lastEcrProfileVersion = null;
+        $this->lastDetectedFormat = null;
 
         if ($gradingPeriod !== null) {
             $version = $this->ecrProfile->detect($filePath);
             if ($version !== null) {
                 $this->lastEcrProfileVersion = $version;
+                $this->lastDetectedFormat = 'sshs';
                 return $this->ecrReader->toFlatRows($filePath, $gradingPeriod);
+            }
+
+            // Grade 12's reader needs a target Section to resolve names to
+            // students (this template has no LRN anywhere — see
+            // Grade12EcrReaderService's own docblock), so detection is
+            // only attempted when one is available.
+            if ($section !== null && $this->grade12Profile->detect($filePath)) {
+                $this->lastDetectedFormat = 'grade12';
+                return $this->grade12Reader->toFlatRows($filePath, $gradingPeriod, $section->id);
             }
         }
 

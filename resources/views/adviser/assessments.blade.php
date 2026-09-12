@@ -33,6 +33,26 @@
 
 @include('partials.import-result')
 
+{{-- "Do not import formula results blindly" -- the Grade 12 workbook's OWN
+     computed Term Grade vs GradingEngine's independent result, for the SAME
+     imported raw scores. Never resolved automatically in either direction —
+     see Grade12DiscrepancyChecker. Only ever populated right after a Grade
+     12 import that actually found a mismatch. --}}
+@if(session('grade_discrepancies'))
+<div class="bg-amber-50 border border-amber-200 text-amber-800 text-sm p-4 rounded-lg mb-4">
+    <p class="font-medium"><i class="bi bi-exclamation-triangle-fill"></i> Term Grade discrepancy — the file's own computed grade disagrees with the system's</p>
+    <p class="mt-1 mb-2">Not corrected automatically in either direction. Review before trusting either figure.</p>
+    <table class="tbl text-xs">
+        <thead><tr><th>Learner</th><th class="tbl-num">Excel Term Grade</th><th class="tbl-num">DSS Term Grade</th></tr></thead>
+        <tbody>
+            @foreach(session('grade_discrepancies') as $d)
+                <tr><td>{{ $d['name'] }}</td><td class="tbl-num">{{ $d['excel_term_grade'] }}</td><td class="tbl-num">{{ $d['dss_term_grade'] }}</td></tr>
+            @endforeach
+        </tbody>
+    </table>
+</div>
+@endif
+
 {{-- TASK 3 of "add an assessment item by hand" — before/after component
      percentages for the students an item edit actually touched, so a
      max-score correction shows its own effect instead of just "Updated." --}}

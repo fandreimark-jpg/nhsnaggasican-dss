@@ -262,10 +262,22 @@ class AssessmentController extends Controller
         $request->file('file')->storeAs(self::TEMP_DIR, $storedFilename, 'local');
 
         $absolutePath = Storage::disk('local')->path(self::TEMP_DIR . '/' . $storedFilename);
-        $detected = $this->uploads->detectColumns($absolutePath, $gradingPeriod);
+        $detected = $this->uploads->detectColumns($absolutePath, $gradingPeriod, $section);
+        $detectedFormat = $this->uploads->lastDetectedFormat();
 
         if (empty($detected['columns'])) {
             Storage::disk('local')->delete(self::TEMP_DIR . '/' . $storedFilename);
+
+            // Grade 12 files with zero resolvable columns are usually zero
+            // MATCHED LEARNERS (every roster name unresolved against this
+            // section), not a genuinely empty file — name the real cause
+            // rather than the generic "no columns found" message.
+            if ($detectedFormat === 'grade12' && !empty($this->uploads->lastUnresolvedLearnerNames())) {
+                return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
+                    ->with('error', 'None of the names in that file could be matched to a student already enrolled in your section: '
+                        . implode(', ', $this->uploads->lastUnresolvedLearnerNames()) . '. Add these students first (Admin > Students), then re-upload.');
+            }
+
             return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
                 ->with('error', 'No assessment columns were found in that file. Expected: lrn, last_name, first_name, then one column per assessment item.');
         }
@@ -298,7 +310,7 @@ class AssessmentController extends Controller
         // only ever populated for a file actually read through the ECR
         // profile. Never overwrites the subject's own weights — see
         // EcrReaderService::checkWeightMismatch().
-        $weightMismatch = $this->uploads->checkEcrWeightMismatch($absolutePath, $subject);
+        $weightMismatch = $this->uploads->checkEcrWeightMismatch($absolutePath, $subject, $gradingPeriod, $section);
 
         return view('adviser.assessments-verify', [
             'section'          => $section,
@@ -311,6 +323,8 @@ class AssessmentController extends Controller
             'originalName'     => $request->file('file')->getClientOriginalName(),
             'filenameMismatch' => $filenameMismatch,
             'weightMismatch'   => $weightMismatch,
+            'detectedFormat'   => $detectedFormat,
+            'unresolvedLearnerNames' => $this->uploads->lastUnresolvedLearnerNames(),
         ]);
     }
 
@@ -480,6 +494,23 @@ class AssessmentController extends Controller
             // read through the existing flat path, unchanged.
             'ecr_profile_version'  => $result['ecr_profile_version'] ?? null,
         ]);
+
+        // "Do not import formula results blindly" — after the raw scores
+        // are actually in the database, compare the Grade 12 workbook's
+        // OWN computed Term Grade against GradingEngine's independent
+        // result for the same data. Never resolved automatically either
+        // way; flashed for the import-result screen to show plainly.
+        // Only for the Grade 12 template — the SSHS ECR's own separate
+        // weight-mismatch check (checkEcrWeightMismatch()) is a different,
+        // pre-import comparison and is unaffected.
+        if (($result['detected_format'] ?? null) === 'grade12') {
+            $discrepancies = (new \App\Services\Grade12DiscrepancyChecker())
+                ->compare($absolutePath, $section, $subject, $gradingPeriod, $section->school_year);
+            $mismatches = array_filter($discrepancies, fn($d) => $d['status'] === 'mismatch');
+            if (!empty($mismatches)) {
+                session()->flash('grade_discrepancies', $mismatches);
+            }
+        }
 
         Storage::disk('local')->delete($relativePath);
 

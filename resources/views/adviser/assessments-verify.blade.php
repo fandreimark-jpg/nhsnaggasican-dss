@@ -5,6 +5,35 @@
 
 @section('content')
 
+{{-- Detected ECR Format -- shown whenever a real DepEd/school class-record
+     template was recognized (never for a plain flat CSV/XLSX upload, which
+     has no "format" to name). See AssessmentUploadService::lastDetectedFormat(). --}}
+@if(($detectedFormat ?? null) === 'sshs')
+<div class="bg-blue-50 border border-blue-200 text-blue-800 text-sm p-3 rounded-lg mb-4">
+    <i class="bi bi-file-earmark-check"></i> Detected ECR Format: <strong>Strengthened SHS E-Class Record</strong>
+</div>
+@elseif(($detectedFormat ?? null) === 'grade12')
+<div class="bg-blue-50 border border-blue-200 text-blue-800 text-sm p-3 rounded-lg mb-4">
+    <i class="bi bi-file-earmark-check"></i> Detected ECR Format: <strong>Grade 12 Class Record</strong>
+</div>
+@endif
+
+{{-- Grade 12's template carries no LRN at all -- a roster name that
+     couldn't be confidently matched to one existing student in this
+     section is EXCLUDED from the import, never given a fabricated LRN.
+     Shown even when other rows imported fine, since a silently-skipped
+     student is exactly the kind of gap that must never be silent. --}}
+@if(!empty($unresolvedLearnerNames ?? []))
+<div class="bg-amber-50 border border-amber-200 text-amber-800 text-sm p-4 rounded-lg mb-4">
+    <p class="font-medium"><i class="bi bi-exclamation-triangle-fill"></i> {{ count($unresolvedLearnerNames) }} learner name(s) in the file could not be matched to a student already enrolled in this section — excluded from this import, not guessed:</p>
+    <ul class="list-disc list-inside mt-1">
+        @foreach($unresolvedLearnerNames as $name)
+            <li>{{ $name }}</li>
+        @endforeach
+    </ul>
+</div>
+@endif
+
 {{-- TASK 3a of "dashboard structure and upload safeguards" — a signal,
      never a block: see AssessmentUploadService::detectFilenameSubjectMismatch().
      Dismissible, and the Preview button below stays enabled either way. --}}
