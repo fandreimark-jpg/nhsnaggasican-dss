@@ -48,7 +48,7 @@
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 px-6 py-4 border-b">
         <div>
             <h2 class="text-sm font-semibold text-gray-800">All Students</h2>
-            <p class="text-xs text-gray-400"><x-count-label :count="$students->count()" noun="student" total /></p>
+            <p class="text-xs text-gray-400"><x-count-label :count="$students->total()" noun="student" total /></p>
         </div>
         <div class="flex items-center gap-3 flex-wrap">
             <form method="GET">
