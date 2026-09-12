@@ -43,15 +43,19 @@ class SubjectGroupWeightingTest extends TestCase
         AssessmentScore::factory()->create(['assessment_id' => $assessment->id, 'student_id' => $student->id, 'score' => $earned]);
     }
 
-    public function test_all_twelve_scheme_subject_group_rows_are_present_and_sum_to_100(): void
+    public function test_all_thirteen_scheme_subject_group_rows_are_present_and_sum_to_100(): void
     {
         // 7 original (6 do015_2026 groups + do8_2015's universal 'all') +
         // 5 added by "ECR alignment" work order PART 2d for DO 8's five
         // track-keyed groups (do8_core, do8_academic_other, do8_academic_
         // work_immersion, do8_tvl_sports_arts_other, do8_tvl_sports_arts_
-        // work_immersion) — see that migration and SubjectGroupWeightsSeeder.
+        // work_immersion) + 1 added by "subject classification and grading
+        // weights cleanup" (do015_2026's `academic_other`, splitting the
+        // Academic-Elective-that-happens-to-also-be-20/50/30 profile out
+        // of `core_academic`, which is now reserved for type=core only) —
+        // see that migration and SubjectGroupWeightsSeeder.
         $rows = SubjectGroupWeight::all();
-        $this->assertCount(12, $rows);
+        $this->assertCount(13, $rows);
 
         foreach ($rows as $row) {
             $sum = (float) $row->ww_weight + (float) $row->pt_weight + (float) ($row->ex_weight ?? 0);

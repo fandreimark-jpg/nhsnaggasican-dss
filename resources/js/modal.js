@@ -503,6 +503,49 @@ document.addEventListener("DOMContentLoaded", function () {
             }
         };
 
+        // "Subject classification and grading weights cleanup" pass —
+        // Subject Group only applies to Grade 11 (DO 015, s. 2026); Grade
+        // 12 stays on DO 8, s. 2015, which weighs by section track, not
+        // subject_group at all (see GradingEngine::resolveDo8GroupKey()),
+        // so the field is hidden and cleared rather than left to submit a
+        // value that would be meaningless. Within Grade 11, the option
+        // list is filtered to match the selected Type — 'core_academic' is
+        // reserved for Core (SubjectGroupWeight::classificationError()
+        // rejects any other combination server-side too, so this is a
+        // convenience, not the only enforcement).
+        window.refreshSubjectGroupField = function () {
+            const type = document.getElementById("subjectType").value;
+            const grade = document.getElementById("subjectGrade").value;
+            const wrapper = document.getElementById("subjectGroupWrapper");
+            const select = document.getElementById("subjectGroupField");
+            if (!wrapper || !select) return;
+
+            if (grade === "12") {
+                wrapper.classList.add("hidden");
+                select.value = "";
+                select.removeAttribute("required");
+                return;
+            }
+
+            wrapper.classList.remove("hidden");
+            select.setAttribute("required", "required");
+
+            const current = select.value;
+            let firstVisible = "";
+            Array.from(select.options).forEach((opt) => {
+                if (!opt.value) return; // keep the blank placeholder as-is
+                const matches = !type || opt.dataset.forType === type;
+                opt.hidden = !matches;
+                opt.disabled = !matches;
+                if (matches && !firstVisible) firstVisible = opt.value;
+            });
+
+            const currentOption = Array.from(select.options).find((o) => o.value === current);
+            if (type && (!current || !currentOption || currentOption.disabled)) {
+                select.value = firstVisible;
+            }
+        };
+
         window.openAddSubjectModal = function () {
             document.getElementById("modalTitle").textContent = "Add Subject";
             document.getElementById("formMethod").value = "POST";
@@ -510,11 +553,12 @@ document.addEventListener("DOMContentLoaded", function () {
             document.getElementById("subjectName").value = "";
             document.getElementById("subjectType").value = "";
             document.getElementById("subjectGrade").value = "";
-            document.getElementById("subjectGroupField").value = "core_academic";
+            document.getElementById("subjectGroupField").value = "";
             document.getElementById("subjectTrack").value = "";
             document.getElementById("subjectSpec").innerHTML =
                 '<option value="">— All specializations in track —</option>';
             document.getElementById("trackFields").classList.add("hidden");
+            window.refreshSubjectGroupField();
             window.showModal("subjectModal");
         };
 
@@ -525,7 +569,6 @@ document.addEventListener("DOMContentLoaded", function () {
             document.getElementById("subjectName").value = subject.name;
             document.getElementById("subjectType").value = subject.type;
             document.getElementById("subjectGrade").value = subject.grade_level;
-            document.getElementById("subjectGroupField").value = subject.subject_group || "core_academic";
 
             if (subject.type === "elective") {
                 document.getElementById("trackFields").classList.remove("hidden");
@@ -541,6 +584,9 @@ document.addEventListener("DOMContentLoaded", function () {
             } else {
                 document.getElementById("trackFields").classList.add("hidden");
             }
+
+            window.refreshSubjectGroupField();
+            document.getElementById("subjectGroupField").value = subject.subject_group || "";
 
             window.showModal("subjectModal");
         };

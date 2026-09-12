@@ -48,8 +48,8 @@ class SubjectsImportTest extends TestCase
     public function test_valid_core_subject_is_imported(): void
     {
         $import = $this->importCsv([
-            ['General Mathematics', 'core', '11', '', ''],
-        ]);
+            ['General Mathematics', 'core', '11', 'core_academic', '', ''],
+        ], 'name,type,grade_level,subject_group,track,specialization');
 
         $this->assertCount(0, $import->failures());
         $this->assertSame(1, $import->importedCount);
@@ -66,12 +66,12 @@ class SubjectsImportTest extends TestCase
         $track = Track::factory()->create(['name' => 'Technical-Professional Track', 'code' => 'TVL']);
         $spec  = Specialization::factory()->create(['track_id' => $track->id, 'name' => 'Information and Communications Technology', 'code' => 'ICT']);
 
-        // subject_group is now required on an elective row (see
-        // test_an_elective_with_no_subject_group_is_rejected_not_defaulted_to_core)
-        // -- 'techpro' here since this is a TVL-track elective; not the
-        // thing under test in this method, so any valid group would do.
+        // "Subject classification and grading weights cleanup" pass —
+        // subject_group must be BLANK for a Grade 12 row (DO 8, s. 2015
+        // weighs by section track, not subject_group) -- track/spec
+        // resolution is what's under test here, not weighting.
         $import = $this->importCsv([
-            ['Programming', 'elective', '12', 'techpro', 'Technical-Professional Track', 'ICT'],
+            ['Programming', 'elective', '12', '', 'Technical-Professional Track', 'ICT'],
         ], 'name,type,grade_level,subject_group,track,specialization');
 
         $this->assertCount(0, $import->failures());
@@ -86,8 +86,9 @@ class SubjectsImportTest extends TestCase
     {
         $track = Track::factory()->create(['name' => 'Academic Track', 'code' => 'ACAD']);
 
+        // Grade 12 -- subject_group must be blank (see note above).
         $import = $this->importCsv([
-            ['Research', 'elective', '12', 'research_innovation', 'ACAD', ''],
+            ['Research', 'elective', '12', '', 'ACAD', ''],
         ], 'name,type,grade_level,subject_group,track,specialization');
 
         $this->assertCount(0, $import->failures());
@@ -98,8 +99,9 @@ class SubjectsImportTest extends TestCase
     {
         // Track/specialization are optional lookups, not required fields —
         // matching the existing manual Add Subject form's own leniency.
+        // Grade 12 -- subject_group must be blank (see note above).
         $import = $this->importCsv([
-            ['Mystery Elective', 'elective', '12', 'field_exposure', 'Nonexistent Track', ''],
+            ['Mystery Elective', 'elective', '12', '', 'Nonexistent Track', ''],
         ], 'name,type,grade_level,subject_group,track,specialization');
 
         $this->assertCount(0, $import->failures());
@@ -131,8 +133,8 @@ class SubjectsImportTest extends TestCase
         Subject::factory()->create(['name' => 'Filipino', 'grade_level' => 11, 'type' => 'core']);
 
         $import = $this->importCsv([
-            ['Filipino', 'core', '11', '', ''],
-        ]);
+            ['Filipino', 'core', '11', 'core_academic', '', ''],
+        ], 'name,type,grade_level,subject_group,track,specialization');
 
         $this->assertCount(1, $import->failures());
         $this->assertSame(1, Subject::where('name', 'Filipino')->count());
@@ -141,9 +143,9 @@ class SubjectsImportTest extends TestCase
     public function test_duplicate_within_the_same_file_is_rejected_without_crashing(): void
     {
         $import = $this->importCsv([
-            ['Physical Education', 'core', '11', '', ''],
-            ['Physical Education', 'core', '11', '', ''],
-        ]);
+            ['Physical Education', 'core', '11', 'core_academic', '', ''],
+            ['Physical Education', 'core', '11', 'core_academic', '', ''],
+        ], 'name,type,grade_level,subject_group,track,specialization');
 
         $this->assertCount(1, $import->failures());
         $this->assertSame(1, Subject::where('name', 'Physical Education')->count());
@@ -151,10 +153,11 @@ class SubjectsImportTest extends TestCase
 
     public function test_same_name_different_grade_level_is_not_a_duplicate(): void
     {
+        // Grade 11 requires subject_group; Grade 12 requires it blank.
         $import = $this->importCsv([
-            ['Statistics', 'core', '11', '', ''],
-            ['Statistics', 'core', '12', '', ''],
-        ]);
+            ['Statistics', 'core', '11', 'core_academic', '', ''],
+            ['Statistics', 'core', '12', '', '', ''],
+        ], 'name,type,grade_level,subject_group,track,specialization');
 
         $this->assertCount(0, $import->failures());
         $this->assertSame(2, Subject::where('name', 'Statistics')->count());
@@ -163,9 +166,9 @@ class SubjectsImportTest extends TestCase
     public function test_valid_and_invalid_rows_in_the_same_file_are_handled_independently(): void
     {
         $import = $this->importCsv([
-            ['Valid Subject', 'core', '11', '', ''],
-            ['Invalid Subject', 'not-a-type', '11', '', ''],
-        ]);
+            ['Valid Subject', 'core', '11', 'core_academic', '', ''],
+            ['Invalid Subject', 'not-a-type', '11', '', '', ''],
+        ], 'name,type,grade_level,subject_group,track,specialization');
 
         $this->assertCount(1, $import->failures());
         $this->assertDatabaseHas('subjects', ['name' => 'Valid Subject']);
@@ -176,8 +179,8 @@ class SubjectsImportTest extends TestCase
     {
         $admin = User::factory()->admin()->create();
 
-        $csv  = "name,type,grade_level,track,specialization\n";
-        $csv .= "Empowerment Technologies,core,11,,\n";
+        $csv  = "name,type,grade_level,subject_group,track,specialization\n";
+        $csv .= "Empowerment Technologies,core,11,core_academic,,\n";
         $path = tempnam(sys_get_temp_dir(), 'subjects_http_import_') . '.csv';
         file_put_contents($path, $csv);
         $file = new \Illuminate\Http\UploadedFile($path, 'subjects.csv', 'text/csv', null, true);
@@ -216,20 +219,21 @@ class SubjectsImportTest extends TestCase
     }
 
     /**
-     * SYSTEM_FIXES_AND_ML_AUDIT.md, "Core and electives must not be
-     * swapped" -- core_academic is a safe default for a blank
-     * subject_group only on a CORE row (see
-     * SubjectsImportDefaultGroupNoticeTest). An elective has no safe
-     * default -- Arts/Research/TechPro/Field Experience electives all
-     * carry different weights -- so a blank subject_group on an elective
-     * row must be rejected, not silently defaulted.
+     * "Subject classification and grading weights cleanup" pass -- a
+     * Grade 11 subject has no safe default for a blank subject_group, core
+     * or elective (the prior "blank CORE row defaults to core_academic"
+     * leniency was removed on purpose -- an unclassified subject must stay
+     * unclassified, never quietly become Core). This exercises the
+     * elective case specifically -- Arts/Research/TechPro/Field Experience
+     * electives all carry different weights, so there is no single safe
+     * guess.
      */
     public function test_an_elective_with_no_subject_group_is_rejected_not_defaulted_to_core(): void
     {
         $track = Track::factory()->create(['name' => 'Academic Track', 'code' => 'ACAD']);
 
         $csv = "name,type,grade_level,subject_group,track,specialization\n";
-        $csv .= "Creative Writing,elective,12,,{$track->name},\n";
+        $csv .= "Creative Writing,elective,11,,{$track->name},\n";
         $path = tempnam(sys_get_temp_dir(), 'subjects_import_') . '.csv';
         file_put_contents($path, $csv);
         $import = new SubjectsImport();
@@ -238,7 +242,6 @@ class SubjectsImportTest extends TestCase
 
         $this->assertCount(1, $import->failures());
         $this->assertDatabaseMissing('subjects', ['name' => 'Creative Writing']);
-        $this->assertEmpty($import->defaultedSubjectGroupNames, 'An elective must never be silently defaulted -- it must be rejected instead.');
     }
 
     public function test_an_elective_with_an_explicit_subject_group_still_imports(): void
@@ -249,7 +252,7 @@ class SubjectsImportTest extends TestCase
         // SubjectGroupWeightsSeeder, not core_academic -- proves the row
         // imports with the group it actually declared, not a default.
         $csv = "name,type,grade_level,subject_group,track,specialization\n";
-        $csv .= "Creative Writing,elective,12,field_exposure,{$track->name},\n";
+        $csv .= "Creative Writing,elective,11,field_exposure,{$track->name},\n";
         $path = tempnam(sys_get_temp_dir(), 'subjects_import_') . '.csv';
         file_put_contents($path, $csv);
         $import = new SubjectsImport();
@@ -284,8 +287,8 @@ class SubjectsImportTest extends TestCase
 
     public function test_a_row_matching_the_selected_upload_grade_still_imports(): void
     {
-        $csv  = "name,type,grade_level,track,specialization\n";
-        $csv .= "Statistics and Probability,core,11,,\n";
+        $csv  = "name,type,grade_level,subject_group,track,specialization\n";
+        $csv .= "Statistics and Probability,core,11,core_academic,,\n";
         $path = tempnam(sys_get_temp_dir(), 'subjects_import_') . '.csv';
         file_put_contents($path, $csv);
 

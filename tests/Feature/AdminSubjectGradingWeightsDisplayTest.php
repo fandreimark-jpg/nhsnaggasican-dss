@@ -55,8 +55,8 @@ class AdminSubjectGradingWeightsDisplayTest extends TestCase
         $response = $this->actingAs($admin)->get('/admin/subjects');
 
         $response->assertOk();
-        $response->assertSee('100%'); // the catalog's ex_weight, not techpro's 20%
-        $response->assertSee('from DepEd SSHS catalog');
+        $response->assertSee('100'); // the catalog's ex_weight, not techpro's 20
+        $response->assertSee('DepEd Strengthened SHS catalog');
     }
 
     public function test_a_grade_12_subject_does_not_guess_a_do8_weight(): void
@@ -67,6 +67,6 @@ class AdminSubjectGradingWeightsDisplayTest extends TestCase
         $response = $this->actingAs($admin)->get('/admin/subjects');
 
         $response->assertOk();
-        $response->assertSee('depends on section');
+        $response->assertSee('by section track');
     }
 }

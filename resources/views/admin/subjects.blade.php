@@ -12,6 +12,7 @@
     // scheme's addition) still renders a readable fallback.
     $subjectGroupLabels = [
         'core_academic'        => 'Core Academic',
+        'academic_other'       => 'Academic Elective',
         'field_exposure'       => 'Field Exposure',
         'arts_sports_wellness' => 'Arts, Sports & Wellness',
         'research_innovation'  => 'Research/Innovation',
@@ -36,7 +37,13 @@
     // Livelihood" is DO 8/2013 vocabulary; SSHS calls this track Tech-Pro —
     // Part 3 just spent a migration keeping those two taxonomies apart.
     $subjectGroupCovers = [
-        'core_academic'        => 'Core Subjects and Other Academic Electives',
+        'core_academic'        => 'Core Subjects only',
+        // Split out of core_academic during "subject classification and
+        // grading weights cleanup" — same 20/50/30 numbers as Core, but a
+        // genuinely different DepEd profile (STEM and Business &
+        // Entrepreneurship cluster electives), so an elective never has to
+        // sit in the Core-labelled bucket to get its correct weights.
+        'academic_other'       => 'Academic Electives (STEM, Business & Entrepreneurship) — not Core',
         'field_exposure'       => 'Field Exposure and Arts Apprenticeship Electives',
         'arts_sports_wellness' => 'Arts, Social Sciences, Humanities, and Sports/Wellness Electives',
         'research_innovation'  => 'Research and Innovation Electives',
@@ -88,12 +95,10 @@
         <thead>
             <tr>
                 <th scope="col">Subject Name</th>
-                <th scope="col">Type</th>
-                <th scope="col">Grade Level</th>
-                <th scope="col">Subject Group</th>
-                <th scope="col">Grading Weights (WW / PT / Exam)</th>
-                <th scope="col">Track</th>
-                <th scope="col">Specialization</th>
+                <th scope="col">Grade</th>
+                <th scope="col">Category</th>
+                <th scope="col">Grading Profile / Weights</th>
+                <th scope="col">Track / Specialization</th>
                 <th scope="col" class="text-right">Actions</th>
             </tr>
         </thead>
@@ -101,37 +106,40 @@
             @forelse($subjects as $subject)
             <tr class="subject-row">
                 <td class="font-medium text-gray-800">{{ $subject->name }}</td>
+                <td>Grade {{ $subject->grade_level }}</td>
                 <td>
                     @if($subject->type === 'core')
                         <span class="bg-green-100 text-green-700 text-xs font-semibold px-2 py-1 rounded">Core</span>
                     @else
                         <span class="bg-orange-100 text-orange-700 text-xs font-semibold px-2 py-1 rounded">Elective</span>
-                    @endif
-                </td>
-                <td>Grade {{ $subject->grade_level }}</td>
-                <td>
-                    {{ $subjectGroupLabel($subject->subject_group) }}
-                    @if($subjectGroupCoverText($subject->subject_group))
-                        <span class="block text-xs text-gray-400">{{ $subjectGroupCoverText($subject->subject_group) }}</span>
+                        @if($subject->subject_group)
+                            <span class="block text-xs text-gray-400 mt-0.5">{{ $subjectGroupLabel($subject->subject_group) }}</span>
+                        @endif
                     @endif
                 </td>
                 <td class="text-xs">
                     @php $w = $subject->grading_weights_display; @endphp
                     @if(($w['source'] ?? null) === 'do8_by_track')
-                        <span class="text-gray-400">DO 8, s. 2015 — depends on section's track (see Sections)</span>
+                        <span class="text-gray-400" title="DO 8, s. 2015 — this section's track decides the split; see Sections.">DO 8, s. 2015 — by section track</span>
                     @elseif($w)
-                        {{ rtrim(rtrim(number_format($w['ww'], 2), '0'), '.') }}%
-                        / {{ rtrim(rtrim(number_format($w['pt'], 2), '0'), '.') }}%
-                        / {{ $w['ex'] !== null ? rtrim(rtrim(number_format($w['ex'], 2), '0'), '.') . '%' : '—' }}
-                        <span class="block text-gray-400">
-                            {{ $w['source'] === 'catalog' ? 'from DepEd SSHS catalog' : 'DO 015, s. 2026 — ' . $subjectGroupLabel($subject->subject_group) }}
+                        @php
+                            $wwStr = rtrim(rtrim(number_format($w['ww'], 2), '0'), '.');
+                            $ptStr = rtrim(rtrim(number_format($w['pt'], 2), '0'), '.');
+                            $exStr = $w['ex'] !== null ? rtrim(rtrim(number_format($w['ex'], 2), '0'), '.') . '%' : 'none';
+                            $sourceLabel = $w['source'] === 'catalog'
+                                ? 'Source: DepEd Strengthened SHS catalog (exact subject match)'
+                                : 'Profile: ' . $subjectGroupLabel($subject->subject_group) . ' — Source: configured grading policy';
+                            $tooltip = "WW {$wwStr}% / PT {$ptStr}% / Exam {$exStr}. {$sourceLabel}. Effective: DO 015, s. 2026 (Grade 11).";
+                        @endphp
+                        <span class="font-medium text-gray-700 cursor-help" title="{{ $tooltip }}">
+                            {{ $wwStr }}/{{ $ptStr }}/{{ $w['ex'] !== null ? rtrim(rtrim(number_format($w['ex'], 2), '0'), '.') : '—' }}
                         </span>
+                        <i class="bi bi-info-circle text-gray-300" title="{{ $tooltip }}"></i>
                     @else
-                        <span class="text-gray-400">Not configured</span>
+                        <span class="text-gray-400" title="No catalog match and no Subject Group set — grading weights cannot be resolved until this subject is classified.">Not configured</span>
                     @endif
                 </td>
-                <td>{{ $subject->track->name ?? '—' }}</td>
-                <td>{{ $subject->specialization->name ?? '—' }}</td>
+                <td class="text-xs">{{ trim(($subject->track->name ?? '') . ($subject->specialization ? ' / ' . $subject->specialization->name : ''), ' /') ?: '—' }}</td>
                 <td class="text-right">
                     <div class="flex items-center justify-end gap-2">
                         <button type="button"
@@ -155,7 +163,7 @@
             </tr>
             @empty
             <tr>
-                <td colspan="8">
+                <td colspan="6">
                     <x-empty-state message="No subjects yet." icon="bi-book"
                         hint='Use "Add Subject" or "Import Subjects" above to get started.' />
                 </td>
@@ -197,7 +205,7 @@
             <div class="grid grid-cols-2 gap-4">
                 <div>
                     <label class="block text-sm text-gray-600 mb-1">Type</label>
-                    <select name="type" id="subjectType" required onchange="toggleTrackFields()"
+                    <select name="type" id="subjectType" required onchange="toggleTrackFields(); refreshSubjectGroupField();"
                             class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
                         <option value="">— Select Type —</option>
                         <option value="core">Core</option>
@@ -206,7 +214,7 @@
                 </div>
                 <div>
                     <label class="block text-sm text-gray-600 mb-1">Grade Level</label>
-                    <select name="grade_level" id="subjectGrade" required
+                    <select name="grade_level" id="subjectGrade" required onchange="refreshSubjectGroupField()"
                             class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
                         <option value="">— Select Grade —</option>
                         <option value="11">Grade 11</option>
@@ -215,17 +223,19 @@
                 </div>
             </div>
 
-            <div>
+            <div id="subjectGroupWrapper">
                 <label class="block text-sm text-gray-600 mb-1">
                     Subject Group
-                    <span class="text-gray-400 text-xs">(DO 015, s. 2026 grading weight group)</span>
+                    <span class="text-gray-400 text-xs">(DO 015, s. 2026 grading weight group — Grade 11 only; Grade 12 weighs by section track instead)</span>
                 </label>
-                <select name="subject_group" id="subjectGroupField" required
+                <select name="subject_group" id="subjectGroupField"
                         class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                    <option value="">— Select Subject Group —</option>
                     @foreach($subjectGroups as $group)
-                        <option value="{{ $group }}">{{ $subjectGroupLabel($group) }}{{ $subjectGroupCoverText($group) ? ' — covers ' . $subjectGroupCoverText($group) : '' }}</option>
+                        <option value="{{ $group }}" data-for-type="{{ $group === 'core_academic' ? 'core' : 'elective' }}">{{ $subjectGroupLabel($group) }}{{ $subjectGroupCoverText($group) ? ' — covers ' . $subjectGroupCoverText($group) : '' }}</option>
                     @endforeach
                 </select>
+                <p class="text-xs text-gray-400 mt-1">Resolved grading weights (WW / PT / Exam) are shown on the Subjects list — never typed in manually.</p>
             </div>
 
             <div id="trackFields" class="hidden space-y-4">
@@ -287,16 +297,21 @@
 
         <p class="text-sm text-gray-500 mb-4">
             Upload an Excel (.xlsx) or CSV file. Required columns:
-            <strong>name, type, grade_level</strong>.
-            <strong>subject_group</strong> defaults to <strong>core_academic</strong>
-            when omitted, but only for a <strong>core</strong> row — the DO 015,
-            s. 2026 grading weight group; see the Subject Group column above for
-            the full list. An <strong>elective</strong> row must specify
-            subject_group explicitly; there is no safe default for an elective,
-            since Arts/Research/TechPro/Field Experience electives all carry
-            different weights. <strong>track, specialization</strong> (by name or
-            code) are also required for elective subjects. Type must be
-            <strong>core</strong> or <strong>elective</strong>; grade_level must be
+            <strong>name, type, grade_level</strong>. Never include WW/PT/Exam
+            percentage columns — grading weights are always resolved
+            automatically, from the DepEd catalog (by exact subject name) or
+            from Subject Group, never typed into a file.
+            <strong>subject_group</strong> is <strong>required for every Grade
+            11</strong> row (core or elective — there is no safe default; an
+            unclassified subject is rejected, never silently made Core) and
+            must be <strong>left blank for Grade 12</strong> rows (DO 8, s. 2015
+            weighs by section track, not subject group). It must also match
+            the row's type — <strong>core_academic</strong> is for
+            <strong>core</strong> rows only; an elective must use one of the
+            other groups listed in the Subject Group column above.
+            <strong>track, specialization</strong> (by name or code) are also
+            required for elective subjects. Type must be <strong>core</strong>
+            or <strong>elective</strong>; grade_level must be
             <strong>11</strong> or <strong>12</strong>.
         </p>
 

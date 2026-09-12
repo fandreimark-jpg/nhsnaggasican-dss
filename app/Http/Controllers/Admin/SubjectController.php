@@ -13,7 +13,6 @@ use App\Imports\SubjectsImport;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Helpers\LogActivity;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 
 /**
  * SubjectController (Admin)
@@ -28,7 +27,7 @@ class SubjectController extends Controller
     use ValidatesSpreadsheetUpload;
 
     /**
-     * Which subject_group a subject can be assigned — read from
+     * Every do015_2026 subject_group a subject can be assigned — read from
      * subject_group_weights itself rather than hardcoded, so a future
      * scheme's different group list is a seeded row, never a code
      * change. Scoped to 'do015_2026': the five do8_* rows are resolved
@@ -39,14 +38,16 @@ class SubjectController extends Controller
      * weights on a DO 015 subject, silently. 'all' is also excluded:
      * that's do8_2015's scheme-wide fallback bucket, never a real group
      * a subject is actually assigned.
+     *
+     * "Subject classification and grading weights cleanup" pass — kept as
+     * the view's full dropdown source (Blade needs every group, labelled,
+     * to build the type-filtered <select> client-side), but the
+     * authoritative type/group consistency check is
+     * SubjectGroupWeight::classificationError(), not this method.
      */
     private function availableSubjectGroups()
     {
-        return SubjectGroupWeight::where('scheme', 'do015_2026')
-            ->where('subject_group', '!=', 'all')
-            ->distinct()
-            ->orderBy('subject_group')
-            ->pluck('subject_group');
+        return collect(SubjectGroupWeight::allGroups());
     }
 
     /**
@@ -122,16 +123,28 @@ class SubjectController extends Controller
             'name'              => 'required|string|max:255',
             'type'              => 'required|in:core,elective',
             'grade_level'       => 'required|in:11,12',
-            'subject_group'     => ['required', Rule::in($this->availableSubjectGroups())],
+            'subject_group'     => 'nullable|string',
             'track_id'          => 'nullable|exists:tracks,id',
             'specialization_id' => 'nullable|exists:specializations,id',
         ]);
+
+        // Validate the RAW submitted value first — a Grade 12 row that
+        // submits a value anyway must be rejected outright, never silently
+        // dropped. Only after it's confirmed consistent (or confirmed
+        // blank) does Grade 12 get coerced to null for storage.
+        $rawSubjectGroup = $request->subject_group !== '' ? $request->subject_group : null;
+
+        if ($error = SubjectGroupWeight::classificationError($request->type, (int) $request->grade_level, $rawSubjectGroup)) {
+            return back()->withErrors(['subject_group' => $error])->withInput();
+        }
+
+        $subjectGroup = $request->grade_level == 12 ? null : $rawSubjectGroup;
 
         Subject::create([
             'name'              => $request->name,
             'type'              => $request->type,
             'grade_level'       => $request->grade_level,
-            'subject_group'     => $request->subject_group,
+            'subject_group'     => $subjectGroup,
             // Only elective subjects have track/specialization
             'track_id'          => $request->type === 'elective' ? $request->track_id : null,
             'specialization_id' => $request->type === 'elective' ? $request->specialization_id : null,
@@ -165,16 +178,17 @@ class SubjectController extends Controller
 
         $failures = $import->failures();
 
-        // "ECR alignment" work order, PART 4a — every row whose
-        // subject_group cell was blank/absent fell back to core_academic
-        // silently; report it by name via the import-result panel's
-        // existing (previously unused) import_warnings notice channel
-        // rather than leaving the fallback invisible. Set on both branches
-        // below — a row can default its group and still import cleanly.
+        // "Subject classification and grading weights cleanup" pass — a
+        // subject whose name exactly matches a deped_subject_catalog row
+        // was auto-linked (catalog_id set); its grading weights now come
+        // from that catalog row, not subject_group. Reported here so an
+        // Admin can see it happened, since nothing prompts for it on the
+        // import form. Set on both branches below — a row can auto-link
+        // and still import cleanly.
         $importWarnings = [];
-        if (!empty($import->defaultedSubjectGroupNames)) {
-            $importWarnings[] = count($import->defaultedSubjectGroupNames) . ' subject(s) had no subject_group in the file and defaulted to Core Academic (20/50/30): '
-                . implode(', ', $import->defaultedSubjectGroupNames) . '.';
+        if (!empty($import->catalogLinkedNames)) {
+            $importWarnings[] = count($import->catalogLinkedNames) . ' subject(s) matched the DepEd Strengthened SHS catalog by name and were auto-linked (grading weights come from the catalog, not Subject Group): '
+                . implode(', ', $import->catalogLinkedNames) . '.';
         }
 
         if ($failures->count() > 0) {
@@ -215,16 +229,28 @@ class SubjectController extends Controller
             'name'              => 'required|string|max:255',
             'type'              => 'required|in:core,elective',
             'grade_level'       => 'required|in:11,12',
-            'subject_group'     => ['required', Rule::in($this->availableSubjectGroups())],
+            'subject_group'     => 'nullable|string',
             'track_id'          => 'nullable|exists:tracks,id',
             'specialization_id' => 'nullable|exists:specializations,id',
         ]);
+
+        // Validate the RAW submitted value first — a Grade 12 row that
+        // submits a value anyway must be rejected outright, never silently
+        // dropped. Only after it's confirmed consistent (or confirmed
+        // blank) does Grade 12 get coerced to null for storage.
+        $rawSubjectGroup = $request->subject_group !== '' ? $request->subject_group : null;
+
+        if ($error = SubjectGroupWeight::classificationError($request->type, (int) $request->grade_level, $rawSubjectGroup)) {
+            return back()->withErrors(['subject_group' => $error])->withInput();
+        }
+
+        $subjectGroup = $request->grade_level == 12 ? null : $rawSubjectGroup;
 
         $subject->update([
             'name'              => $request->name,
             'type'              => $request->type,
             'grade_level'       => $request->grade_level,
-            'subject_group'     => $request->subject_group,
+            'subject_group'     => $subjectGroup,
             'track_id'          => $request->type === 'elective' ? $request->track_id : null,
             'specialization_id' => $request->type === 'elective' ? $request->specialization_id : null,
         ]);

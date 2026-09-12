@@ -21,8 +21,12 @@ class AdminSubjectGroupTest extends TestCase
     {
         $admin = User::factory()->admin()->create();
 
+        // "Subject classification and grading weights cleanup" pass —
+        // research_innovation is elective-only (SubjectGroupWeight::
+        // classificationError() rejects it for type=core); Practical
+        // Research 1 is a genuine elective in the real DepEd catalog.
         $this->actingAs($admin)->post(route('admin.subjects.store'), [
-            'name' => 'Practical Research 1', 'type' => 'core', 'grade_level' => 11,
+            'name' => 'Practical Research 1', 'type' => 'elective', 'grade_level' => 11,
             'subject_group' => 'research_innovation',
         ])->assertRedirect(route('admin.subjects'));
 
@@ -46,10 +50,13 @@ class AdminSubjectGroupTest extends TestCase
     public function test_updating_a_subject_can_change_its_subject_group(): void
     {
         $admin = User::factory()->admin()->create();
-        $subject = Subject::factory()->create(['subject_group' => 'core_academic']);
+        // grade_level pinned to 11 (not left to the factory's random 11/12)
+        // — techpro is a Grade 11/do015_2026 group and would be rejected
+        // outright for a Grade 12 row (subject_group must be null there).
+        $subject = Subject::factory()->create(['type' => 'elective', 'grade_level' => 11, 'subject_group' => 'field_exposure']);
 
         $this->actingAs($admin)->put(route('admin.subjects.update', $subject->id), [
-            'name' => $subject->name, 'type' => $subject->type, 'grade_level' => $subject->grade_level,
+            'name' => $subject->name, 'type' => 'elective', 'grade_level' => 11,
             'subject_group' => 'techpro',
         ])->assertRedirect(route('admin.subjects'));
 
