@@ -419,6 +419,91 @@ to `scheme = 'do015_2026'`; regression tests assert no `do8_` slug appears
 in the form's rendered HTML or view data, and that a `do8_core` value is
 rejected both from the manual form and from an uploaded file.
 
+## Subject classification: `core_academic` is Core-only now — `academic_other` exists so an elective never has to borrow it
+
+**"Subject classification and grading weights cleanup" pass.** `core_academic`
+(20/50/30) was quietly serving two different DepEd profiles at once: Core
+subjects themselves, and the separate "Academic Elective — all other" profile
+(STEM and Business & Entrepreneurship cluster electives), which happens to
+carry the identical 20/50/30 split. Sharing one slug between them is the exact
+mechanism behind the reported "TYPE: Elective, SUBJECT GROUP: Core Academic"
+contradiction — an elective correctly weighted at 20/50/30 had no honest group
+to sit in except the one named for Core. A new `academic_other` row (same
+20/50/30 numbers, a distinct slug) was added to `subject_group_weights`, and
+`core_academic` is now reserved for `type=core` subjects only.
+
+**`SubjectGroupWeight::classificationError(string $type, int $gradeLevel,
+?string $subjectGroup): ?string`** is the single authoritative check this
+enforces — called from both `Admin\SubjectController::store()`/`update()` and
+`SubjectsImport::withValidator()`, so the manual form and the bulk importer
+can never disagree about what's a valid combination:
+
+- Grade 11 (do015_2026): `subject_group` is REQUIRED, must be a real seeded
+  group, and must match type — `core_academic` for `type=core` only, never for
+  an elective, and every other group is elective-only, never for a core
+  subject.
+- Grade 12 (do8_2015): `subject_group` must be `null`. DO 8 weighs by a
+  SECTION's track (`GradingEngine::resolveDo8GroupKey()`), never reads a
+  subject's `subject_group` at all — any non-null value there is meaningless,
+  not merely unused, and is rejected rather than silently ignored (the Admin
+  controller validates the RAW submitted value before coercing it to null for
+  storage, specifically so a stray value is rejected, not silently dropped).
+
+**Every "blank/unknown → `core_academic`" default was removed, on purpose,
+across all three layers it existed in**: the `subjects.subject_group` column's
+DB-level `DEFAULT 'core_academic'` (dropped via a new migration — the
+already-run column-add migration was never edited), `SubjectGroupWeight::
+resolve()`'s own `$subjectGroup ?: 'core_academic'` fallback (removed — a null
+group for `do015_2026` now falls through to the same "no `all` bucket either"
+`RuntimeException` an unseeded scheme would throw, since do015_2026 has no
+`all` row and never had one), and `SubjectsImport`'s prior CORE-row leniency
+(a blank `subject_group` cell used to default quietly for CORE rows only,
+reported via an `import_warnings` notice — that entire mechanism is gone; a
+blank cell on any Grade 11 row, core or elective, is now a rejected row). An
+unclassified Grade 11 subject now surfaces loudly — a validation error at
+creation/import time, or a `RuntimeException` from `GradingEngine` if one ever
+reaches grading — never a quiet, wrong `core_academic` guess.
+
+**Three live subjects the audit found actually misclassified, corrected by a
+targeted migration** (`2026_09_12_000003_normalize_existing_subject_
+classification.php`, scoped by exact name+grade_level match, not a blanket
+re-derivation — verified zero grade/assessment rows referenced any of the
+three before touching them, so this was a pure classification fix with no
+computed-grade movement):
+
+- **Basic Calculus** (Grade 11 elective) — was `core_academic`; its real
+  catalog row (STEM cluster) is also 20/50/30, which is exactly why the
+  mislabel went unnoticed, but it is TE-only (no ST1/ST2 at all). Linked to
+  its `deped_subject_catalog` row and moved to `academic_other`. The catalog
+  link isn't just a label fix — it corrects a real grading bug: before this,
+  the subject had no catalog link and was computing on the equal-thirds
+  ST1/ST2/TE fallback it was never supposed to have.
+- **Art Criticism and Creative Markets** (Grade 11 elective) — was
+  `core_academic`; its real catalog row (Arts, Social Sciences, and Humanities
+  cluster) is genuinely 20/60/20, a different split. This one was silently
+  mis-GRADED, not just mislabeled. Linked to its catalog row and moved to the
+  already-seeded `arts_sports_wellness` group.
+- **Community Engagement Solidarity and Citizenship** (Grade 12 elective) —
+  had `subject_group = core_academic`, a leftover from the Admin form always
+  requiring a do015_2026 group even for a Grade 12 row (now fixed — see
+  above). Not wrong the way the two Grade 11 rows are, since Grade 12 never
+  read this column at all; just meaningless. Set to `null`.
+
+**`SubjectsImport` also now auto-links `catalog_id`** by exact,
+case-insensitive subject-name match against `deped_subject_catalog` for every
+imported row (reported via the existing `import_warnings` notice channel,
+repurposed from the removed default-notice) — the same automatic resolution a
+manually-created subject still doesn't get (there's no equivalent lookup on
+`Admin\SubjectController::store()`; only import reads the whole file row by
+row already).
+
+`tests/Feature/SubjectClassificationConsistencyTest.php` is the test-of-record
+for all of this: every one of the seven named DO 015, s. 2026 profiles (Core,
+Academic Elective — all other, Research/Design/Innovation, Arts/Sports/
+Health/Wellness, Field Experience, Tech-Pro — all other, Work Immersion)
+computed end-to-end through `GradingEngine`, plus every invalid type/group/
+grade-level combination `classificationError()` is meant to catch.
+
 ## mimes: MIME-sniffing rejects the official DepEd ECR — fixed everywhere it appeared
 
 The real official SSHS E-Class Record's actual bytes sniff as
@@ -1659,11 +1744,16 @@ exists to make** — nothing warns an admin that the row they just created
 isn't classified, and nothing stops the same ambiguity (an SSHS cluster or a
 2013 strand sharing a code) from recurring one row at a time.
 
-This is the same shape as the `subject_group` default Part 4 addresses for
-`subjects`: a nullable column, no UI to set it, quietly defaulting instead of
-asking. Part 4 makes that default visible for subjects; this one is not yet
-fixed the same way for `curriculum` on newly-created specializations — no
-data-health check, no import-panel notice, nothing surfacing it today. See
+This is the same shape `subjects.subject_group` used to have before the
+"subject classification and grading weights cleanup" pass: a nullable column,
+no UI forcing a value, quietly defaulting instead of asking. That pass went
+further than "make it visible" for subjects — it removed the default outright
+(`SubjectGroupWeight::classificationError()` now rejects a Grade 11 subject
+with no `subject_group` rather than defaulting one), which is why an
+unclassified Grade 11 subject can no longer exist at all going forward. This
+same fix has not yet been applied to `curriculum` on newly-created
+specializations — no equivalent rejection, no data-health check, no
+import-panel notice, nothing surfacing it today. See
 `ECR_ALIGNMENT_WORK_ORDER.md` Part 7, which requires `curriculum` to be set
 explicitly on every specialization it touches, alongside `sections.curriculum`.
 
