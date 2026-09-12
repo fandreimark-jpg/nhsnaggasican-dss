@@ -181,10 +181,15 @@ class GradesImportTest extends TestCase
         $this->assertEmpty($import->errors); // blank is not an error, just skipped
     }
 
-    public function test_a_column_not_matching_any_known_subject_is_ignored(): void
+    /**
+     * SYSTEM_FIXES_AND_ML_AUDIT.md, "School Excel data must match the
+     * system" -- an unrecognized column is skipped for grading (unchanged
+     * -- it must never silently enter the calculation under the wrong
+     * subject), but is now ALSO reported by name, not silently dropped
+     * with nothing on screen to explain the missing scores.
+     */
+    public function test_a_column_not_matching_any_known_subject_is_skipped_and_reported(): void
     {
-        // Prevents an unrecognized/unmapped column from silently entering
-        // the grading calculation under the wrong subject.
         $adviser = User::factory()->create();
         $section = Section::factory()->create(['adviser_id' => $adviser->id]);
         $student = Student::factory()->create(['section_id' => $section->id]);
@@ -201,6 +206,31 @@ class GradesImportTest extends TestCase
 
         $this->assertSame(0, $import->importedCount);
         $this->assertDatabaseMissing('grades', ['student_id' => $student->id]);
+        $this->assertNotEmpty($import->errors, 'The unmatched column must be reported, not silently dropped.');
+        $this->assertStringContainsString('Some Unrelated Column', $import->errors[0]);
+    }
+
+    public function test_a_duplicate_lrn_within_the_file_is_reported_and_the_second_row_is_skipped(): void
+    {
+        $adviser = User::factory()->create();
+        $section = Section::factory()->create(['adviser_id' => $adviser->id]);
+        $student = Student::factory()->create(['section_id' => $section->id]);
+        $subject = Subject::factory()->create();
+
+        $import = $this->makeImport($section, collect([$subject]), collect([$student]));
+
+        $rows = collect([
+            ['lrn', 'last_name', 'first_name', $subject->name],
+            [$student->lrn, $student->last_name, $student->first_name, 80],
+            [$student->lrn, $student->last_name, $student->first_name, 95], // duplicate LRN
+        ]);
+
+        $import->collection($rows);
+
+        $this->assertSame(1, $import->importedCount);
+        $this->assertDatabaseHas('grades', ['student_id' => $student->id, 'subject_id' => $subject->id, 'grade' => 80]);
+        $this->assertNotEmpty($import->errors);
+        $this->assertStringContainsString('already appeared', $import->errors[array_key_last($import->errors)]);
     }
 
     public function test_re_importing_the_same_student_and_subject_updates_rather_than_duplicates(): void

@@ -75,6 +75,8 @@
         <input type="hidden" name="section_search" value="{{ request('section_search') }}">
         <input type="hidden" name="status" value="{{ request('status') }}">
         <input type="hidden" name="subject_id" value="{{ request('subject_id') }}">
+        <input type="hidden" name="student_search" value="{{ request('student_search') }}">
+        <input type="hidden" name="risk_level" value="{{ request('risk_level') }}">
         @if(request()->has('grading_period'))
             <input type="hidden" name="grading_period" value="{{ request('grading_period') }}">
         @endif
@@ -113,7 +115,8 @@
         'completed' => 'bg-green-100 text-green-700', 'monitoring' => 'bg-orange-100 text-orange-700',
     ];
     $componentLabels = ['written_work' => 'Written Work', 'performance_task' => 'Performance Task', 'examination' => 'Examination'];
-    $filterKeys = ['grade_level', 'section_search', 'status', 'ready_for_review', 'subject_id', 'grading_period', 'awaiting_decision'];
+    $riskLevelLabels = ['low' => 'Low', 'moderate' => 'Moderate', 'high' => 'High'];
+    $filterKeys = ['grade_level', 'section_search', 'status', 'ready_for_review', 'subject_id', 'grading_period', 'awaiting_decision', 'student_search', 'risk_level'];
     $filtersActive = collect($filterKeys)->contains(fn($k) => request($k));
     $selectedSection = $sections->firstWhere('name', request('section_search'));
 @endphp
@@ -193,6 +196,21 @@
                         <option value="">All subjects</option>
                         @foreach($subjects as $subj)
                             <option value="{{ $subj->id }}" {{ (string) request('subject_id') === (string) $subj->id ? 'selected' : '' }}>{{ $subj->name }}</option>
+                        @endforeach
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Student</label>
+                    <input type="text" name="student_search" value="{{ request('student_search') }}"
+                           placeholder="Last or first name"
+                           class="border rounded-md text-sm px-2 py-1.5 min-w-[150px]">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">Risk Level</label>
+                    <select name="risk_level" class="border rounded-md text-sm px-2 py-1.5 min-w-[130px]">
+                        <option value="">All risk levels</option>
+                        @foreach($riskLevelLabels as $value => $label)
+                            <option value="{{ $value }}" {{ request('risk_level') === $value ? 'selected' : '' }}>{{ $label }}</option>
                         @endforeach
                     </select>
                 </div>

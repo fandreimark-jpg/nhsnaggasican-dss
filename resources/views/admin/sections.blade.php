@@ -203,6 +203,22 @@
             </div>
 
             <div>
+                <label class="block text-sm text-gray-600 mb-1">
+                    Curriculum <span class="text-gray-400">(optional)</span>
+                </label>
+                <select name="curriculum" id="sectionCurriculum"
+                        class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                    <option value="">— Not set (inferred from grade level) —</option>
+                    <option value="sshs">Strengthened SHS (sshs)</option>
+                    <option value="k12_2013">2013 Curriculum (k12_2013)</option>
+                </select>
+                <p class="text-xs text-gray-400 mt-1">
+                    Leave unset to keep using grade-level inference. Set explicitly once the school's real curriculum
+                    assignment is confirmed for this section.
+                </p>
+            </div>
+
+            <div>
                 <label class="block text-sm text-gray-600 mb-1">Track</label>
                 <select name="track_id" id="sectionTrack" required
                         onchange="loadSpecializations(this.value, 'sectionSpec', document.getElementById('sectionForm').dataset.specUrl)"

@@ -193,6 +193,48 @@ class SectionsImportTest extends TestCase
         $this->assertTrue($subjects->contains('id', $elective->id), 'The imported section must resolve to the correct elective via its track_id/specialization_id.');
     }
 
+    /**
+     * SYSTEM_FIXES_AND_ML_AUDIT.md, "sections/curriculum reconciliation"
+     * -- system-side structure only (see the importer's own docblock on
+     * why this stays optional, not required, until a real school file
+     * exists to justify making it mandatory).
+     */
+    public function test_curriculum_column_is_optional_and_absent_files_still_import_with_a_null_curriculum(): void
+    {
+        [$track, $spec] = $this->makeTrackAndSpec();
+
+        $import = $this->importCsv([
+            ['Narra', '11', $track->name, $spec->name, '', '2026-2027'],
+        ]);
+
+        $this->assertCount(0, $import->failures());
+        $this->assertDatabaseHas('sections', ['name' => 'Narra', 'curriculum' => null]);
+    }
+
+    public function test_curriculum_column_when_given_is_stored_explicitly(): void
+    {
+        [$track, $spec] = $this->makeTrackAndSpec();
+
+        $import = $this->importCsv([
+            ['Shakespeare', '11', $track->name, $spec->name, '', '2026-2027', 'sshs'],
+        ], self::HEADER . ',curriculum');
+
+        $this->assertCount(0, $import->failures());
+        $this->assertDatabaseHas('sections', ['name' => 'Shakespeare', 'curriculum' => 'sshs']);
+    }
+
+    public function test_an_unrecognized_curriculum_value_is_rejected_not_silently_dropped(): void
+    {
+        [$track, $spec] = $this->makeTrackAndSpec();
+
+        $import = $this->importCsv([
+            ['Mystery', '11', $track->name, $spec->name, '', '2026-2027', 'strengthened_shs'], // not a real value
+        ], self::HEADER . ',curriculum');
+
+        $this->assertCount(1, $import->failures());
+        $this->assertDatabaseMissing('sections', ['name' => 'Mystery']);
+    }
+
     public function test_admin_can_import_sections_via_http_and_gets_a_summary(): void
     {
         $admin = User::factory()->admin()->create();

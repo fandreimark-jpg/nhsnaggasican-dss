@@ -47,21 +47,50 @@ class GradesImport implements ToCollection, WithMultipleSheets
         $header   = $rows->first();
         $dataRows = $rows->slice(1);
 
-        // Map column index (3 onward) to the matching Subject
+        // Map column index (3 onward) to the matching Subject. SYSTEM_
+        // FIXES_AND_ML_AUDIT.md, "School Excel data must match the
+        // system" — a header that names no real subject for this
+        // section used to be silently dropped (every score under it
+        // discarded with nothing on screen to explain why); now reported
+        // once, by name, so a typo or a subject the school doesn't
+        // actually offer this section is a visible error, not missing
+        // data nobody asked about.
         $columnSubjectMap = [];
+        $unmatchedHeaders = [];
         foreach ($header as $colIndex => $colName) {
             if ($colIndex < 3) continue; // 0=lrn, 1=last_name, 2=first_name
-            $subject = $this->subjectsByName->get(strtolower(trim((string) $colName)));
+            $colName = trim((string) $colName);
+            if ($colName === '') continue; // a genuinely blank trailing column, not a subject attempt
+            $subject = $this->subjectsByName->get(strtolower($colName));
             if ($subject) {
                 $columnSubjectMap[$colIndex] = $subject;
+            } else {
+                $unmatchedHeaders[] = $colName;
             }
         }
+
+        if (!empty($unmatchedHeaders)) {
+            $this->errors[] = 'Column(s) not recognized as a subject for this section, and skipped entirely: '
+                . implode(', ', $unmatchedHeaders) . '. Check spelling against the downloadable template.';
+        }
+
+        // Cross-row duplicate LRN — without this, a student listed twice
+        // (a copy-paste error) would silently have their SECOND row's
+        // scores overwrite the first via updateOrCreate() below, with
+        // nothing on screen to say a row was ever discarded.
+        $seenLrns = [];
 
         foreach ($dataRows as $rowIndex => $row) {
             $excelRowNumber = $rowIndex + 2;
 
             $lrn = trim((string) ($row[0] ?? ''));
             if ($lrn === '') continue; // fully blank row — skip silently
+
+            if (isset($seenLrns[$lrn])) {
+                $this->errors[] = "Row {$excelRowNumber}: LRN {$lrn} already appeared on row {$seenLrns[$lrn]} in this file — this row was skipped, not applied on top of it.";
+                continue;
+            }
+            $seenLrns[$lrn] = $excelRowNumber;
 
             $student = $this->studentsByLrn->get($lrn);
             if (!$student) {

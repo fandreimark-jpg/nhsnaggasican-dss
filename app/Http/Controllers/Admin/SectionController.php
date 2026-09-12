@@ -91,11 +91,21 @@ class SectionController extends Controller
             // exists:users,id alone would let a non-adviser account (e.g.
             // another admin) be assigned as a section's adviser.
             'adviser_id'        => ['nullable', Rule::exists('users', 'id')->where('role', 'adviser')],
+            // Optional (nullable) rather than required -- SYSTEM_FIXES_
+            // AND_ML_AUDIT.md, "sections/curriculum reconciliation."
+            // Leaving it unset keeps TransmutationService::schemeFor()'s
+            // existing grade-level inference exactly as it already
+            // behaves for every section created before this field
+            // existed; ECR_ALIGNMENT_WORK_ORDER.md Part 7 (the real
+            // roster, once it arrives) is what actually requires setting
+            // it explicitly for every section it creates.
+            'curriculum'        => 'nullable|in:sshs,k12_2013',
         ]);
 
         Section::create([
             'name'              => $request->name,
             'grade_level'       => $request->grade_level,
+            'curriculum'        => $request->curriculum ?: null,
             'track_id'          => $request->track_id,
             'specialization_id' => $request->specialization_id,
             'school_year'       => $request->school_year,
@@ -188,6 +198,7 @@ class SectionController extends Controller
             // exists:users,id alone would let a non-adviser account (e.g.
             // another admin) be assigned as a section's adviser.
             'adviser_id'        => ['nullable', Rule::exists('users', 'id')->where('role', 'adviser')],
+            'curriculum'        => 'nullable|in:sshs,k12_2013',
         ]);
 
         // Prevent assigning an adviser who is already assigned to another section
@@ -206,6 +217,7 @@ class SectionController extends Controller
         $section->update([
             'name'              => $request->name,
             'grade_level'       => $request->grade_level,
+            'curriculum'        => $request->curriculum ?: null,
             'track_id'          => $request->track_id,
             'specialization_id' => $request->specialization_id,
             'school_year'       => $request->school_year,

@@ -106,9 +106,24 @@ class SectionsImport implements ToModel, WithHeadingRow, WithValidation, SkipsOn
 
         $this->importedCount++;
 
+        // SYSTEM_FIXES_AND_ML_AUDIT.md, "Sections must remain separate
+        // master-data records" / "sections/curriculum reconciliation" --
+        // optional column, kept nullable rather than made required: every
+        // pre-existing import file (and this importer's own established
+        // 6-column header) has no curriculum column at all, and forcing
+        // one now would break every one of them for no real gain until
+        // there is an actual school file that supplies it. When given,
+        // it is used directly instead of falling back to
+        // TransmutationService::schemeFor()'s grade-level inference --
+        // ECR_ALIGNMENT_WORK_ORDER.md Part 7 explicitly requires curriculum
+        // to be set explicitly, not inferred a second time, for every
+        // section it creates from the real roster once that arrives.
+        $curriculum = trim((string) ($row['curriculum'] ?? ''));
+
         return new Section([
             'name'              => trim($row['name']),
             'grade_level'       => (int) $row['grade_level'],
+            'curriculum'        => $curriculum !== '' ? strtolower($curriculum) : null,
             'track_id'          => $track?->id,
             'specialization_id' => $specialization?->id,
             'adviser_id'        => $adviser?->id,
@@ -147,6 +162,11 @@ class SectionsImport implements ToModel, WithHeadingRow, WithValidation, SkipsOn
             '*.specialization' => ['required', 'string'],
             '*.adviser_email'  => ['nullable', 'email'],
             '*.school_year'    => ['required', 'string', 'max:20'],
+            // Optional (see model()'s docblock) but strictly validated when
+            // given, case-insensitively — an unrecognized value is a row
+            // failure, never silently dropped to null the way an absent
+            // column already, correctly, is.
+            '*.curriculum'     => ['nullable', 'in:sshs,k12_2013,SSHS,K12_2013'],
         ];
     }
 
@@ -154,6 +174,7 @@ class SectionsImport implements ToModel, WithHeadingRow, WithValidation, SkipsOn
     {
         return [
             '*.grade_level.in' => 'Grade level must be 11 or 12.',
+            '*.curriculum.in'  => 'Curriculum must be "sshs" or "k12_2013" when given.',
         ];
     }
 

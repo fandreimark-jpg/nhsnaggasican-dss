@@ -272,6 +272,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
             document.getElementById("sectionName").value = section.name;
             document.getElementById("sectionGrade").value = section.grade_level;
+            document.getElementById("sectionCurriculum").value = section.curriculum ?? "";
             document.getElementById("sectionTrack").value = section.track_id ?? "";
             document.getElementById("sectionSchoolYear").value = section.school_year;
 

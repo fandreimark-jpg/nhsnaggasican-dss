@@ -213,6 +213,8 @@ class InterventionController extends Controller
         $sectionName = $request->input('section_search');
         $status      = $request->input('status');
         $subjectId   = $request->input('subject_id');
+        $studentSearch = $request->input('student_search');
+        $riskLevel   = $request->input('risk_level');
         $gradingPeriod = $this->resolveGradingPeriod($request);
 
         return Intervention::query()
@@ -224,6 +226,25 @@ class InterventionController extends Controller
             // apply every OTHER active filter but deliberately not this
             // one — see its call site.
             ->when($includeSubjectFilter && $subjectId, fn($q) => $q->where('subject_id', $subjectId))
+            // SYSTEM_FIXES_AND_ML_AUDIT.md, "Interventions" — Student
+            // filter, by name (same text-search convention as
+            // section_search above) rather than a select of every student
+            // in the school, which would be unusably long.
+            ->when($studentSearch, fn($q) => $q->whereHas('student', function ($s) use ($studentSearch) {
+                $s->where(function ($s2) use ($studentSearch) {
+                    $s2->where('last_name', 'like', "%{$studentSearch}%")
+                       ->orWhere('first_name', 'like', "%{$studentSearch}%");
+                });
+            }))
+            // Risk Level filter — reads the LINKED risk_result's risk_level,
+            // never a copy of it on interventions itself (there is none).
+            // An intervention with no risk result at all (recorded from
+            // in-term evidence, no submitted term report yet — a real,
+            // documented case, see CLAUDE.md's "Term-over-Term Progress
+            // depends on the order a Principal acted in") has no risk
+            // level to match, so it is correctly excluded when this filter
+            // is active, not guessed into a bucket.
+            ->when($riskLevel, fn($q) => $q->whereHas('riskResult', fn($r) => $r->where('risk_level', $riskLevel)))
             // An intervention with no recorded term (nullable on older
             // rows) isn't "about" any particular term, so the Term
             // filter never hides it — only narrows among rows that DO

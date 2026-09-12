@@ -27,6 +27,7 @@ use App\Http\Controllers\Admin\SectionController;
 use App\Http\Controllers\Admin\StudentController;
 use App\Http\Controllers\Admin\ReportController;
 use App\Http\Controllers\Admin\AcademicTermController;
+use App\Http\Controllers\Admin\AcademicYearController;
 use App\Http\Controllers\Admin\ActivityLogController;
 
 // Root redirect
@@ -181,6 +182,11 @@ Route::middleware(['auth', 'role:admin'])
         Route::get('/academic-terms',               [AcademicTermController::class, 'index'])->name('academic-terms');
         Route::post('/academic-terms/{term}/open',  [AcademicTermController::class, 'open'])->whereNumber('term')->name('academic-terms.open');
         Route::post('/academic-terms/{term}/close',[AcademicTermController::class, 'close'])->whereNumber('term')->name('academic-terms.close');
+        // SYSTEM_FIXES_AND_ML_AUDIT.md, "Remove Hardcoded Academic Year" —
+        // explicit academic-year configuration, separate from term
+        // open/close control above.
+        Route::post('/academic-years',              [AcademicYearController::class, 'store'])->name('academic-years.store');
+        Route::post('/academic-years/{academicYear}/activate', [AcademicYearController::class, 'activate'])->name('academic-years.activate');
         // Students Management — adding and importing students is exclusively
         // an Admin action (master-data ownership); advisers may only view
         // their own section's students and edit existing records.

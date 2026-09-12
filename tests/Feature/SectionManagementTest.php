@@ -67,4 +67,57 @@ class SectionManagementTest extends TestCase
         $response->assertSessionHasNoErrors();
         $this->assertDatabaseHas('sections', ['name' => 'Narra', 'adviser_id' => $adviser->id]);
     }
+
+    /**
+     * SYSTEM_FIXES_AND_ML_AUDIT.md, "sections/curriculum reconciliation"
+     * -- the manual Add/Edit Section form can now set curriculum
+     * explicitly, same optional treatment as the bulk importer (see
+     * SectionsImportTest).
+     */
+    public function test_curriculum_is_optional_on_manual_create(): void
+    {
+        $admin = User::factory()->admin()->create();
+
+        $response = $this->actingAs($admin)->post('/admin/sections', $this->sectionPayload());
+
+        $response->assertSessionHasNoErrors();
+        $this->assertDatabaseHas('sections', ['name' => 'Narra', 'curriculum' => null]);
+    }
+
+    public function test_curriculum_can_be_set_explicitly_on_manual_create(): void
+    {
+        $admin = User::factory()->admin()->create();
+
+        $response = $this->actingAs($admin)->post('/admin/sections', $this->sectionPayload(['curriculum' => 'sshs']));
+
+        $response->assertSessionHasNoErrors();
+        $this->assertDatabaseHas('sections', ['name' => 'Narra', 'curriculum' => 'sshs']);
+    }
+
+    public function test_an_unrecognized_curriculum_value_is_rejected_on_manual_create(): void
+    {
+        $admin = User::factory()->admin()->create();
+
+        $response = $this->actingAs($admin)->post('/admin/sections', $this->sectionPayload(['curriculum' => 'not_a_real_curriculum']));
+
+        $response->assertSessionHasErrors('curriculum');
+        $this->assertDatabaseMissing('sections', ['name' => 'Narra']);
+    }
+
+    public function test_curriculum_can_be_updated_on_an_existing_section(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $track = Track::factory()->create();
+        $specialization = Specialization::factory()->create(['track_id' => $track->id]);
+        $section = Section::factory()->create([
+            'track_id' => $track->id, 'specialization_id' => $specialization->id, 'curriculum' => null,
+        ]);
+
+        $response = $this->actingAs($admin)->put("/admin/sections/{$section->id}", $this->sectionPayload([
+            'name' => $section->name, 'curriculum' => 'k12_2013',
+        ]));
+
+        $response->assertSessionHasNoErrors();
+        $this->assertSame('k12_2013', $section->fresh()->curriculum);
+    }
 }

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\AcademicTerm;
+use App\Models\AcademicYear;
 use App\Models\Section;
 use App\Helpers\LogActivity;
 use Illuminate\Http\Request;
@@ -40,7 +41,9 @@ class AcademicTermController extends Controller
                 return $term;
             });
 
-        return view('admin.academic-terms', compact('terms', 'schoolYear'));
+        $academicYears = AcademicYear::orderByDesc('school_year')->get();
+
+        return view('admin.academic-terms', compact('terms', 'schoolYear', 'academicYears'));
     }
 
     public function open(int $term)

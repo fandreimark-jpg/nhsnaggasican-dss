@@ -70,14 +70,25 @@ class Section extends Model
     }
 
     /**
-     * The school year currently in use system-wide — the most recently
-     * created section's school_year, or a fresh default if none exist yet.
-     * Shared by AcademicTermController and the Admin dashboard so both
-     * agree on which year is "active" instead of each guessing separately.
+     * The school year currently in use system-wide. Reads
+     * AcademicYear::active() first — the explicit, admin-configurable
+     * flag (SYSTEM_FIXES_AND_ML_AUDIT.md, "Remove Hardcoded Academic
+     * Year") — so an admin can activate a NEW school year before any
+     * section exists in it. Falls back to the most recently created
+     * section's school_year (this method's original behavior, kept for
+     * every database that predates the academic_years table and for a
+     * fresh install where nobody has explicitly activated a year yet),
+     * and only as a last resort to a computed (never hardcoded) default.
+     *
+     * Shared by every consumer that needs "the current school year" —
+     * assessments, grades, reports, risk classification, interventions,
+     * imports, and every dashboard — so all of them agree on which year
+     * is active instead of each independently guessing.
      */
     public static function activeSchoolYear(): string
     {
-        return static::orderByDesc('id')->value('school_year')
+        return \App\Models\AcademicYear::active()?->school_year
+            ?? static::orderByDesc('id')->value('school_year')
             ?? date('Y') . '-' . (date('Y') + 1);
     }
 }

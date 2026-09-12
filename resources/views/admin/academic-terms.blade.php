@@ -17,6 +17,71 @@
 </div>
 @endif
 
+<div class="bg-white rounded-xl shadow-sm mb-4">
+    <div class="px-6 py-4 border-b">
+        <h2 class="text-sm font-semibold text-gray-800">Academic Years</h2>
+        <p class="text-xs text-gray-400">
+            Configure which school year is active — no code change or new section required. Everything on this page,
+            and every other screen that reads "the active school year," follows whichever one is marked Active below.
+        </p>
+    </div>
+
+    <div class="divide-y divide-gray-100">
+        @forelse($academicYears as $year)
+        <div class="flex items-center justify-between gap-3 px-6 py-3">
+            <div>
+                <span class="font-medium text-gray-800">{{ $year->school_year }}</span>
+                @if($year->start_date || $year->end_date)
+                    <span class="text-xs text-gray-400 ml-2">
+                        {{ $year->start_date?->format('M j, Y') ?? '—' }} to {{ $year->end_date?->format('M j, Y') ?? '—' }}
+                    </span>
+                @endif
+            </div>
+            @if($year->is_active)
+                <span class="bg-green-100 text-green-700 text-xs font-medium px-2 py-0.5 rounded-full">
+                    <i class="bi bi-check-circle-fill"></i> Active
+                </span>
+            @else
+                <form method="POST" action="{{ route('admin.academic-years.activate', $year->id) }}"
+                      data-confirm="Activate {{ $year->school_year }}? Every screen that reads the active school year will switch to it.">
+                    @csrf
+                    <button type="submit" class="text-xs text-brand-700 border border-brand-200 rounded px-2 py-1 hover:bg-brand-50">
+                        Activate
+                    </button>
+                </form>
+            @endif
+        </div>
+        @empty
+        <div class="px-6 py-4 text-sm text-gray-400">
+            No academic years configured yet — the system falls back to the most recently created section's school year
+            (currently <strong>{{ $schoolYear }}</strong>). Add one below to take explicit control.
+        </div>
+        @endforelse
+    </div>
+
+    <div class="px-6 py-4 border-t">
+        <form method="POST" action="{{ route('admin.academic-years.store') }}" class="flex flex-wrap items-end gap-3">
+            @csrf
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">School Year</label>
+                <input type="text" name="school_year" required placeholder="e.g. 2027-2028"
+                       class="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">Start Date <span class="text-gray-400">(optional)</span></label>
+                <input type="date" name="start_date" class="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">End Date <span class="text-gray-400">(optional)</span></label>
+                <input type="date" name="end_date" class="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+            </div>
+            <button type="submit" class="bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-800">
+                Add Academic Year
+            </button>
+        </form>
+    </div>
+</div>
+
 <div class="bg-white rounded-xl shadow-sm">
     <div class="px-6 py-4 border-b">
         <h2 class="text-sm font-semibold text-gray-800">Term Control</h2>
