@@ -22,6 +22,11 @@ stay true after the work is done.
 - `MASTER_PROMPT.md` — earlier, partly superseded; where it conflicts with
   `WORK_ORDER.md`, the later one won and the code follows it
 - `HANDOFF.md` — design decisions that may not change without asking
+- `ML_ARCHITECTURE.md` — academic-rules-vs-ML boundary, training pipeline,
+  model versioning; the current active model is synthetic-trained only —
+  see this file before touching anything under `analytics/`
+- `TRAINING_DATA_CONTRACT.md` — the schema a real historical dataset must
+  satisfy before `analytics/train_model.py` will train a candidate from it
 
 When a work order and this file disagree, the code is the answer and the
 disagreement is worth reporting. Documents in this project have gone stale
