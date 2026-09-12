@@ -123,6 +123,10 @@ class DraftRosterExtractionTest extends TestCase
         $errors = session('import_errors');
         $this->assertNotNull($errors);
         $this->assertStringContainsString('The lrn field is required.', implode("\n", $errors));
+        // The test's own name says "by name" -- this is what actually makes
+        // that true: the row is identified by the person's name, not only
+        // by its row number.
+        $this->assertStringContainsString('Reyes, Juan', implode("\n", $errors));
 
         // The other 3 valid rows imported; the blank-LRN row did not.
         $this->assertSame(3, Student::count());
@@ -151,7 +155,7 @@ class DraftRosterExtractionTest extends TestCase
         @unlink($path);
 
         $response->assertRedirect(route('admin.students'));
-        $response->assertSessionHas('success', 'Students imported successfully!');
+        $response->assertSessionHas('success', '4 student(s) imported successfully!');
         $this->assertSame(4, Student::count());
 
         $juanMiguel = Student::where('lrn', '110000000001')->first();

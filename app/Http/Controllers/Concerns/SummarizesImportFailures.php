@@ -16,23 +16,52 @@ trait SummarizesImportFailures
 {
     /**
      * @param Collection<int, \Maatwebsite\Excel\Validators\Failure> $failures
-     * @return array{skippedCount: int, rowMessages: array<int, string>, headerHint: ?string}
+     * @param array<int, string> $identifyingFields optional row-value keys (e.g.
+     *        ['last_name', 'first_name']) used to name a rejected row instead of
+     *        only numbering it — see rowLabel(). Default (empty) preserves the
+     *        original "Row N: ..." wording exactly, so existing importers/tests
+     *        are unaffected.
+     * @return array{skippedCount: int, rowMessages: array<int, string>, headerHint: ?string, rejectedRows: array<int, array>}
      */
-    protected function summarizeImportFailures(Collection $failures, object $importer): array
+    protected function summarizeImportFailures(Collection $failures, object $importer, array $identifyingFields = []): array
     {
         $byRow = $failures->groupBy(fn($failure) => $failure->row())->sortKeys();
 
-        $rowMessages = $byRow->map(function (Collection $rowFailures, int $row) {
+        $rowMessages = $byRow->map(function (Collection $rowFailures, int $row) use ($identifyingFields) {
             $messages = $rowFailures->flatMap(fn($f) => $f->errors())->all();
+            $label = $this->rowLabel($row, $rowFailures->first()->values(), $identifyingFields);
 
-            return "Row {$row}: " . implode(', ', $messages);
+            return "{$label}: " . implode(', ', $messages);
         })->values()->all();
 
         return [
             'skippedCount' => $byRow->count(),
             'rowMessages'  => $rowMessages,
             'headerHint'   => $this->headerHintFor($byRow, $importer),
+            // One representative Failure per row carries that row's full
+            // original data (Maatwebsite\Excel\Validators\Failure::values()) --
+            // every Failure in the same row's group has identical values(),
+            // since a row can fail on more than one attribute at once. This is
+            // exactly the shape needed to write the row back out as a
+            // re-uploadable CSV (see StudentController::downloadRejectedStudents()).
+            'rejectedRows' => $byRow->map(fn(Collection $rowFailures) => $rowFailures->first()->values())->values()->all(),
         ];
+    }
+
+    /**
+     * "Row 5" by default, or "Row 5 (Dela Cruz, Juan)" when $identifyingFields
+     * names columns present in this row's data -- named, not just numbered,
+     * without assuming every importer's rows have a person's name at all
+     * (Tracks/Subjects/Sections rows don't).
+     */
+    private function rowLabel(int $row, array $values, array $identifyingFields): string
+    {
+        $name = collect($identifyingFields)
+            ->map(fn($field) => trim((string) ($values[$field] ?? '')))
+            ->filter()
+            ->implode(', ');
+
+        return $name !== '' ? "Row {$row} ({$name})" : "Row {$row}";
     }
 
     /**

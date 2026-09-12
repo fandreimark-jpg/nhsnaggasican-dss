@@ -187,6 +187,27 @@ class StudentsImportTest extends TestCase
         $this->assertSame(1, Student::where('lrn', $rows[0][0])->count());
     }
 
+    /**
+     * createdCount() feeds the import-result screen's "N student(s)
+     * created" line -- model() is only ever called for a row that already
+     * passed rules(), so counting calls there counts real inserted rows
+     * without a separate before/after Student::count() query.
+     */
+    public function test_created_count_reflects_only_the_rows_that_actually_passed_validation(): void
+    {
+        $adviser = User::factory()->create();
+        $section = Section::factory()->create(['adviser_id' => $adviser->id]);
+
+        $import = $this->importCsv($section, [
+            ['100000000101', 'Valid', 'One', '', 'male', '2008-05-01'],
+            ['bad-lrn', 'Invalid', 'Row', '', 'male', '2008-05-01'],
+            ['100000000102', 'Valid', 'Two', '', 'female', '2008-05-01'],
+        ]);
+
+        $this->assertSame(2, $import->createdCount());
+        $this->assertCount(1, $import->failures());
+    }
+
     public function test_students_are_always_assigned_to_the_importing_advisers_section(): void
     {
         // Security measure documented on StudentsImport::model() — the

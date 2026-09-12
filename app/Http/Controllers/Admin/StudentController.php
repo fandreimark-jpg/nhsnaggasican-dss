@@ -104,32 +104,53 @@ class StudentController extends Controller
         Excel::import($import, $request->file('file'));
 
         $failures = $import->failures();
+        $createdCount = $import->createdCount();
 
         if ($failures->count() > 0) {
-            $result = $this->summarizeImportFailures($failures, $import);
+            // Named by last_name/first_name, not just a row number -- see
+            // rowLabel() in the trait. Matches this screen's own promise
+            // ("Import Students will reject a blank LRN by name") for real,
+            // rather than only by row position.
+            $result = $this->summarizeImportFailures($failures, $import, ['last_name', 'first_name']);
+
+            // Session only, same shape as roster_extraction below -- lets
+            // downloadRejectedStudents() stream just these rows back out as
+            // a re-uploadable CSV, so fixing 2 of 8 rejected rows means
+            // uploading 2 rows next time, not the whole original file
+            // (which would bounce the other 6, already-imported rows off
+            // the LRN unique constraint for no reason).
+            session(['rejected_students' => [
+                'rows'            => $result['rejectedRows'],
+                'source_filename' => $request->file('file')->getClientOriginalName(),
+            ]]);
 
             LogActivity::log(
                 action:      'import_students',
-                description: 'Imported students (with ' . $result['skippedCount'] . ' skipped rows)',
+                description: "Imported students ({$createdCount} created, {$result['skippedCount']} rejected)",
                 tableName:   'students',
                 recordId:    null
             );
 
             return redirect()->route('admin.students')
-                ->with('warning', 'Valid rows were imported. ' . $result['skippedCount'] . ' row(s) were skipped:')
+                ->with('warning', "{$createdCount} student(s) created. {$result['skippedCount']} row(s) were rejected:")
                 ->with('import_errors', $result['rowMessages'])
                 ->with('import_header_hint', $result['headerHint']);
         }
 
+        // A prior import's rejected-rows CSV is now stale -- either this
+        // upload IS the corrected re-upload (nothing left to download), or
+        // it's an unrelated later import.
+        session()->forget('rejected_students');
+
         LogActivity::log(
             action:      'import_students',
-            description: 'Bulk imported students via file upload',
+            description: "Bulk imported students via file upload ({$createdCount} created)",
             tableName:   'students',
             recordId:    null
         );
 
         return redirect()->route('admin.students')
-            ->with('success', 'Students imported successfully!');
+            ->with('success', "{$createdCount} student(s) imported successfully!");
     }
 
     /**
@@ -247,22 +268,49 @@ class StudentController extends Controller
         $extraction = session('roster_extraction');
         abort_if(!$extraction, 404, 'No draft roster extraction is pending — upload an E-Class Record first.');
 
+        session()->forget('roster_extraction');
+
+        return $this->studentRowsCsvResponse(
+            $extraction['rows'],
+            'draft_roster_' . pathinfo($extraction['source_filename'], PATHINFO_FILENAME) . '.csv'
+        );
+    }
+
+    /**
+     * Streams a CSV of just the rows rejected by the last import(), in the
+     * same lrn/last_name/first_name/middle_name/gender/birthdate shape the
+     * upload expects -- so correcting what was wrong means re-uploading
+     * those rows only, not the whole original file (which would bounce
+     * every already-imported row off the LRN unique constraint again).
+     * Left in session across repeat downloads; a later import() call
+     * (success or failure) replaces or clears it, whichever fits.
+     */
+    public function downloadRejectedStudents(): Response
+    {
+        $rejected = session('rejected_students');
+        abort_if(!$rejected, 404, 'No rejected rows are pending — import a file first.');
+
+        return $this->studentRowsCsvResponse(
+            $rejected['rows'],
+            'rejected_students_' . pathinfo($rejected['source_filename'], PATHINFO_FILENAME) . '.csv'
+        );
+    }
+
+    /** @param array<int, array<string, mixed>> $rows */
+    private function studentRowsCsvResponse(array $rows, string $downloadName): Response
+    {
         $csv = "lrn,last_name,first_name,middle_name,gender,birthdate\n";
-        foreach ($extraction['rows'] as $row) {
+        foreach ($rows as $row) {
             $csv .= implode(',', array_map(function ($value) {
                 $value = (string) $value;
                 return str_contains($value, ',') || str_contains($value, '"')
                     ? '"' . str_replace('"', '""', $value) . '"'
                     : $value;
             }, [
-                $row['lrn'], $row['last_name'], $row['first_name'],
-                $row['middle_name'], $row['gender'], $row['birthdate'],
+                $row['lrn'] ?? '', $row['last_name'] ?? '', $row['first_name'] ?? '',
+                $row['middle_name'] ?? '', $row['gender'] ?? '', $row['birthdate'] ?? '',
             ])) . "\n";
         }
-
-        session()->forget('roster_extraction');
-
-        $downloadName = 'draft_roster_' . pathinfo($extraction['source_filename'], PATHINFO_FILENAME) . '.csv';
 
         return response($csv, 200, [
             'Content-Type'        => 'text/csv',

@@ -194,6 +194,10 @@ Route::middleware(['auth', 'role:admin'])
         // it through students.import above, unchanged.
         Route::post('/students/extract-roster',          [StudentController::class, 'extractRosterPreview'])->name('students.extract-roster');
         Route::get('/students/extract-roster/download',  [StudentController::class, 'downloadRosterExtraction'])->name('students.extract-roster.download');
+        // Rejected-rows re-upload feature — students.import above stores just
+        // the rejected rows in session; this streams them back out as a CSV
+        // in the same upload shape.
+        Route::get('/students/rejected/download', [StudentController::class, 'downloadRejectedStudents'])->name('students.rejected.download');
 
         // Reports
         Route::get('/reports', [ReportController::class, 'index'])->name('reports');

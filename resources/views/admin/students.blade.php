@@ -7,6 +7,26 @@
 
 @include('partials.import-result')
 
+{{-- Rejected-rows re-upload feature — students.import() stores just the
+     rejected rows (in the same shape the upload expects) in session so
+     fixing what was wrong means re-uploading only those rows, not the
+     whole original file, which would bounce every already-imported row
+     off the LRN unique constraint a second time for nothing. Stays
+     available across repeat downloads until the next import() call
+     (success or failure) replaces or clears it. --}}
+@if(session('rejected_students'))
+    <div class="bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm p-4 rounded-lg mb-4 flex items-center justify-between gap-3 flex-wrap">
+        <p>
+            <i class="bi bi-file-earmark-arrow-down"></i>
+            Fix the rows above, then re-upload just those — not the whole original file.
+        </p>
+        <a href="{{ route('admin.students.rejected.download') }}"
+           class="inline-flex items-center gap-1 bg-brand-700 text-white px-4 py-2 rounded-lg text-xs font-medium hover:bg-brand-800 shrink-0">
+            <i class="bi bi-download"></i> Download rejected rows
+        </a>
+    </div>
+@endif
+
 {{-- "Draft roster from an E-Class Record" feature — shows once, right after
      the upload, then clears itself the moment the CSV is downloaded (see
      StudentController::downloadRosterExtraction()). Export only: nothing

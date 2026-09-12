@@ -34,6 +34,14 @@ class StudentsImport implements ToModel, WithHeadingRow, WithValidation, SkipsOn
     /** LRNs already seen during this import run, across every chunk. */
     private array $seenLrns = [];
 
+    /**
+     * model() is only ever called for a row that already passed rules()
+     * (SkipsOnFailure diverts a failing row to a Failure instead) -- so
+     * counting calls here counts real rows that will be inserted, without
+     * re-deriving it from a before/after Student::count() query.
+     */
+    private int $created = 0;
+
     public function __construct(int $sectionId)
     {
         $this->sectionId = $sectionId;
@@ -42,6 +50,11 @@ class StudentsImport implements ToModel, WithHeadingRow, WithValidation, SkipsOn
     public function chunkSize(): int
     {
         return self::CHUNK_SIZE;
+    }
+
+    public function createdCount(): int
+    {
+        return $this->created;
     }
 
     public function batchSize(): int
@@ -56,6 +69,8 @@ class StudentsImport implements ToModel, WithHeadingRow, WithValidation, SkipsOn
      */
     public function model(array $row)
     {
+        $this->created++;
+
         return new Student([
             'lrn'         => (string) $row['lrn'],
             'last_name'   => trim($row['last_name']),
