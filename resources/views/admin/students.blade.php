@@ -322,6 +322,17 @@
                 </p>
             </button>
 
+            <button type="button" onclick="closeAddStudentsChooserModal(); openImportLearnersFromEcrModal();"
+                class="w-full text-left border rounded-lg p-4 hover:bg-gray-50 hover:border-brand-300 transition-colors">
+                <p class="font-medium text-gray-800">
+                    <i class="bi bi-file-earmark-person text-brand-700"></i> Import Learners from ECR
+                </p>
+                <p class="text-xs text-gray-500 mt-1.5">
+                    Reads learner identity directly from a Strengthened SHS or Grade 12 class-record workbook — never
+                    assessment scores. Shows Insert/Existing/Conflict/Rejected before anything is saved.
+                </p>
+            </button>
+
             <button type="button" onclick="closeAddStudentsChooserModal(); openImportStudentsModal();"
                 class="w-full text-left border rounded-lg p-4 hover:bg-gray-50 hover:border-brand-300 transition-colors">
                 <p class="font-medium text-gray-800">
@@ -341,10 +352,69 @@
     </div>
 </div>
 
+{{-- IMPORT LEARNERS FROM ECR MODAL — reads learner identity directly from a
+     real SSHS or Grade 12 class-record workbook. Never assessment scores;
+     never writes to the database until the Admin reviews the classified
+     preview (Insert/Existing/Conflict/Rejected) and confirms it. Distinct
+     from "From an E-Class Record" above (which only ever exports a draft
+     CSV) and from "I already have a CSV" (a plain roster file, not a real
+     class record). --}}
+<div id="importLearnersFromEcrModal"
+     class="{{ $errors->ecrLearnerImport->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
+    <div class="modal-box {{ $errors->ecrLearnerImport->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold text-gray-800">Import Learners from ECR</h3>
+            <button type="button" onclick="closeImportLearnersFromEcrModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
+        </div>
+
+        @if($errors->ecrLearnerImport->any())
+            <div class="bg-red-100 text-red-700 text-sm p-3 rounded-lg mb-4">
+                <ul class="list-disc list-inside">
+                    @foreach($errors->ecrLearnerImport->all() as $error)
+                        <li>{{ $error }}</li>
+                    @endforeach
+                </ul>
+            </div>
+        @endif
+
+        <p class="text-sm text-gray-500 mb-4">
+            Supports the Strengthened SHS E-Class Record and the Grade 12 class-record workbook. Choose the section
+            this file's roster belongs to, then upload — you'll see exactly what will be inserted before anything is
+            saved.
+        </p>
+
+        <form method="POST" action="{{ route('admin.students.import-from-ecr.preview') }}"
+              enctype="multipart/form-data" class="space-y-4">
+            @csrf
+            <div>
+                <label class="block text-sm text-gray-600 mb-1">Section</label>
+                <select name="section_id" required
+                        class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                    <option value="">— Select Section —</option>
+                    @foreach($sections as $section)
+                        <option value="{{ $section->id }}">{{ $section->name }} — Grade {{ $section->grade_level }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <input type="file" name="file" accept=".xlsx,.xls" required
+                   class="w-full border rounded-lg px-3 py-2 text-sm">
+
+            <div class="flex justify-end gap-3 pt-2">
+                <button type="button" onclick="closeImportLearnersFromEcrModal()"
+                        class="px-4 py-2 text-sm text-gray-500">Cancel</button>
+                <button type="submit"
+                        class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium">
+                    Preview
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
 {{-- ADD STUDENT MODAL --}}
 <div id="addStudentModal"
-     class="{{ $errors->any() && !$errors->import->any() && !$errors->extractRoster->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box {{ $errors->any() && !$errors->import->any() && !$errors->extractRoster->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
+     class="{{ $errors->any() && !$errors->import->any() && !$errors->extractRoster->any() && !$errors->ecrLearnerImport->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
+    <div class="modal-box {{ $errors->any() && !$errors->import->any() && !$errors->extractRoster->any() && !$errors->ecrLearnerImport->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
 
         <div class="flex justify-between items-center mb-4">
             <h3 class="text-lg font-semibold text-gray-800">Add Student</h3>
@@ -352,7 +422,7 @@
                     aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
-        @if($errors->any() && !$errors->import->any() && !$errors->extractRoster->any())
+        @if($errors->any() && !$errors->import->any() && !$errors->extractRoster->any() && !$errors->ecrLearnerImport->any())
             <div class="bg-red-100 text-red-700 text-sm p-3 rounded-lg mb-4">
                 <ul class="list-disc list-inside">
                     @foreach($errors->all() as $error)

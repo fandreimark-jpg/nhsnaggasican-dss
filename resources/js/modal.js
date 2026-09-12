@@ -361,6 +361,15 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     // =============================================
+    // ADMIN — IMPORT LEARNERS FROM ECR MODAL
+    // =============================================
+    if (document.getElementById("importLearnersFromEcrModal")) {
+        window.openImportLearnersFromEcrModal = () => window.showModal("importLearnersFromEcrModal");
+        window.closeImportLearnersFromEcrModal = () => window.hideModal("importLearnersFromEcrModal");
+        window.bindModalOverlayClose("importLearnersFromEcrModal");
+    }
+
+    // =============================================
     // ADMIN — ADD STUDENT MODAL
     // =============================================
     if (document.getElementById("addStudentModal")) {

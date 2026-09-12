@@ -204,6 +204,14 @@ Route::middleware(['auth', 'role:admin'])
         // the rejected rows in session; this streams them back out as a CSV
         // in the same upload shape.
         Route::get('/students/rejected/download', [StudentController::class, 'downloadRejectedStudents'])->name('students.rejected.download');
+        // "Import Learners from ECR" — a DISTINCT feature from
+        // students.import (plain CSV/XLSX) and students.extract-roster
+        // (export-only draft): reads a real SSHS or Grade 12 class-record
+        // workbook and writes to `students` directly, but ONLY learner
+        // identity, and only after the Admin reviews a classified preview
+        // (Insert/Existing/Conflict/Rejected) and explicitly confirms it.
+        Route::post('/students/import-from-ecr/preview', [StudentController::class, 'importFromEcrPreview'])->name('students.import-from-ecr.preview');
+        Route::post('/students/import-from-ecr/confirm', [StudentController::class, 'importFromEcrConfirm'])->name('students.import-from-ecr.confirm');
 
         // Reports
         Route::get('/reports', [ReportController::class, 'index'])->name('reports');
