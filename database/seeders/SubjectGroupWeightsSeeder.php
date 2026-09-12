@@ -20,6 +20,13 @@ class SubjectGroupWeightsSeeder extends Seeder
     /** @var array<int, array{0: string, 1: float, 2: float, 3: ?float}> [subject_group, ww, pt, ex] */
     private const DO015_2026_GROUPS = [
         ['core_academic',        20.00, 50.00, 30.00],
+        // "Subject classification and grading weights cleanup" pass —
+        // same 20/50/30 numbers as core_academic, but a genuinely
+        // different DepEd profile (STEM / Business & Entrepreneurship
+        // cluster ELECTIVES, never a Core subject) — see
+        // 2026_09_12_000001_add_academic_other_subject_group_to_weights_table.php
+        // and SubjectGroupWeight::classificationError().
+        ['academic_other',       20.00, 50.00, 30.00],
         ['field_exposure',       15.00, 70.00, 15.00],
         ['arts_sports_wellness', 20.00, 60.00, 20.00],
         ['research_innovation',  40.00, 60.00, null],

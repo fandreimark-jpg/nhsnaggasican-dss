@@ -157,7 +157,7 @@
                     <p class="text-sm text-gray-700">
                         <span class="font-semibold">{{ $c7 }}</span> subject{{ $c7 === 1 ? '' : 's' }} may have the wrong grading weight
                         <span class="block text-xs text-gray-400">
-                            {{ $dataHealth['subjectsWithSuspectGroup']->pluck('name')->implode(', ') }} — an elective still on the Core Academic default, or linked to a DepEd catalog row implying different weights than stored. Across the full 141-subject catalog, 101 of 139 subjects get the wrong weights under this silent default.
+                            {{ $dataHealth['subjectsWithSuspectGroup']->pluck('name')->implode(', ') }} — an elective still on the Core Academic group (no longer possible from the Admin form or an import, but may remain from data created before that rule), or linked to a DepEd catalog row implying different weights than stored.
                         </span>
                     </p>
                 </div>
