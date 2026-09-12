@@ -91,6 +91,7 @@
                 <th scope="col">Type</th>
                 <th scope="col">Grade Level</th>
                 <th scope="col">Subject Group</th>
+                <th scope="col">Grading Weights (WW / PT / Exam)</th>
                 <th scope="col">Track</th>
                 <th scope="col">Specialization</th>
                 <th scope="col" class="text-right">Actions</th>
@@ -112,6 +113,21 @@
                     {{ $subjectGroupLabel($subject->subject_group) }}
                     @if($subjectGroupCoverText($subject->subject_group))
                         <span class="block text-xs text-gray-400">{{ $subjectGroupCoverText($subject->subject_group) }}</span>
+                    @endif
+                </td>
+                <td class="text-xs">
+                    @php $w = $subject->grading_weights_display; @endphp
+                    @if(($w['source'] ?? null) === 'do8_by_track')
+                        <span class="text-gray-400">DO 8, s. 2015 — depends on section's track (see Sections)</span>
+                    @elseif($w)
+                        {{ rtrim(rtrim(number_format($w['ww'], 2), '0'), '.') }}%
+                        / {{ rtrim(rtrim(number_format($w['pt'], 2), '0'), '.') }}%
+                        / {{ $w['ex'] !== null ? rtrim(rtrim(number_format($w['ex'], 2), '0'), '.') . '%' : '—' }}
+                        <span class="block text-gray-400">
+                            {{ $w['source'] === 'catalog' ? 'from DepEd SSHS catalog' : 'DO 015, s. 2026 — ' . $subjectGroupLabel($subject->subject_group) }}
+                        </span>
+                    @else
+                        <span class="text-gray-400">Not configured</span>
                     @endif
                 </td>
                 <td>{{ $subject->track->name ?? '—' }}</td>
@@ -139,7 +155,7 @@
             </tr>
             @empty
             <tr>
-                <td colspan="7">
+                <td colspan="8">
                     <x-empty-state message="No subjects yet." icon="bi-book"
                         hint='Use "Add Subject" or "Import Subjects" above to get started.' />
                 </td>
@@ -272,17 +288,36 @@
         <p class="text-sm text-gray-500 mb-4">
             Upload an Excel (.xlsx) or CSV file. Required columns:
             <strong>name, type, grade_level</strong>.
-            Optional: <strong>subject_group</strong> (defaults to
-            <strong>core_academic</strong> when omitted — the DO 015, s. 2026
-            grading weight group; see the Subject Group column above for the
-            full list), <strong>track, specialization</strong> (by name or code —
-            for elective subjects). Type must be <strong>core</strong> or
-            <strong>elective</strong>; grade_level must be <strong>11</strong> or <strong>12</strong>.
+            <strong>subject_group</strong> defaults to <strong>core_academic</strong>
+            when omitted, but only for a <strong>core</strong> row — the DO 015,
+            s. 2026 grading weight group; see the Subject Group column above for
+            the full list. An <strong>elective</strong> row must specify
+            subject_group explicitly; there is no safe default for an elective,
+            since Arts/Research/TechPro/Field Experience electives all carry
+            different weights. <strong>track, specialization</strong> (by name or
+            code) are also required for elective subjects. Type must be
+            <strong>core</strong> or <strong>elective</strong>; grade_level must be
+            <strong>11</strong> or <strong>12</strong>.
         </p>
 
         <form method="POST" action="{{ route('admin.subjects.import') }}"
               enctype="multipart/form-data" class="space-y-4">
             @csrf
+
+            <div>
+                <label class="block text-sm text-gray-600 mb-1">Grade Level being uploaded</label>
+                <select name="grade_level" required
+                        class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                    <option value="">— Select Grade Level —</option>
+                    <option value="11">Grade 11</option>
+                    <option value="12">Grade 12</option>
+                </select>
+                <p class="text-xs text-gray-400 mt-1">
+                    Every row in the file must match this grade level — a row for
+                    the other grade is rejected, not silently imported.
+                </p>
+            </div>
+
             <input type="file" name="file" accept=".xlsx,.xls,.csv" required
                    class="w-full border rounded-lg px-3 py-2 text-sm">
 

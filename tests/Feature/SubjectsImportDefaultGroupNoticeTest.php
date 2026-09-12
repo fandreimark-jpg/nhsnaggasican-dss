@@ -32,7 +32,7 @@ class SubjectsImportDefaultGroupNoticeTest extends TestCase
         file_put_contents($path, $csv);
         $file = new \Illuminate\Http\UploadedFile($path, 'subjects.csv', 'text/csv', null, true);
 
-        $response = $this->actingAs($admin)->post('/admin/subjects/import', ['file' => $file]);
+        $response = $this->actingAs($admin)->post('/admin/subjects/import', ['grade_level' => '11', 'file' => $file]);
 
         @unlink($path);
 
@@ -62,7 +62,7 @@ class SubjectsImportDefaultGroupNoticeTest extends TestCase
         file_put_contents($path, $csv);
         $file = new \Illuminate\Http\UploadedFile($path, 'subjects.csv', 'text/csv', null, true);
 
-        $response = $this->actingAs($admin)->post('/admin/subjects/import', ['file' => $file]);
+        $response = $this->actingAs($admin)->post('/admin/subjects/import', ['grade_level' => '11', 'file' => $file]);
 
         @unlink($path);
 

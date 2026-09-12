@@ -60,13 +60,49 @@ class SubjectController extends Controller
      */
     public function index()
     {
-        $subjects = Subject::with(['track', 'specialization'])
+        $subjects = Subject::with(['track', 'specialization', 'catalog'])
             ->when(request('type'), fn($q) => $q->where('type', request('type')))
             ->when(request('subject_group_check'), fn($q) => $q->whereIn('id', Subject::withSuspectSubjectGroup()->pluck('id')))
             ->orderBy('grade_level')
             ->orderBy('type') // core subjects first
             ->orderBy('name')
             ->get();
+
+        // SYSTEM_FIXES_AND_ML_AUDIT.md, "Grading details per subject" —
+        // resolved the same way GradingEngine actually resolves it (catalog
+        // row wins over subject_group, per CLAUDE.md's resolution order),
+        // not a second copy of the arithmetic, so this can never drift from
+        // what a grade actually computes to. Grade 12 (do8_2015) is
+        // deliberately NOT resolved to a number here: that scheme weights by
+        // a SECTION's track, not by subject_group at all (subject_group
+        // isn't even read for do8_2015 — see GradingEngine::
+        // resolveDo8GroupKey()), so guessing one here would show a
+        // plausible-looking percentage that may not be what any given
+        // section's grade actually uses.
+        $subjects->each(function (Subject $subject) {
+            if ($subject->catalog) {
+                $subject->grading_weights_display = [
+                    'source' => 'catalog', 'ww' => $subject->catalog->ww_weight,
+                    'pt' => $subject->catalog->pt_weight, 'ex' => $subject->catalog->ex_weight,
+                ];
+                return;
+            }
+
+            if ($subject->grade_level == 11) {
+                try {
+                    $w = SubjectGroupWeight::resolve('do015_2026', $subject->subject_group);
+                    $subject->grading_weights_display = [
+                        'source' => 'subject_group', 'ww' => $w->ww_weight, 'pt' => $w->pt_weight, 'ex' => $w->ex_weight,
+                    ];
+                } catch (\Throwable $e) {
+                    $subject->grading_weights_display = null;
+                }
+                return;
+            }
+
+            // Grade 12 / do8_2015 — see note above.
+            $subject->grading_weights_display = ['source' => 'do8_by_track'];
+        });
 
         $tracks          = Track::with('specializations')->orderBy('name')->get();
         $specializations = Specialization::with('track')->orderBy('name')->get();
@@ -120,10 +156,11 @@ class SubjectController extends Controller
     public function import(Request $request)
     {
         $request->validateWithBag('import', [
-            'file' => $this->spreadsheetFileRule(),
+            'grade_level' => 'required|in:11,12',
+            'file'        => $this->spreadsheetFileRule(),
         ]);
 
-        $import = new SubjectsImport();
+        $import = new SubjectsImport((int) $request->grade_level);
         Excel::import($import, $request->file('file'));
 
         $failures = $import->failures();

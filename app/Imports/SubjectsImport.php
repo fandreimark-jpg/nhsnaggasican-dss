@@ -19,14 +19,21 @@ use Illuminate\Validation\Rule;
  * Bulk subject import.
  *
  * Expected heading row: name | type | grade_level | subject_group | track | specialization
- * subject_group is optional — defaults to 'core_academic' (same default
- * the subjects table column itself has) so an older import file with no
- * such column keeps working exactly as before this column existed. When
- * given, it must be one of the groups seeded in subject_group_weights
- * (see SubjectGroupWeight) — a typo here would silently mis-weight every
- * grade computed for that subject, so it is validated, not guessed.
- * track/specialization are optional and matched by name OR code
- * (case-insensitive) — required only for elective subjects that need one.
+ * subject_group is optional for CORE rows only — defaults to
+ * 'core_academic' (same default the subjects table column itself has,
+ * and the weight a genuinely core subject actually carries under DO 015 —
+ * see CLAUDE.md's subject catalog table), so an older core-only import
+ * file with no such column keeps working exactly as before this column
+ * existed. It is REQUIRED for ELECTIVE rows — there is no safe default
+ * for an elective (Arts, Research, TechPro, and Field Experience
+ * electives all carry different weights), so a blank subject_group on an
+ * elective row is a validation error, not a silent core_academic guess
+ * (see withValidator() below). When given, it must be one of the groups
+ * seeded in subject_group_weights (see SubjectGroupWeight) — a typo here
+ * would silently mis-weight every grade computed for that subject, so it
+ * is validated, not guessed. track/specialization are optional and
+ * matched by name OR code (case-insensitive) — required only for
+ * elective subjects that need one.
  *
  * WithChunkReading/WithBatchInserts (200 rows at a time) — see
  * StudentsImport's class docblock for why $seen below lives on $this
@@ -44,16 +51,33 @@ class SubjectsImport implements ToModel, WithHeadingRow, WithValidation, SkipsOn
     public int $importedCount = 0;
 
     /**
-     * "ECR alignment" work order, PART 4a — names of every row whose
+     * "ECR alignment" work order, PART 4a — names of every CORE row whose
      * subject_group cell was blank or absent and fell back to
      * core_academic, so Admin\SubjectController::import() can report this
      * by name instead of the fallback happening invisibly. Populated in
-     * model() below.
+     * model() below. Never populated for an ELECTIVE row — that case is a
+     * validation error now (see withValidator()), not a default.
      */
     public array $defaultedSubjectGroupNames = [];
 
     /** "name|grade_level" pairs already seen during this import run, across every chunk. */
     private array $seen = [];
+
+    /**
+     * SYSTEM_FIXES_AND_ML_AUDIT.md, "Subject upload by year level" — Admin
+     * picks Grade 11 or 12 BEFORE uploading; every row in the file must
+     * match that choice, or the row is rejected rather than silently
+     * imported under the wrong grade level. Nullable — direct
+     * instantiation with no argument (existing tests, and any future
+     * caller with no upfront selection) keeps every row's own grade_level
+     * exactly as before this check existed.
+     */
+    private ?int $expectedGradeLevel;
+
+    public function __construct(?int $expectedGradeLevel = null)
+    {
+        $this->expectedGradeLevel = $expectedGradeLevel;
+    }
 
     public function chunkSize(): int
     {
@@ -161,6 +185,31 @@ class SubjectsImport implements ToModel, WithHeadingRow, WithValidation, SkipsOn
             foreach ($validator->getData() as $index => $row) {
                 $name       = strtolower(trim($row['name'] ?? ''));
                 $gradeLevel = $row['grade_level'] ?? null;
+                $type       = strtolower(trim($row['type'] ?? ''));
+
+                // SYSTEM_FIXES_AND_ML_AUDIT.md, "Core and electives must
+                // not be swapped" — core_academic (20/50/30) is only a
+                // safe default for CORE subjects, which genuinely ARE
+                // core_academic-weighted under DO 015 (see CLAUDE.md's
+                // subject catalog table). An elective with no subject_group
+                // has no safe default at all — Arts, Research, TechPro,
+                // and Field Experience electives carry different weights,
+                // and silently applying core_academic would misweight
+                // whichever one this row actually is. Blocked here rather
+                // than left to default, so the row never reaches model().
+                if ($type === 'elective' && trim((string) ($row['subject_group'] ?? '')) === '') {
+                    $validator->errors()->add(
+                        "{$index}.subject_group",
+                        'Electives must specify an explicit subject_group — there is no safe default for an elective (unlike Core subjects, which may default to Core Academic). Valid values: ' . implode(', ', $this->validSubjectGroups()) . '.'
+                    );
+                }
+
+                if ($this->expectedGradeLevel !== null && $gradeLevel && (int) $gradeLevel !== $this->expectedGradeLevel) {
+                    $validator->errors()->add(
+                        "{$index}.grade_level",
+                        "This row is Grade {$gradeLevel}, but Grade {$this->expectedGradeLevel} was selected for this upload — file and selection must match, not be silently imported under the wrong grade level."
+                    );
+                }
 
                 if ($name === '' || !$gradeLevel) {
                     continue; // already flagged by the required/in rules above

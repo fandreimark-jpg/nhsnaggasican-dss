@@ -62,9 +62,17 @@ class SectionController extends Controller
         $tracks          = Track::with('specializations')->orderBy('name')->get();
         $specializations = Specialization::with('track')->orderBy('name')->get();
 
+        // The "Add Section" school-year default reads this instead of a
+        // hardcoded literal — see SYSTEM_FIXES_AND_ML_AUDIT.md's academic-
+        // year finding. Section::activeSchoolYear() is the same resolver
+        // AcademicTermController already treats as the source of truth
+        // (most recent section's school_year; a computed, not hardcoded,
+        // fallback only when the database has no sections at all yet).
+        $activeSchoolYear = Section::activeSchoolYear();
+
         return view('admin.sections', compact(
             'sections', 'allAdvisers',
-            'tracks', 'specializations'
+            'tracks', 'specializations', 'activeSchoolYear'
         ));
     }
 

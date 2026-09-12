@@ -38,13 +38,15 @@ class TrackController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'name' => 'required|string|max:255|unique:tracks,name',
-            'code' => 'required|string|max:20|unique:tracks,code',
+            'name'        => 'required|string|max:255|unique:tracks,name',
+            'code'        => 'required|string|max:20|unique:tracks,code',
+            'description' => 'nullable|string|max:2000',
         ]);
 
         Track::create([
-            'name' => $request->name,
-            'code' => strtoupper($request->code),
+            'name'        => $request->name,
+            'code'        => strtoupper($request->code),
+            'description' => $request->description,
         ]);
 
          LogActivity::log(
@@ -116,13 +118,15 @@ class TrackController extends Controller
         $track = Track::findOrFail($id);
 
         $request->validate([
-            'name' => 'required|string|max:255|unique:tracks,name,' . $id,
-            'code' => 'required|string|max:20|unique:tracks,code,' . $id,
+            'name'        => 'required|string|max:255|unique:tracks,name,' . $id,
+            'code'        => 'required|string|max:20|unique:tracks,code,' . $id,
+            'description' => 'nullable|string|max:2000',
         ]);
 
         $track->update([
-            'name' => $request->name,
-            'code' => strtoupper($request->code),
+            'name'        => $request->name,
+            'code'        => strtoupper($request->code),
+            'description' => $request->description,
         ]);
 
         return redirect()->route('admin.tracks')

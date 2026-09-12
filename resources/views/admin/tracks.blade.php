@@ -31,6 +31,7 @@
             <tr>
                 <th scope="col">Track Name</th>
                 <th scope="col">Code</th>
+                <th scope="col">Description</th>
                 <th scope="col">Specializations</th>
                 <th scope="col" class="text-right">Actions</th>
             </tr>
@@ -43,6 +44,13 @@
                     <span class="bg-brand-100 text-brand-700 text-xs font-semibold px-2 py-1 rounded">
                         {{ $track->code }}
                     </span>
+                </td>
+                <td class="text-gray-600 max-w-xs">
+                    @if($track->description)
+                        {{ $track->description }}
+                    @else
+                        <span class="text-gray-400 text-xs">No description yet</span>
+                    @endif
                 </td>
                 <td>
                     @if($track->specializations->count() > 0)
@@ -74,7 +82,7 @@
             </tr>
             @empty
             <tr>
-                <td colspan="4">
+                <td colspan="5">
                     <x-empty-state message="No tracks yet." icon="bi-diagram-3"
                         hint='Use "Add Track" or "Import Tracks" above to get started.' />
                 </td>
@@ -112,6 +120,13 @@
                        placeholder="e.g. ACAD"
                        class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
                 <p class="text-xs text-gray-400 mt-1">Short code for the track (auto-uppercased)</p>
+            </div>
+
+            <div>
+                <label class="block text-sm text-gray-600 mb-1">Description <span class="text-gray-400">(optional)</span></label>
+                <textarea name="description" id="trackDescription" rows="3"
+                          placeholder="e.g. Prepares learners for higher education through academic subjects."
+                          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"></textarea>
             </div>
 
             <div class="flex justify-end gap-3 pt-2">

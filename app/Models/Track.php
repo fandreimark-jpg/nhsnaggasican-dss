@@ -20,8 +20,9 @@ class Track extends Model
 
     // Fields that can be mass-assigned
     protected $fillable = [
-        'name',  // e.g. 'Academic Track'
-        'code',  // e.g. 'ACAD' — short identifier, always uppercase
+        'name',         // e.g. 'Academic Track'
+        'code',         // e.g. 'ACAD' — short identifier, always uppercase
+        'description',  // nullable — not every track has one yet
     ];
 
     // =============================================

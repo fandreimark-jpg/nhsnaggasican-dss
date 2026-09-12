@@ -237,6 +237,10 @@ document.addEventListener("DOMContentLoaded", function () {
     if (document.getElementById("sectionModal") && sectionForm) {
         const sectionStoreUrl = sectionForm.dataset.storeUrl;
         const specByTrackUrl = sectionForm.dataset.specUrl;
+        // Server-resolved (Section::activeSchoolYear() — the most recent
+        // section's school_year, not a literal) — see
+        // SectionController::index(). Never hardcode a school year here.
+        const activeSchoolYear = sectionForm.dataset.activeSchoolYear || "";
         const adviserSelect = document.getElementById("sectionAdviser");
 
         window.openAddSectionModal = function () {
@@ -244,7 +248,7 @@ document.addEventListener("DOMContentLoaded", function () {
             sectionTitle.textContent = "Add Section";
             sectionMethod.value = "POST";
             sectionForm.action = sectionStoreUrl;
-            document.getElementById("sectionSchoolYear").value = "2026-2027";
+            document.getElementById("sectionSchoolYear").value = activeSchoolYear;
             document.getElementById("sectionSpec").innerHTML = '<option value="">— Select Track First —</option>';
 
             // Only hide advisers who already have a DIFFERENT section.
@@ -396,6 +400,7 @@ document.addEventListener("DOMContentLoaded", function () {
             trackForm.action = trackStoreUrl;
             document.getElementById("trackName").value = "";
             document.getElementById("trackCode").value = "";
+            document.getElementById("trackDescription").value = "";
             window.showModal("trackModal");
         };
 
@@ -405,6 +410,7 @@ document.addEventListener("DOMContentLoaded", function () {
             trackForm.action = `/admin/tracks/${track.id}`;
             document.getElementById("trackName").value = track.name;
             document.getElementById("trackCode").value = track.code;
+            document.getElementById("trackDescription").value = track.description || "";
             window.showModal("trackModal");
         };
 

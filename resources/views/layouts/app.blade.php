@@ -164,6 +164,7 @@
                     <p class="text-sm text-gray-500">@yield('subtitle')</p>
                 </div>
                 @yield('content')
+                @include('partials.footer')
             </div>
         </main>
     </div>

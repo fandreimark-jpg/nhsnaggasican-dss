@@ -179,7 +179,8 @@
 
         <form id="sectionForm" method="POST" class="space-y-4"
               data-store-url="{{ route('admin.sections.store') }}"
-              data-spec-url="{{ url('admin/specializations-by-track') }}">
+              data-spec-url="{{ url('admin/specializations-by-track') }}"
+              data-active-school-year="{{ $activeSchoolYear }}">
             @csrf
             <input type="hidden" name="_method" id="sectionMethod" value="POST">
 

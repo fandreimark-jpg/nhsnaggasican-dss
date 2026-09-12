@@ -1,0 +1,16 @@
+# Python dependencies for analytics/classify.py (the DSS risk classifier).
+# Versions pinned from the actual tested development environment (Python
+# 3.14.6) via `python -c "import X; print(X.__version__)"` for each
+# package below — not invented. Re-pin from your own environment if it
+# differs; do not guess.
+#
+# Install with: pip install -r analytics/requirements.txt
+#
+# json, sys, os, argparse, datetime are Python standard library — no
+# separate install needed. Laravel's Excel import package (maatwebsite/
+# excel, in composer.json) is unrelated to this file; it is not an ML
+# library and does not belong here.
+
+numpy==2.4.6
+scikit-learn==1.9.0
+joblib==1.5.3

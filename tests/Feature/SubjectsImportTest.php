@@ -66,9 +66,13 @@ class SubjectsImportTest extends TestCase
         $track = Track::factory()->create(['name' => 'Technical-Professional Track', 'code' => 'TVL']);
         $spec  = Specialization::factory()->create(['track_id' => $track->id, 'name' => 'Information and Communications Technology', 'code' => 'ICT']);
 
+        // subject_group is now required on an elective row (see
+        // test_an_elective_with_no_subject_group_is_rejected_not_defaulted_to_core)
+        // -- 'techpro' here since this is a TVL-track elective; not the
+        // thing under test in this method, so any valid group would do.
         $import = $this->importCsv([
-            ['Programming', 'elective', '12', 'Technical-Professional Track', 'ICT'],
-        ]);
+            ['Programming', 'elective', '12', 'techpro', 'Technical-Professional Track', 'ICT'],
+        ], 'name,type,grade_level,subject_group,track,specialization');
 
         $this->assertCount(0, $import->failures());
         $this->assertDatabaseHas('subjects', [
@@ -83,8 +87,8 @@ class SubjectsImportTest extends TestCase
         $track = Track::factory()->create(['name' => 'Academic Track', 'code' => 'ACAD']);
 
         $import = $this->importCsv([
-            ['Research', 'elective', '12', 'ACAD', ''],
-        ]);
+            ['Research', 'elective', '12', 'research_innovation', 'ACAD', ''],
+        ], 'name,type,grade_level,subject_group,track,specialization');
 
         $this->assertCount(0, $import->failures());
         $this->assertDatabaseHas('subjects', ['name' => 'Research', 'track_id' => $track->id]);
@@ -95,8 +99,8 @@ class SubjectsImportTest extends TestCase
         // Track/specialization are optional lookups, not required fields —
         // matching the existing manual Add Subject form's own leniency.
         $import = $this->importCsv([
-            ['Mystery Elective', 'elective', '12', 'Nonexistent Track', ''],
-        ]);
+            ['Mystery Elective', 'elective', '12', 'field_exposure', 'Nonexistent Track', ''],
+        ], 'name,type,grade_level,subject_group,track,specialization');
 
         $this->assertCount(0, $import->failures());
         $this->assertDatabaseHas('subjects', ['name' => 'Mystery Elective', 'track_id' => null]);
@@ -178,7 +182,7 @@ class SubjectsImportTest extends TestCase
         file_put_contents($path, $csv);
         $file = new \Illuminate\Http\UploadedFile($path, 'subjects.csv', 'text/csv', null, true);
 
-        $response = $this->actingAs($admin)->post('/admin/subjects/import', ['file' => $file]);
+        $response = $this->actingAs($admin)->post('/admin/subjects/import', ['grade_level' => '11', 'file' => $file]);
 
         @unlink($path);
 
@@ -209,6 +213,124 @@ class SubjectsImportTest extends TestCase
 
         $this->assertCount(1, $import->failures());
         $this->assertDatabaseMissing('subjects', ['name' => 'Sneaky Do8 Subject']);
+    }
+
+    /**
+     * SYSTEM_FIXES_AND_ML_AUDIT.md, "Core and electives must not be
+     * swapped" -- core_academic is a safe default for a blank
+     * subject_group only on a CORE row (see
+     * SubjectsImportDefaultGroupNoticeTest). An elective has no safe
+     * default -- Arts/Research/TechPro/Field Experience electives all
+     * carry different weights -- so a blank subject_group on an elective
+     * row must be rejected, not silently defaulted.
+     */
+    public function test_an_elective_with_no_subject_group_is_rejected_not_defaulted_to_core(): void
+    {
+        $track = Track::factory()->create(['name' => 'Academic Track', 'code' => 'ACAD']);
+
+        $csv = "name,type,grade_level,subject_group,track,specialization\n";
+        $csv .= "Creative Writing,elective,12,,{$track->name},\n";
+        $path = tempnam(sys_get_temp_dir(), 'subjects_import_') . '.csv';
+        file_put_contents($path, $csv);
+        $import = new SubjectsImport();
+        Excel::import($import, $path);
+        @unlink($path);
+
+        $this->assertCount(1, $import->failures());
+        $this->assertDatabaseMissing('subjects', ['name' => 'Creative Writing']);
+        $this->assertEmpty($import->defaultedSubjectGroupNames, 'An elective must never be silently defaulted -- it must be rejected instead.');
+    }
+
+    public function test_an_elective_with_an_explicit_subject_group_still_imports(): void
+    {
+        $track = Track::factory()->create(['name' => 'Academic Track', 'code' => 'ACAD']);
+
+        // 'field_exposure' -- a real do015_2026 group seeded by
+        // SubjectGroupWeightsSeeder, not core_academic -- proves the row
+        // imports with the group it actually declared, not a default.
+        $csv = "name,type,grade_level,subject_group,track,specialization\n";
+        $csv .= "Creative Writing,elective,12,field_exposure,{$track->name},\n";
+        $path = tempnam(sys_get_temp_dir(), 'subjects_import_') . '.csv';
+        file_put_contents($path, $csv);
+        $import = new SubjectsImport();
+        Excel::import($import, $path);
+        @unlink($path);
+
+        $this->assertCount(0, $import->failures());
+        $this->assertDatabaseHas('subjects', [
+            'name' => 'Creative Writing', 'type' => 'elective', 'subject_group' => 'field_exposure',
+        ]);
+    }
+
+    /**
+     * SYSTEM_FIXES_AND_ML_AUDIT.md, "Subject upload by year level" -- a
+     * Grade 12 row in a file uploaded against a Grade 11 selection must be
+     * rejected, not silently imported under the wrong grade level.
+     */
+    public function test_a_row_whose_grade_level_does_not_match_the_selected_upload_grade_is_rejected(): void
+    {
+        $csv  = "name,type,grade_level,track,specialization\n";
+        $csv .= "Statistics and Probability,core,12,,\n"; // Grade 12 row
+        $path = tempnam(sys_get_temp_dir(), 'subjects_import_') . '.csv';
+        file_put_contents($path, $csv);
+
+        $import = new SubjectsImport(11); // Admin selected Grade 11
+        Excel::import($import, $path);
+        @unlink($path);
+
+        $this->assertCount(1, $import->failures());
+        $this->assertDatabaseMissing('subjects', ['name' => 'Statistics and Probability']);
+    }
+
+    public function test_a_row_matching_the_selected_upload_grade_still_imports(): void
+    {
+        $csv  = "name,type,grade_level,track,specialization\n";
+        $csv .= "Statistics and Probability,core,11,,\n";
+        $path = tempnam(sys_get_temp_dir(), 'subjects_import_') . '.csv';
+        file_put_contents($path, $csv);
+
+        $import = new SubjectsImport(11);
+        Excel::import($import, $path);
+        @unlink($path);
+
+        $this->assertCount(0, $import->failures());
+        $this->assertDatabaseHas('subjects', ['name' => 'Statistics and Probability', 'grade_level' => 11]);
+    }
+
+    public function test_admin_must_select_a_grade_level_before_uploading_subjects(): void
+    {
+        $admin = User::factory()->admin()->create();
+
+        $csv  = "name,type,grade_level,track,specialization\n";
+        $csv .= "Statistics and Probability,core,11,,\n";
+        $path = tempnam(sys_get_temp_dir(), 'subjects_import_') . '.csv';
+        file_put_contents($path, $csv);
+        $file = new \Illuminate\Http\UploadedFile($path, 'subjects.csv', 'text/csv', null, true);
+
+        $response = $this->actingAs($admin)->post('/admin/subjects/import', ['file' => $file]);
+        @unlink($path);
+
+        $response->assertSessionHasErrors(['grade_level'], null, 'import');
+        $this->assertDatabaseMissing('subjects', ['name' => 'Statistics and Probability']);
+    }
+
+    public function test_a_grade_12_row_uploaded_against_a_grade_11_selection_is_rejected_via_http(): void
+    {
+        $admin = User::factory()->admin()->create();
+
+        $csv  = "name,type,grade_level,track,specialization\n";
+        $csv .= "Statistics and Probability,core,12,,\n";
+        $path = tempnam(sys_get_temp_dir(), 'subjects_import_') . '.csv';
+        file_put_contents($path, $csv);
+        $file = new \Illuminate\Http\UploadedFile($path, 'subjects.csv', 'text/csv', null, true);
+
+        $response = $this->actingAs($admin)->post('/admin/subjects/import', ['grade_level' => '11', 'file' => $file]);
+        @unlink($path);
+
+        $response->assertRedirect(route('admin.subjects'));
+        $response->assertSessionHas('warning');
+        $this->assertStringContainsString('Grade 11 was selected', implode("\n", session('import_errors')));
+        $this->assertDatabaseMissing('subjects', ['name' => 'Statistics and Probability']);
     }
 
     public function test_adviser_cannot_import_subjects(): void
