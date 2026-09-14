@@ -1,0 +1,51 @@
+FROM python:3.14.6-slim-bookworm AS python
+RUN pip install --no-cache-dir --upgrade pip
+COPY analytics/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && pip check
+
+FROM php:8.2-apache-bookworm AS php-base
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libzip-dev libpng-dev libjpeg62-turbo-dev libfreetype6-dev libonig-dev \
+    libxml2-dev libicu-dev libcurl4-openssl-dev libgomp1 libexpat1 libffi8 \
+    libbz2-1.0 liblzma5 libreadline8 libsqlite3-0 libuuid1 libncursesw6 libtinfo6 \
+    ca-certificates unzip \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install -j"$(nproc)" pdo_mysql mbstring gd zip intl bcmath opcache curl dom simplexml xml xmlreader xmlwriter \
+    && a2enmod rewrite \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=python /usr/local/ /usr/local/
+RUN ldconfig
+WORKDIR /var/www/html
+
+FROM php-base AS dependencies
+COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
+COPY . .
+RUN mkdir -p bootstrap/cache storage/framework/views storage/framework/cache/data storage/framework/sessions storage/logs \
+    && composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader \
+    && composer check-platform-reqs --no-dev
+
+FROM node:22-bookworm-slim AS assets
+WORKDIR /app
+COPY --from=dependencies /var/www/html /app
+RUN npm ci && npm run build
+
+FROM php-base AS runtime
+ENV APP_ENV=production APP_DEBUG=false LOG_CHANNEL=stderr LOG_LEVEL=warning \
+    PYTHON_PATH=/usr/local/bin/python3 PYTHONDONTWRITEBYTECODE=1 \
+    SESSION_DRIVER=database CACHE_STORE=database QUEUE_CONNECTION=sync \
+    SESSION_SECURE_COOKIE=true TRUSTED_PROXIES=* PORT=8080
+COPY --from=dependencies /var/www/html /var/www/html
+COPY --from=assets /app/public/build /var/www/html/public/build
+COPY deploy/vercel/apache.conf /etc/apache2/sites-available/000-default.conf
+COPY deploy/vercel/php.ini /usr/local/etc/php/conf.d/production.ini
+COPY deploy/vercel/entrypoint.sh /usr/local/bin/vercel-entrypoint
+# Fail at build time if the approved artifact was omitted or is incompatible.
+# Loading/predicting never trains or replaces it.
+RUN python3 -c "import sys; sys.path.insert(0, 'analytics'); from classify import get_model; get_model().predict([[85.0]])" \
+    && mkdir -p storage/app/private storage/app/public storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs bootstrap/cache \
+    && chown -R www-data:www-data storage bootstrap/cache \
+    && chmod -R u=rwX,g=rX,o= storage bootstrap/cache \
+    && chmod +x /usr/local/bin/vercel-entrypoint
+EXPOSE 8080
+ENTRYPOINT ["vercel-entrypoint"]
+CMD ["apache2-foreground"]

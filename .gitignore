@@ -24,7 +24,7 @@ Homestead.yaml
 Thumbs.db
 
 # Analytics generated files
-/analytics/model_cache.pkl
+# The approved synthetic runtime model is required in Git deployments.
 /analytics/model_accuracy.txt
 /analytics/temp_*.json
 
