@@ -58,6 +58,23 @@ class Grade extends Model
         return $this->belongsTo(Subject::class);
     }
 
+    /** The section the grade was encoded under — historical context, stored on the row. */
+    public function section()
+    {
+        return $this->belongsTo(Section::class);
+    }
+
+    /** The school year this grade belongs to, via its school_year string. */
+    public function academicYear()
+    {
+        return $this->belongsTo(AcademicYear::class, 'school_year', 'school_year');
+    }
+
+    public function scopeForSchoolYear($query, string $schoolYear)
+    {
+        return $query->where('school_year', $schoolYear);
+    }
+
     /**
      * The formal Failing determination (official grade <= 74), for SQL
      * contexts (aggregate dashboard counts, etc.) where fetching every

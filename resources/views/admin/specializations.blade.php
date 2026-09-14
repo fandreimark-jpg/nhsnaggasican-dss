@@ -7,11 +7,11 @@
 
 @include('partials.import-result')
 
-<div class="bg-white rounded-xl shadow-sm mb-0">
-    <div class="flex items-center justify-between px-6 py-4 border-b">
+<div class="card mb-0">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-line">
         <div>
-            <h2 class="text-sm font-semibold text-gray-800">All Specializations</h2>
-            <p class="text-xs text-gray-400"><x-count-label :count="$specializations->count()" noun="specialization" total /></p>
+            <h2 class="card-title">All Specializations</h2>
+            <p class="text-xs text-muted"><x-count-label :count="$specializations->count()" noun="specialization" total /></p>
         </div>
         <div class="flex items-center gap-3">
             <button type="button" onclick="openImportSpecializationsModal()"
@@ -19,7 +19,7 @@
                 <i class="bi bi-upload"></i> Import Specializations
             </button>
             <button type="button" onclick="openAddSpecModal()"
-                class="bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-800 whitespace-nowrap">
+                class="btn btn-primary whitespace-nowrap">
                 <i class="bi bi-plus-lg"></i> Add Specialization
             </button>
         </div>
@@ -38,7 +38,7 @@
         <tbody>
             @forelse($specializations as $spec)
             <tr>
-                <td class="font-medium text-gray-800">{{ $spec->name }}</td>
+                <td class="font-medium text-ink">{{ $spec->name }}</td>
                 <td>
                     <span class="bg-purple-100 text-purple-700 text-xs font-semibold px-2 py-1 rounded">
                         {{ $spec->code }}
@@ -49,7 +49,7 @@
                     <div class="flex items-center justify-end gap-2">
                         <button type="button"
                             onclick='openEditSpecModal(@json($spec))'
-                            class="inline-flex items-center gap-1 text-brand-600 hover:text-brand-800 text-xs font-medium border border-brand-200 rounded px-2 py-1 hover:bg-brand-50 whitespace-nowrap">
+                            class="inline-flex items-center gap-1 btn btn-xs btn-secondary whitespace-nowrap">
                             <i class="bi bi-pencil-square"></i> Edit
                         </button>
                         <form method="POST"
@@ -59,7 +59,7 @@
                             @csrf
                             @method('DELETE')
                             <button type="submit"
-                                class="inline-flex items-center gap-1 text-red-600 hover:text-red-800 text-xs font-medium border border-red-200 rounded px-2 py-1 hover:bg-red-50 whitespace-nowrap">
+                                class="inline-flex items-center gap-1 btn btn-xs btn-danger-outline whitespace-nowrap">
                                 <i class="bi bi-trash"></i> Delete
                             </button>
                         </form>
@@ -81,10 +81,10 @@
 
 {{-- MODAL --}}
 <div id="specModal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-    <div class="bg-white rounded-xl shadow-lg w-full max-w-md p-6">
+    <div class="bg-white rounded-xl shadow-modal w-full max-w-md p-6">
 
         <div class="flex justify-between items-center mb-4">
-            <h3 id="modalTitle" class="text-lg font-semibold text-gray-800">Add Specialization</h3>
+            <h3 id="modalTitle" class="text-lg font-semibold text-ink">Add Specialization</h3>
             <button type="button" onclick="closeSpecModal()"
                     aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
@@ -94,9 +94,9 @@
             <input type="hidden" name="_method" id="formMethod" value="POST">
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Track</label>
+                <label class="form-label">Track</label>
                 <select name="track_id" id="specTrack" required
-                        class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                        class="form-input">
                     <option value="">— Select Track —</option>
                     @foreach($tracks as $track)
                         <option value="{{ $track->id }}">{{ $track->name }}</option>
@@ -105,24 +105,24 @@
             </div>
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Specialization Name</label>
+                <label class="form-label">Specialization Name</label>
                 <input type="text" name="name" id="specName" required
                        placeholder="e.g. Humanities and Social Sciences"
-                       class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                       class="form-input">
             </div>
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Code</label>
+                <label class="form-label">Code</label>
                 <input type="text" name="code" id="specCode" required
                        placeholder="e.g. HUMSS"
-                       class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                       class="form-input">
             </div>
 
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="closeSpecModal()"
-                        class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+                        class="btn btn-outline">Cancel</button>
                 <button type="submit"
-                        class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-brand-800">
+                        class="btn btn-primary">
                     Save Specialization
                 </button>
             </div>
@@ -134,15 +134,15 @@
 {{-- IMPORT SPECIALIZATIONS MODAL --}}
 <div id="importSpecializationsModal"
      class="{{ $errors->import->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box {{ $errors->import->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
+    <div class="modal-box {{ $errors->import->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200">
 
         <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-800">Import Specializations</h3>
+            <h3 class="text-lg font-semibold text-ink">Import Specializations</h3>
             <button type="button" onclick="closeImportSpecializationsModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         @if($errors->import->any())
-            <div class="bg-red-100 text-red-700 text-sm p-3 rounded-lg mb-4">
+            <div class="alert alert-danger mb-4">
                 <ul class="list-disc list-inside">
                     @foreach($errors->import->all() as $error)
                         <li>{{ $error }}</li>
@@ -151,7 +151,7 @@
             </div>
         @endif
 
-        <p class="text-sm text-gray-500 mb-4">
+        <p class="text-sm text-muted mb-4">
             Upload an Excel (.xlsx) or CSV file. Required columns:
             <strong>name, code, track</strong>. Track is matched by name
             or code (e.g. "Academic Track" or "ACAD") and must already
@@ -167,9 +167,9 @@
 
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="closeImportSpecializationsModal()"
-                        class="px-4 py-2 text-sm text-gray-500">Cancel</button>
+                        class="px-4 py-2 text-sm text-muted">Cancel</button>
                 <button type="submit"
-                        class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium">
+                        class="btn btn-primary">
                     Upload & Import
                 </button>
             </div>

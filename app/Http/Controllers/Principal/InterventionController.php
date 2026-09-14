@@ -9,6 +9,7 @@ use App\Models\Section;
 use App\Models\Student;
 use App\Helpers\LogActivity;
 use App\Models\AcademicTerm;
+use App\Models\AcademicYear;
 use App\Models\Subject;
 use App\Services\InTermStatusService;
 use App\Services\ProgressMonitoringService;
@@ -69,11 +70,16 @@ class InterventionController extends Controller
         $readyOnly   = $request->boolean('ready_for_review');
         $subjectId   = $request->input('subject_id');
         $gradingPeriod = $this->resolveGradingPeriod($request);
+        // "Multi-school-year academic history" work order, PART 12/13 —
+        // one school year at a time, defaulting to the active one; a
+        // historical year is selectable but never mixed into the current.
+        $schoolYear = $this->resolveSchoolYear($request);
 
         $baseQuery = $this->buildFilteredQuery($request, includeSubjectFilter: false)
             ->with([
-                'student.section.track',
-                'student.section.specialization',
+                'student',
+                'section.track',
+                'section.specialization',
                 'subject',
                 'riskResult',
                 'createdBy',
@@ -159,8 +165,9 @@ class InterventionController extends Controller
             return $intervention;
         });
 
-        $gradeLevels = Section::select('grade_level')->distinct()->orderBy('grade_level')->pluck('grade_level');
-        $sections = Section::select('id', 'name', 'grade_level', 'track_id', 'specialization_id')
+        $gradeLevels = Section::where('school_year', $schoolYear)->select('grade_level')->distinct()->orderBy('grade_level')->pluck('grade_level');
+        $sections = Section::where('school_year', $schoolYear)
+            ->select('id', 'name', 'grade_level', 'track_id', 'specialization_id')
             ->with(['track:id,name', 'specialization:id,name'])
             ->orderBy('grade_level')
             ->orderBy('name')
@@ -171,6 +178,9 @@ class InterventionController extends Controller
             'statuses'      => Intervention::STATUSES,
             'gradeLevels'   => $gradeLevels,
             'sections'      => $sections,
+            'schoolYear'    => $schoolYear,
+            'schoolYears'   => AcademicYear::selectableSchoolYears(),
+            'isHistoricalYear' => $schoolYear !== Section::activeSchoolYear(),
             'subjects'      => $availableSubjects,
             'gradingPeriod' => $gradingPeriod,
             'readyForReviewCount' => $this->inTermStatus->readyForReviewCount(),
@@ -194,7 +204,16 @@ class InterventionController extends Controller
     {
         return $request->has('grading_period')
             ? ($request->filled('grading_period') ? (int) $request->input('grading_period') : null)
-            : AcademicTerm::currentOpenTerm(Section::activeSchoolYear());
+            : AcademicTerm::currentOpenTerm($this->resolveSchoolYear($request));
+    }
+
+    /**
+     * The one school year this page shows — the requested one if it is
+     * a real year, else the active one (AcademicYear::resolveSelected()).
+     */
+    private function resolveSchoolYear(Request $request): string
+    {
+        return AcademicYear::resolveSelected($request->input('school_year'));
     }
 
     /**
@@ -217,9 +236,15 @@ class InterventionController extends Controller
         $riskLevel   = $request->input('risk_level');
         $gradingPeriod = $this->resolveGradingPeriod($request);
 
+        $schoolYear = $this->resolveSchoolYear($request);
+
         return Intervention::query()
-            ->when($gradeLevel, fn($q) => $q->whereHas('student.section', fn($s) => $s->where('grade_level', $gradeLevel)))
-            ->when($sectionName, fn($q) => $q->whereHas('student.section', fn($s) => $s->where('name', $sectionName)))
+            // PART 12 — scoped to ONE school year, and Grade/Section read
+            // the intervention's OWN stored section (the learner's section
+            // when it was recorded), never students.section_id.
+            ->where('school_year', $schoolYear)
+            ->when($gradeLevel, fn($q) => $q->whereHas('section', fn($s) => $s->where('grade_level', $gradeLevel)))
+            ->when($sectionName, fn($q) => $q->whereHas('section', fn($s) => $s->where('name', $sectionName)))
             ->when($status, fn($q) => $q->where('status', $status))
             // $includeSubjectFilter is false only for index()'s "which
             // subjects should the dropdown list" computation, which must
@@ -297,11 +322,22 @@ class InterventionController extends Controller
             return back()->with('error', "An open intervention already exists for this student and subject in Term {$request->grading_period} — see the Interventions page.");
         }
 
-        $schoolYear = $student->section?->school_year;
+        // "Multi-school-year academic history" work order, PART 12 — an
+        // intervention is recorded against the ACTIVE school year and the
+        // learner's section in that year, captured now so the record never
+        // has to be re-derived from students.section_id (which changes on
+        // promotion). A learner with no enrollment this year cannot have
+        // an intervention recorded for it.
+        $schoolYear = Section::activeSchoolYear();
+        $sectionNow = $student->sectionFor($schoolYear);
+
+        if (!$sectionNow) {
+            return back()->with('error', "{$student->last_name}, {$student->first_name} is not enrolled in School Year {$schoolYear}, so no intervention can be recorded for this year.");
+        }
 
         $riskResult = RiskResult::where('student_id', $student->id)
             ->where('grading_period', (int) $request->grading_period)
-            ->when($schoolYear, fn($q) => $q->where('school_year', $schoolYear))
+            ->where('school_year', $schoolYear)
             ->first();
 
         // "Decision flow, report scoping, and dashboard pass" TASK 1a/1b —
@@ -320,6 +356,8 @@ class InterventionController extends Controller
             // within-term comparison has a term to scope its evidence
             // query to — this was the gap the docblock above used to note.
             'grading_period'         => (int) $request->grading_period,
+            'school_year'            => $schoolYear,
+            'section_id'             => $sectionNow->id,
             'risk_result_id'         => $riskResult?->id,
             'recommended_type'       => $request->recommended_type,
             'recommendation_reason'  => $request->recommendation_reason,
@@ -450,10 +488,17 @@ class InterventionController extends Controller
                 continue;
             }
 
-            $schoolYear = $student->section?->school_year;
+            // PART 12 — same active-year/section capture as store().
+            $schoolYear = Section::activeSchoolYear();
+            $sectionNow = $student->sectionFor($schoolYear);
+            if (!$sectionNow) {
+                $skipped++;
+                continue;
+            }
+
             $riskResult = RiskResult::where('student_id', $studentId)
                 ->where('grading_period', $gradingPeriod)
-                ->when($schoolYear, fn($q) => $q->where('school_year', $schoolYear))
+                ->where('school_year', $schoolYear)
                 ->first();
 
             $componentKey = $focusToComponent[$type] ?? null;
@@ -474,6 +519,8 @@ class InterventionController extends Controller
                 'student_id'            => $studentId,
                 'subject_id'            => $subjectId,
                 'grading_period'        => $gradingPeriod,
+                'school_year'           => $schoolYear,
+                'section_id'            => $sectionNow->id,
                 'risk_result_id'        => $riskResult?->id,
                 'recommended_type'      => $type,
                 'recommendation_reason' => $reason,

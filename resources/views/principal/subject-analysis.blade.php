@@ -7,117 +7,131 @@
 
 @php
     $componentLabels = ['written_work' => 'Written Work', 'performance_task' => 'Performance Task', 'examination' => 'Examination'];
+    $withEvidence = collect($summaries)->filter(fn($r) => collect($r['components'])->filter()->isNotEmpty())->count();
+    $needsAttention = collect($summaries)->filter(fn($r) => $r['weakest_component'] && (($r['components'][$r['weakest_component']]['status'] ?? null) === 'Needs Attention'))->count();
+    $failingSubjects = collect($summaries)->filter(fn($r) => ($r['failure_rate'] ?? 0) > 0)->count();
 @endphp
 
-<div class="bg-white rounded-xl shadow-sm p-4 mb-4">
-    <form method="GET" class="flex flex-wrap items-end gap-3">
-        <div>
-            <label class="block text-xs text-gray-500 mb-1">Section</label>
-            <select name="section_id" onchange="this.form.submit()"
-                    class="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
-                <option value="">All sections</option>
-                @foreach($sections as $section)
-                    <option value="{{ $section->id }}" {{ (string) $selectedSection === (string) $section->id ? 'selected' : '' }}>
-                        {{ $section->name }} — Grade {{ $section->grade_level }}
-                    </option>
-                @endforeach
-            </select>
-        </div>
-        <div>
-            <label class="block text-xs text-gray-500 mb-1">Term</label>
-            <select name="term" onchange="this.form.submit()"
-                    class="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
-                <option value="">All terms this school year</option>
-                @foreach([1, 2, 3] as $t)
-                    <option value="{{ $t }}" {{ (string) $selectedTerm === (string) $t ? 'selected' : '' }}>
-                        Term {{ $t }} {{ $currentTerm === $t ? '(currently open)' : '' }}
-                    </option>
-                @endforeach
-            </select>
-        </div>
-        @if($selectedSection || $selectedTerm)
-            <a href="{{ route('principal.subject-analysis') }}" class="text-xs text-gray-500 hover:text-gray-700 underline pb-2">Clear filters</a>
+{{-- Unified filter toolbar — School Year / Section / Term, one card. --}}
+<x-ui.filter-bar id="subjectAnalysisFilters" :clear="route('principal.subject-analysis', ['school_year' => $schoolYear])" :show-clear="(bool) ($selectedSection || $selectedTerm)">
+    <div class="filter-field">
+        <label class="form-label" for="saSchoolYear">School Year</label>
+        <select id="saSchoolYear" name="school_year" onchange="this.form.submit()" class="form-select-sm">
+            @foreach($schoolYears as $sy)
+                <option value="{{ $sy }}" {{ $schoolYear === $sy ? 'selected' : '' }}>{{ $sy }}{{ !$isHistoricalYear && $sy === $schoolYear ? ' (active)' : '' }}</option>
+            @endforeach
+        </select>
+    </div>
+    <div class="filter-field">
+        <label class="form-label" for="saSection">Section</label>
+        <select id="saSection" name="section_id" onchange="this.form.submit()" class="form-select-sm">
+            <option value="">All sections</option>
+            @foreach($sections as $section)
+                <option value="{{ $section->id }}" {{ (string) $selectedSection === (string) $section->id ? 'selected' : '' }}>
+                    {{ $section->name }} — Grade {{ $section->grade_level }}
+                </option>
+            @endforeach
+        </select>
+    </div>
+    <div class="filter-field">
+        <label class="form-label" for="saTerm">Term</label>
+        <select id="saTerm" name="term" onchange="this.form.submit()" class="form-select-sm">
+            <option value="">All terms this school year</option>
+            @foreach([1, 2, 3] as $t)
+                <option value="{{ $t }}" {{ (string) $selectedTerm === (string) $t ? 'selected' : '' }}>
+                    Term {{ $t }} {{ $currentTerm === $t ? '(currently open)' : '' }}
+                </option>
+            @endforeach
+        </select>
+    </div>
+    <x-slot:trailing>
+        <span class="pill"><span class="pill-label">Viewing</span> SY {{ $schoolYear }} · {{ $selectedTerm ? 'Term ' . $selectedTerm : 'All terms' }}</span>
+        @if($isHistoricalYear)
+            <x-ui.status-badge tone="gray" icon="bi-archive" label="Historical Record" />
         @endif
-    </form>
+    </x-slot:trailing>
+</x-ui.filter-bar>
+
+{{-- Scope summary — counts of what the table below contains. --}}
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+    <x-stat-card label="Subjects with evidence" :value="$withEvidence" accent="count-2" icon="book" />
+    <x-stat-card label="Subjects needing attention" :value="$needsAttention" :accent="$needsAttention > 0 ? 'status-attention' : 'count-8'" icon="exclamation-triangle" note="Weakest component below the 75 target" />
+    <x-stat-card label="Subjects with failures" :value="$failingSubjects" :accent="$failingSubjects > 0 ? 'status-failing' : 'count-8'" icon="x-octagon" note="Official grade 74 and below, verified grades only" />
 </div>
 
-<x-panel title="Subject Analysis"
-    subtitle="Average score per assessment component, failure rate, and at-risk count, across every student with evidence in the selected scope. A subject can look fine overall while one component quietly needs attention."
-    class="overflow-x-auto">
+<x-panel title="Subject Analysis" :padded="false"
+    subtitle="Average score per assessment component, failure rate, and at-risk count, across every student with evidence in the selected scope. A subject can look fine overall while one component quietly needs attention.">
 
-    {{-- TASK 7c of "clarity, progress, and visual design pass" — sticky
-         header on the scrollable table, same pattern as every other
-         table in this app. --}}
-    <div class="tbl-scroll -m-4">
+    <div class="tbl-scroll">
     <table class="tbl tbl-sticky">
         <thead>
             <tr>
                 <th scope="col">Subject</th>
-                <th scope="col" class="text-center">Written Work</th>
-                <th scope="col" class="text-center">Performance Task</th>
-                <th scope="col" class="text-center">Examination</th>
+                <th scope="col">Written Work</th>
+                <th scope="col">Performance Task</th>
+                <th scope="col">Examination</th>
                 <th scope="col">Weakest Component</th>
-                <th scope="col" class="text-center tbl-num">Failure Rate</th>
-                <th scope="col" class="text-center tbl-num">At-Risk Count</th>
+                <th scope="col" class="tbl-num">Failure Rate</th>
+                <th scope="col" class="tbl-num">At-Risk Count</th>
             </tr>
         </thead>
         <tbody>
             @forelse($summaries as $row)
             <tr>
-                <td class="font-medium text-gray-800">{{ $row['subject']->name }}</td>
+                <td class="font-medium text-ink whitespace-nowrap">{{ $row['subject']->name }}
+                    <span class="block text-xs text-muted font-normal">Grade {{ $row['subject']->grade_level }} · {{ ucfirst($row['subject']->type) }}</span>
+                </td>
                 @foreach(['written_work', 'performance_task', 'examination'] as $key)
                     @php $c = $row['components'][$key]; @endphp
-                    <td class="text-center">
+                    <td>
                         @if($c === null)
-                            <span class="text-gray-300 text-xs">No data</span>
+                            <span class="badge badge-outline">No data</span>
                         @else
                             <a href="{{ route('principal.students', ['subject_id' => $row['subject']->id, 'focus' => $key]) }}"
-                               class="{{ $c['status'] === 'On Track' ? 'text-status-ontrack' : 'text-status-risk font-medium' }} hover:underline"
-                               title="See the students behind this number">
-                                {{ number_format($c['avg_percentage'], 1) }}%
+                               class="block hover:opacity-80" title="See the students behind this number">
+                                <x-ui.metric-bar :value="$c['avg_percentage']" />
                             </a>
-                            <span class="block text-xs text-gray-400">{{ $c['student_count'] }} student{{ $c['student_count'] === 1 ? '' : 's' }}</span>
+                            <span class="block text-[11px] text-muted mt-1">{{ $c['student_count'] }} student{{ $c['student_count'] === 1 ? '' : 's' }}</span>
                         @endif
                     </td>
                 @endforeach
                 <td>
                     @if($row['weakest_component'] && ($row['components'][$row['weakest_component']]['status'] ?? null) === 'Needs Attention')
-                        <a href="{{ route('principal.students', ['subject_id' => $row['subject']->id, 'focus' => $row['weakest_component']]) }}"
-                           class="px-2 py-0.5 rounded-full text-xs font-medium bg-status-attention/10 text-status-attention hover:bg-status-attention/20">
-                            {{ $componentLabels[$row['weakest_component']] ?? $row['weakest_component'] }}
+                        <a href="{{ route('principal.students', ['subject_id' => $row['subject']->id, 'focus' => $row['weakest_component']]) }}" class="hover:opacity-80">
+                            <x-ui.status-badge tone="warning" icon="bi-exclamation-triangle-fill" :label="$componentLabels[$row['weakest_component']] ?? $row['weakest_component']" />
                         </a>
-                        <span class="block text-xs text-gray-400 mt-1">
+                        <span class="block text-xs text-muted mt-1">
                             {{ $row['below_target_count'] }} student{{ $row['below_target_count'] === 1 ? '' : 's' }} below target
                         </span>
                     @elseif($row['weakest_component'])
-                        <span class="text-xs text-gray-400">All on track</span>
+                        <x-ui.status-badge tone="success" icon="bi-check-circle-fill" label="All on track" />
                     @else
-                        <span class="text-xs text-gray-300">No data</span>
+                        <span class="badge badge-outline">No data</span>
                     @endif
                 </td>
-                <td class="text-center tbl-num">
+                <td class="tbl-num">
                     @if($row['failure_rate'] === null)
-                        <span class="text-gray-300 text-xs">No grades yet</span>
+                        <span class="badge badge-outline">No grades yet</span>
                     @else
-                        <span class="{{ $row['failure_rate'] > 0 ? 'text-status-failing font-medium' : 'text-status-ontrack' }}">
+                        <span class="font-semibold {{ $row['failure_rate'] > 0 ? 'text-status-failing' : 'text-status-ontrack' }}">
                             {{ number_format($row['failure_rate'], 1) }}%
                         </span>
-                        <span class="block text-xs text-gray-400">{{ $row['failing_count'] }} of {{ $row['graded_count'] }}</span>
+                        <span class="block text-xs text-muted">{{ $row['failing_count'] }} of {{ $row['graded_count'] }}</span>
                     @endif
                 </td>
-                <td class="text-center tbl-num">
+                <td class="tbl-num">
                     @if($row['at_risk_count'] > 0)
                         <a href="{{ route('principal.students', ['subject_id' => $row['subject']->id]) }}"
-                           class="text-status-risk font-medium hover:underline">{{ $row['at_risk_count'] }}</a>
+                           class="badge badge-danger hover:opacity-80">{{ $row['at_risk_count'] }}</a>
                     @else
-                        <span class="text-gray-400">0</span>
+                        <span class="text-muted">0</span>
                     @endif
                 </td>
             </tr>
             @empty
             <tr>
                 <td colspan="7">
-                    <x-empty-state icon="bi-bar-chart" message="No assessment evidence for this scope yet."
+                    <x-empty-state icon="bi bi-bar-chart" message="No assessment evidence for this scope yet."
                         hint="This fills in once advisers upload and import assessment forms for their sections, or try clearing the section/term filters." />
                 </td>
             </tr>

@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\AcademicTerm;
+use App\Models\AcademicYear;
 use App\Models\AssessmentScore;
 use App\Models\Grade;
 use App\Models\Intervention;
@@ -89,6 +90,42 @@ class CheckIntegrityCommand extends Command
                 'Students with a missing section',
                 "{$orphanedStudents} row(s)",
                 'Reassign via Admin > Students, or remove them manually — no automatic command (this touches master data, never auto-resolved).',
+            ];
+        }
+
+        // 6. "Multi-school-year academic history" work order — the
+        //    year lifecycle invariants. More than one active academic year
+        //    can only come from a hand edit (activate() locks the table);
+        //    a student whose current section has no matching enrollment
+        //    row can only come from a raw insert that bypassed
+        //    Student::saved; a term row unlinked from its academic year
+        //    can only come from a raw insert that bypassed ensureExistFor().
+        $activeYears = AcademicYear::where('is_active', true)->count();
+        if ($activeYears > 1) {
+            $findings[] = [
+                'More than one active academic year',
+                "{$activeYears} row(s) flagged active",
+                'Activate exactly one year from Admin > Academic Terms; activation deactivates every other year.',
+            ];
+        }
+
+        $unenrolledCurrent = Student::whereNotNull('section_id')
+            ->whereDoesntHave('enrollments', fn($q) => $q->whereColumn('student_enrollments.section_id', 'students.section_id'))
+            ->count();
+        if ($unenrolledCurrent > 0) {
+            $findings[] = [
+                'Students whose current section has no enrollment row',
+                "{$unenrolledCurrent} row(s)",
+                'Re-save the learner from Admin > Students (Edit), or run StudentEnrollmentService::ensureForSection() for the section.',
+            ];
+        }
+
+        $unlinkedTerms = AcademicTerm::whereNull('academic_year_id')->count();
+        if ($unlinkedTerms > 0) {
+            $findings[] = [
+                'Academic terms not linked to an academic year',
+                "{$unlinkedTerms} row(s)",
+                'Open Admin > Academic Terms once — AcademicTerm::ensureExistFor() links the active year; other years link on activation.',
             ];
         }
 

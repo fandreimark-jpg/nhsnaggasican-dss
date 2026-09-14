@@ -23,10 +23,10 @@ class ReportController extends Controller
 
     public function index(Request $request)
     {
-        $data = $this->reports->getFilteredSections(
-            $request->input('grade_level'),
-            $request->input('section_search')
-        );
+        // "Multi-school-year academic history" work order, PART 10 — every
+        // filter (school year, term, grade, section, subject) is read and
+        // validated inside the service; the Request is passed whole.
+        $data = $this->reports->getFilteredSections($request);
 
         return view('admin.reports', array_merge($data, ['clearRoute' => route('principal.reports')]));
     }

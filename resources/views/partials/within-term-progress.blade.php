@@ -35,7 +35,7 @@
 @elseif($p['not_recorded'] ?? false)
     <div class="text-gray-500 bg-gray-50 rounded-md px-2 py-1.5 max-w-[260px] whitespace-normal">
         <span class="italic">Focus component not recorded</span>
-        <span class="block text-xs text-gray-400 mt-0.5">This intervention's recorded reason didn't name a specific component, so there's nothing to anchor a before/after comparison to.</span>
+        <span class="block text-xs text-muted mt-0.5">This intervention's recorded reason didn't name a specific component, so there's nothing to anchor a before/after comparison to.</span>
     </div>
 @else
     @php $label = $componentLabels[$p['component']] ?? $p['component']; @endphp
@@ -55,7 +55,7 @@
                     ->map(fn($key) => $componentLabels[$key] ?? $key)
                     ->implode(', ');
             @endphp
-            <span class="block mt-1 pt-1 border-t border-gray-200 text-amber-700 text-[11px]">
+            <span class="block mt-1 pt-1 border-t border-line text-amber-700 text-[11px]">
                 <i class="bi bi-exclamation-triangle"></i>
                 New evidence was also added in {{ $otherLabels }} since delivery — this intervention is about {{ $label }}.
             </span>

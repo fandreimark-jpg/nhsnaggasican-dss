@@ -20,6 +20,7 @@ class RiskResult extends Model
     // Fields that can be mass-assigned
     protected $fillable = [
         'student_id',       // Which student was classified
+        'section_id',       // The section the student was in WHEN classified — historical context, never re-derived from students.section_id
         'grading_period',   // 1, 2, or 3
         'average_grade',    // Computed average of all subject grades
         'risk_level',       // 'low', 'moderate', or 'high'
@@ -41,6 +42,22 @@ class RiskResult extends Model
         'was_overridden'   => 'boolean',
     ];
 
+    /**
+     * "Multi-school-year academic history" work order, PART 11 — a risk
+     * result always carries the section the learner was in for ITS
+     * school year. Adviser\ReportController sets it explicitly; any other
+     * creation path gets it from the learner's enrollment for that year
+     * (never from a section belonging to a different year).
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (RiskResult $risk) {
+            if ($risk->section_id === null && $risk->school_year && $risk->student_id) {
+                $risk->section_id = Student::find($risk->student_id)?->sectionFor($risk->school_year)?->id;
+            }
+        });
+    }
+
     // =============================================
     // RELATIONSHIPS
     // =============================================
@@ -49,6 +66,28 @@ class RiskResult extends Model
     public function student()
     {
         return $this->belongsTo(Student::class);
+    }
+
+    /**
+     * "Multi-school-year academic history" work order, PART 11 — the
+     * section the learner was in when this result was generated. Stored
+     * at generation time (Adviser\ReportController::runAnalytics()); a
+     * promoted learner's old results keep pointing at the old section.
+     */
+    public function section()
+    {
+        return $this->belongsTo(Section::class);
+    }
+
+    /** The school year this result belongs to, via its school_year string. */
+    public function academicYear()
+    {
+        return $this->belongsTo(AcademicYear::class, 'school_year', 'school_year');
+    }
+
+    public function scopeForSchoolYear($query, string $schoolYear)
+    {
+        return $query->where('school_year', $schoolYear);
     }
 
     /** The subject with the lowest grade for this student this term, if known */

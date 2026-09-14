@@ -6,21 +6,21 @@
 @section('content')
 
 {{-- Header + Search + Add Button --}}
-<div class="bg-white rounded-xl shadow-sm mb-0">
-    <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 px-6 py-4 border-b">
+<div class="card mb-0">
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 px-5 py-4 border-b border-line">
         <div>
-            <h2 class="text-sm font-semibold text-gray-800">All Users</h2>
-            <p class="text-xs text-gray-400"><x-count-label :count="$users->total()" noun="account" total /></p>
+            <h2 class="card-title">All Users</h2>
+            <p class="text-xs text-muted"><x-count-label :count="$users->total()" noun="account" total /></p>
         </div>
         <div class="flex items-center gap-3">
             <div class="relative">
                 <input type="text" id="userSearch"
                     placeholder="Search users..."
-                    class="border rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 w-64">
+                    class="form-input !w-64 pl-9">
                 <i class="bi bi-search absolute left-3 top-2.5 text-gray-400 text-sm"></i>
             </div>
             <button type="button" onclick="openAddModal()"
-                class="bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-800 whitespace-nowrap">
+                class="btn btn-primary whitespace-nowrap">
                 <i class="bi bi-plus-lg"></i> Add User
             </button>
         </div>
@@ -42,17 +42,17 @@
         <tbody id="userTableBody">
             @forelse($users as $user)
             <tr class="user-row">
-                <td class="font-medium text-gray-800">{{ $user->last_name ?? '—' }}</td>
+                <td class="font-medium text-ink">{{ $user->last_name ?? '—' }}</td>
                 <td>{{ $user->first_name ?? '—' }}</td>
                 <td class="text-gray-500">{{ $user->middle_name ?? '—' }}</td>
                 <td class="text-gray-500">{{ $user->email }}</td>
                 <td>
                     @if($user->role === 'admin')
-                        <span class="px-2 py-1 rounded-full text-xs font-semibold bg-purple-100 text-purple-700">
+                        <span class="badge bg-purple-100 text-purple-700">
                             <i class="bi bi-shield-lock-fill"></i> Admin
                         </span>
                     @elseif($user->role === 'principal')
-                        <span class="px-2 py-1 rounded-full text-xs font-semibold bg-yellow-100 text-yellow-800">
+                        <span class="badge badge-warning">
                             <i class="bi bi-mortarboard-fill"></i> Principal
                         </span>
                     @else
@@ -63,11 +63,11 @@
                 </td>
                 <td>
                     @if($user->is_active)
-                        <span class="px-2 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700">
+                        <span class="badge badge-success">
                             <i class="bi bi-check-circle-fill"></i> Active
                         </span>
                     @else
-                        <span class="px-2 py-1 rounded-full text-xs font-semibold bg-gray-200 text-gray-600">
+                        <span class="badge badge-gray">
                             <i class="bi bi-slash-circle-fill"></i> Inactive
                         </span>
                     @endif
@@ -76,7 +76,7 @@
                     <div class="flex items-center justify-end gap-2 flex-wrap">
                         <button type="button"
                             onclick='openUserEditModal(@json($user))'
-                            class="inline-flex items-center gap-1 text-brand-600 hover:text-brand-800 text-xs font-medium border border-brand-200 rounded px-2 py-1 hover:bg-brand-50 whitespace-nowrap">
+                            class="inline-flex items-center gap-1 btn btn-xs btn-secondary whitespace-nowrap">
                             <i class="bi bi-pencil-square"></i> Edit
                         </button>
 
@@ -90,7 +90,7 @@
                                 @csrf
                                 @method('POST')
                                 <button type="submit"
-                                    class="inline-flex items-center gap-1 text-orange-600 hover:text-orange-800 text-xs font-medium border border-orange-200 rounded px-2 py-1 hover:bg-orange-50 whitespace-nowrap">
+                                    class="btn btn-xs bg-warning-soft text-warning-text border border-amber-200 hover:bg-amber-100">
                                     <i class="bi bi-slash-circle"></i> Disable
                                 </button>
                             </form>
@@ -111,7 +111,7 @@
                             @csrf
                             @method('DELETE')
                             <button type="submit"
-                                class="inline-flex items-center gap-1 text-red-600 hover:text-red-800 text-xs font-medium border border-red-200 rounded px-2 py-1 hover:bg-red-50 whitespace-nowrap">
+                                class="inline-flex items-center gap-1 btn btn-xs btn-danger-outline whitespace-nowrap">
                                 <i class="bi bi-trash"></i> Delete
                             </button>
                         </form>
@@ -137,21 +137,21 @@
     </div>
 
     @if($users->hasPages())
-    <div class="px-6 py-4 border-t flex items-center justify-center gap-2 text-sm">
+    <div class="px-5 py-4 border-t border-line flex items-center justify-center gap-2 text-sm">
         @if($users->onFirstPage())
-            <span class="px-3 py-1 rounded border text-gray-300 cursor-not-allowed">← Prev</span>
+            <span class="px-3 py-1 rounded-md border border-line text-gray-300 cursor-not-allowed">← Prev</span>
         @else
             <a href="{{ $users->previousPageUrl() }}"
-               class="px-3 py-1 rounded border hover:bg-gray-50 text-gray-600">← Prev</a>
+               class="px-3 py-1 rounded-md border border-line hover:bg-surface text-gray-600">← Prev</a>
         @endif
-        <span class="px-3 py-1 rounded border bg-brand-700 text-white font-medium">
+        <span class="px-3 py-1 rounded-md border border-brand-800 bg-brand-800 text-white font-medium">
             {{ $users->currentPage() }}
         </span>
         @if($users->hasMorePages())
             <a href="{{ $users->nextPageUrl() }}"
-               class="px-3 py-1 rounded border hover:bg-gray-50 text-gray-600">Next →</a>
+               class="px-3 py-1 rounded-md border border-line hover:bg-surface text-gray-600">Next →</a>
         @else
-            <span class="px-3 py-1 rounded border text-gray-300 cursor-not-allowed">Next →</span>
+            <span class="px-3 py-1 rounded-md border border-line text-gray-300 cursor-not-allowed">Next →</span>
         @endif
     </div>
     @endif
@@ -159,18 +159,18 @@
 
 {{-- ADD / EDIT MODAL --}}
 <div id="userModal"
-     class="{{ $errors->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div id="userModalBox" class="modal-box {{ $errors->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
+     class="{{ ($errors->any() && !$errors->has('deletion')) ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
+    <div id="userModalBox" class="modal-box {{ ($errors->any() && !$errors->has('deletion')) ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200">
 
         <div class="flex justify-between items-center mb-4">
-            <h3 id="modalTitle" class="text-lg font-semibold text-gray-800">
+            <h3 id="modalTitle" class="text-lg font-semibold text-ink">
                 <i class="bi bi-plus-lg"></i> Add User
             </h3>
             <button type="button" onclick="closeUserModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
-        @if($errors->any())
-            <div class="bg-red-100 text-red-700 text-sm p-3 rounded-lg mb-4">
+        @if(($errors->any() && !$errors->has('deletion')))
+            <div class="alert alert-danger mb-4">
                 <ul class="list-disc list-inside">
                     @foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach
                 </ul>
@@ -185,43 +185,43 @@
 
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">Last Name</label>
+                    <label class="form-label">Last Name</label>
                     <input type="text" name="last_name" id="field_last_name" required
                            value="{{ old('last_name') }}"
-                           class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                           class="form-input">
                 </div>
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">First Name</label>
+                    <label class="form-label">First Name</label>
                     <input type="text" name="first_name" id="field_first_name" required
                            value="{{ old('first_name') }}"
-                           class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                           class="form-input">
                 </div>
             </div>
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Middle Name</label>
+                <label class="form-label">Middle Name</label>
                 <input type="text" name="middle_name" id="field_middle_name"
                        value="{{ old('middle_name') }}"
-                       class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                       class="form-input">
             </div>
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Username</label>
+                <label class="form-label">Username</label>
                 <div class="flex items-center border rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-brand-400">
                     <input type="text" name="username" id="field_username" required
                            value="{{ old('username') }}"
                            placeholder="e.g. juan.delacruz"
                            class="flex-1 px-3 py-2 text-sm outline-none">
-                    <span class="bg-gray-100 px-3 py-2 text-sm text-gray-500 border-l">
+                    <span class="bg-gray-100 px-3 py-2 text-sm text-muted border-l">
                         @naggasican.edu.ph
                     </span>
                 </div>
             </div>
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Role</label>
+                <label class="form-label">Role</label>
                 <select name="role" id="field_role" required
-                        class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                        class="form-input">
                     <option value="adviser">Adviser</option>
                     <option value="admin">Admin</option>
                     <option value="principal">Principal</option>
@@ -229,22 +229,22 @@
             </div>
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Password
+                <label class="form-label">Password
                     <span class="text-gray-400 text-xs">(minimum 8 characters)</span>
                 </label>
                 <input type="password" name="password" id="field_password"
-                       class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+                       class="form-input"
                        placeholder="Enter password">
-                <p id="passwordNote" class="text-xs text-gray-400 mt-1 hidden">
+                <p id="passwordNote" class="text-xs text-muted mt-1 hidden">
                     Leave blank to keep current password
                 </p>
             </div>
 
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="closeUserModal()"
-                        class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+                        class="btn btn-outline">Cancel</button>
                 <button type="submit" id="submitBtn"
-                        class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-brand-800">
+                        class="btn btn-primary">
                     Save User
                 </button>
             </div>

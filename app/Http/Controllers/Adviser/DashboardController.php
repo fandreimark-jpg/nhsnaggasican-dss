@@ -33,13 +33,11 @@ class DashboardController extends Controller
     public function index()
     {
         // Get the section assigned to the logged-in adviser
-        $section = Section::where('adviser_id', auth()->id())
-            ->with(['track', 'specialization'])
-            ->first();
+        $section = Section::forAdviser(auth()->id())?->load(['track', 'specialization']);
 
         // If no section assigned — show empty dashboard
         $totalStudents = $section
-            ? Student::where('section_id', $section->id)->count()
+            ? Student::enrolledIn($section)->count()
             : 0;
 
         // Get subjects for this section (core + elective filtered by track/spec)
@@ -108,7 +106,7 @@ class DashboardController extends Controller
 
         // Load students with their latest risk results for the overview table
         $students = $section
-            ? Student::where('section_id', $section->id)
+            ? Student::enrolledIn($section)
                 ->with(['riskResults' => function ($q) use ($section) {
                     $q->where('school_year', $section->school_year)
                       ->orderBy('grading_period', 'desc'); // latest term first
@@ -161,7 +159,7 @@ class DashboardController extends Controller
         // and Adviser\InterventionController's same guard) — it isn't
         // acknowledgeable yet, so it must not appear to be.
         $unacknowledgedInterventions = $section
-            ? Intervention::whereHas('student', fn($q) => $q->where('section_id', $section->id))
+            ? Intervention::where('section_id', $section->id)
                 ->whereNull('acknowledged_at')
                 ->where('status', '!=', Intervention::STATUS_RECOMMENDED)
                 ->whereNotNull('decided_by')
@@ -175,7 +173,7 @@ class DashboardController extends Controller
         // acknowledgement" panel never surfaced: seen, but not yet acted
         // on. Same section/decided scoping as $unacknowledgedInterventions.
         $acknowledgedNotDelivered = $section
-            ? Intervention::whereHas('student', fn($q) => $q->where('section_id', $section->id))
+            ? Intervention::where('section_id', $section->id)
                 ->whereNotNull('acknowledged_at')
                 ->whereNull('delivered_at')
                 ->count()

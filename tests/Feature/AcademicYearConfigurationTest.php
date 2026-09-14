@@ -115,4 +115,72 @@ class AcademicYearConfigurationTest extends TestCase
 
         $this->actingAs($principal)->post('/admin/academic-years', ['school_year' => '2027-2028'])->assertForbidden();
     }
+
+    public function test_year_edit_validation_and_safe_date_corrections(): void
+    {
+        $this->actingAs(User::factory()->admin()->create());
+        $year = AcademicYear::create(['school_year' => '2030-2031']);
+        AcademicYear::create(['school_year' => '2031-2032']);
+        foreach (['2031-2032', '2030', '2030/2031', '2030-2032', 'abcd-efgh'] as $invalid) {
+            $this->put(route('admin.academic-years.update', $year), ['school_year' => $invalid])->assertSessionHasErrors('school_year');
+        }
+        foreach (['2030-06-01', '2030-05-01'] as $end) {
+            $this->put(route('admin.academic-years.update', $year), ['school_year' => '2030-2031', 'start_date' => '2030-06-01', 'end_date' => $end])->assertSessionHasErrors('end_date');
+        }
+        $this->put(route('admin.academic-years.update', $year), ['school_year' => '2032-2033', 'end_date' => '2033-04-01'])->assertSessionHas('success');
+        $this->assertSame('2032-2033', $year->fresh()->school_year);
+        $section = Section::factory()->create(['school_year' => '2032-2033']);
+        $this->put(route('admin.academic-years.update', $year), ['school_year' => '2034-2035'])->assertSessionHasErrors('school_year');
+        $this->put(route('admin.academic-years.update', $year), ['school_year' => '2032-2033', 'start_date' => '2032-06-01', 'end_date' => '2033-04-01'])->assertSessionHas('success');
+        $this->assertSame('2032-06-01', $year->fresh()->start_date->format('Y-m-d'));
+        $this->assertModelExists($section);
+        $this->assertModelExists($year);
+    }
+
+    public function test_non_admins_cannot_manage_years_or_terms(): void
+    {
+        $year = AcademicYear::create(['school_year' => '2030-2031']);
+        AcademicTerm::ensureExistFor($year->school_year);
+        $term = AcademicTerm::first();
+        foreach (['adviser', 'principal'] as $role) {
+            $this->actingAs(User::factory()->create(['role' => $role]));
+            $this->get(route('admin.academic-terms'))->assertForbidden();
+            $this->post(route('admin.academic-years.store'), ['school_year' => '2032-2033'])->assertForbidden();
+            $this->post(route('admin.academic-years.activate', $year))->assertForbidden();
+            foreach (['academic-years' => $year, 'academic-terms' => $term] as $resource => $record) {
+                $this->put(route("admin.$resource.update", $record), [])->assertForbidden();
+            }
+            $this->post(route('admin.academic-terms.open', 1))->assertForbidden();
+            $this->post(route('admin.academic-terms.close', 1))->assertForbidden();
+        }
+    }
+
+    public function test_edit_requires_csrf_outside_laravels_test_bypass(): void
+    {
+        $this->actingAs(User::factory()->admin()->create());
+        $year = AcademicYear::create(['school_year' => '2030-2031']);
+        $this->app['env'] = 'local';
+        try {
+            $this->post(route('admin.academic-years.update', $year), ['_method' => 'PUT', 'school_year' => $year->school_year])->assertStatus(419);
+            $this->assertModelExists($year);
+            $this->withSession(['_token' => 'academic-config-csrf-test'])
+                ->post(route('admin.academic-years.update', $year), ['_method' => 'PUT', '_token' => 'academic-config-csrf-test', 'school_year' => $year->school_year, 'start_date' => '2030-06-01'])
+                ->assertSessionHas('success');
+            $this->assertSame('2030-06-01', $year->fresh()->start_date->format('Y-m-d'));
+        } finally {
+            $this->app['env'] = 'testing';
+        }
+    }
+
+    public function test_term_configuration_prevents_year_rename_but_allows_date_correction(): void
+    {
+        $this->actingAs(User::factory()->admin()->create());
+        $year = AcademicYear::create(['school_year' => '2030-2031']);
+        AcademicTerm::ensureExistFor($year->school_year);
+        AcademicTerm::where('school_year', $year->school_year)->update(['is_open' => false]);
+        $this->put(route('admin.academic-years.update', $year), ['school_year' => '2031-2032'])->assertSessionHasErrors('school_year');
+        $this->put(route('admin.academic-years.update', $year), ['school_year' => $year->school_year, 'start_date' => '2030-06-01'])->assertSessionHas('success');
+        $this->assertSame('2030-06-01', $year->fresh()->start_date->format('Y-m-d'));
+        $this->assertSame(3, AcademicTerm::where('school_year', $year->school_year)->count());
+    }
 }

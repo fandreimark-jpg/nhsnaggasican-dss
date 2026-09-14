@@ -96,7 +96,7 @@ class SectionElectiveStatus
 
     public function expectedGradeCount(Section $section, int $term): int
     {
-        $studentCount = Student::where('section_id', $section->id)->count();
+        $studentCount = Student::enrolledIn($section)->count();
         return $studentCount * $this->expectedSubjectsForTerm($section, $term)->count();
     }
 }

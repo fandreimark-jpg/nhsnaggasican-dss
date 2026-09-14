@@ -35,10 +35,27 @@ class ReportSubmission extends Model
     // RELATIONSHIPS
     // =============================================
 
-    /** Submission belongs to a section */
+    /**
+     * Submission belongs to a section. The section row is itself
+     * school-year-specific (sections.school_year), so grade level, track,
+     * specialization, and adviser resolved through it are the ones in
+     * force when the report was submitted — never the learner's current
+     * placement.
+     */
     public function section()
     {
         return $this->belongsTo(Section::class);
+    }
+
+    /** The school year this report belongs to, via its school_year string. */
+    public function academicYear()
+    {
+        return $this->belongsTo(AcademicYear::class, 'school_year', 'school_year');
+    }
+
+    public function scopeForSchoolYear($query, string $schoolYear)
+    {
+        return $query->where('school_year', $schoolYear);
     }
 
     /**

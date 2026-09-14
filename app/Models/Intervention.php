@@ -58,6 +58,8 @@ class Intervention extends Model
         'student_id',
         'subject_id',
         'grading_period',
+        'school_year',
+        'section_id',
         'risk_result_id',
         'recommended_type',
         'recommendation_reason',
@@ -83,6 +85,37 @@ class Intervention extends Model
         'delivered_at' => 'datetime',
     ];
 
+    /**
+     * "Multi-school-year academic history" work order, PART 12 — every
+     * intervention carries the school year and section it was recorded
+     * under. The Principal controllers set both explicitly; this fills
+     * them for any other creation path (factories, older call sites)
+     * from the best evidence available at creation time — the linked
+     * risk result's year, else the learner's current section's year —
+     * so no row is ever created without historical context. A section
+     * is only stamped when it genuinely belongs to that year.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (Intervention $intervention) {
+            if ($intervention->school_year === null || $intervention->section_id === null) {
+                $risk = $intervention->risk_result_id ? RiskResult::find($intervention->risk_result_id) : null;
+                $student = Student::with('section')->find($intervention->student_id);
+
+                $schoolYear = $intervention->school_year
+                    ?? $risk?->school_year
+                    ?? $student?->section?->school_year;
+
+                $intervention->school_year = $schoolYear;
+
+                if ($intervention->section_id === null && $schoolYear) {
+                    $intervention->section_id = $risk?->section_id
+                        ?? $student?->sectionFor($schoolYear)?->id;
+                }
+            }
+        });
+    }
+
     public function student()
     {
         return $this->belongsTo(Student::class);
@@ -96,6 +129,59 @@ class Intervention extends Model
     public function riskResult()
     {
         return $this->belongsTo(RiskResult::class);
+    }
+
+    /**
+     * "Multi-school-year academic history" work order, PART 12 — the
+     * section the learner was in when this intervention was recorded,
+     * captured at creation the same way focus_component and
+     * risk_result_id are (see CLAUDE.md, "Term-over-Term Progress depends
+     * on the order a Principal acted in"). Never re-derived from
+     * students.section_id — that changes on promotion; this must not.
+     */
+    public function section()
+    {
+        return $this->belongsTo(Section::class);
+    }
+
+    /** The school year this intervention belongs to, via its school_year string. */
+    public function academicYear()
+    {
+        return $this->belongsTo(AcademicYear::class, 'school_year', 'school_year');
+    }
+
+    public function scopeForSchoolYear($query, string $schoolYear)
+    {
+        return $query->where('school_year', $schoolYear);
+    }
+
+    /**
+     * The section this intervention's evidence lives under: the stored
+     * section_id (PART 12), else the learner's enrollment for the stored
+     * school year, else — for a legacy row with neither — the learner's
+     * current section. Every evidence comparison (ProgressMonitoringService,
+     * InTermStatusService::isReadyForReview()) reads THIS, never
+     * $intervention->student->section directly.
+     */
+    public function contextSection(): ?Section
+    {
+        if ($this->section_id) {
+            return $this->section;
+        }
+
+        $student = $this->student;
+
+        if (!$student) {
+            return null;
+        }
+
+        return ($this->school_year ? $student->sectionFor($this->school_year) : null) ?? $student->section;
+    }
+
+    /** The school year this intervention's evidence lives in — stored, else the context section's. */
+    public function contextSchoolYear(): ?string
+    {
+        return $this->school_year ?? $this->contextSection()?->school_year;
     }
 
     public function createdBy()

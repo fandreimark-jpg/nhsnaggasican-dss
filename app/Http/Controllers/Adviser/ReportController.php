@@ -39,9 +39,7 @@ class ReportController extends Controller
      */
     public function show()
     {
-        $section = Section::where('adviser_id', auth()->id())
-            ->with(['track', 'specialization'])
-            ->first();
+        $section = Section::forAdviser(auth()->id())?->load(['track', 'specialization']);
 
         if (!$section) {
             return view('adviser.submit-report', [
@@ -55,7 +53,7 @@ class ReportController extends Controller
         }
 
         $subjects = Subject::forSection($section)->get();
-        $students = Student::where('section_id', $section->id)->orderBy('last_name')->get();
+        $students = Student::enrolledIn($section)->orderBy('last_name')->get();
 
         // Not read by adviser.submit-report.blade.php — the view derives
         // its own per-term $totalExpected from $termStatus[$period]['expected']
@@ -135,7 +133,7 @@ class ReportController extends Controller
      */
    public function submit(Request $request)
     {
-        $section = Section::where('adviser_id', auth()->id())->firstOrFail();
+        $section = Section::forAdviser(auth()->id()) ?? abort(404);
 
         $request->validate([
             'grading_period' => 'required|in:1,2,3',
@@ -146,9 +144,9 @@ class ReportController extends Controller
         // Same server-side rule as grade encoding — a term that's been
         // closed by the admin (or was never opened) must not accept a
         // submission, even a resubmission, regardless of what the UI shows.
-        if (!AcademicTerm::isOpen($section->school_year, $gradingPeriod)) {
+        if (!AcademicTerm::acceptsWrites($section->school_year, $gradingPeriod)) {
             return back()->with('error',
-                'Term ' . $gradingPeriod . ' is currently closed. Contact the admin to reopen it before submitting.'
+                AcademicTerm::writeRefusalReason($section->school_year, $gradingPeriod)
             );
         }
 
@@ -181,7 +179,7 @@ class ReportController extends Controller
             );
         }
 
-        $students      = Student::where('section_id', $section->id)->get();
+        $students      = Student::enrolledIn($section)->get();
         $totalExpected = $this->electiveStatus->expectedGradeCount($section, $gradingPeriod);
 
         $encoded = Grade::where('section_id', $section->id)
@@ -310,9 +308,7 @@ class ReportController extends Controller
      * 4. Save risk results to the database
      * 5. Clean up temp files
      *
-     * Note: exec() is used instead of Laravel Process facade
-     * because Process facade causes WinError 10106 on Windows
-     * when scikit-learn (joblib/asyncio) is involved.
+     * Uses an argument-array process with a bounded execution timeout.
      *
      * Returns true if risk results were generated and saved, false if the
      * classifier failed for any reason — the caller uses this to tell the
@@ -320,37 +316,42 @@ class ReportController extends Controller
      */
    private function runAnalytics(array $gradesData, Section $section, int $gradingPeriod): bool
     {
-        $tempFile   = storage_path('app/temp_grades_' . $section->id . '.json');
-        $outputFile = storage_path('app/temp_results_' . $section->id . '.json');
+        $executionId = (string) \Illuminate\Support\Str::uuid();
+        $tempFile = storage_path('app/temp_grades_' . $executionId . '.json');
+        $outputFile = storage_path('app/temp_results_' . $executionId . '.json');
 
-        $pythonPayload = $this->buildPythonPayload($gradesData, $section, $gradingPeriod);
-
-        file_put_contents($tempFile, json_encode($pythonPayload));
-
-        $pythonPath = config('services.python_path');
-        $scriptPath = base_path('analytics' . DIRECTORY_SEPARATOR . 'classify.py');
-
-        $command    = "\"{$pythonPath}\" \"{$scriptPath}\" \"{$tempFile}\" \"{$outputFile}\"";
-        $execOutput = [];
-        $exitCode   = 0;
-
-        exec($command, $execOutput, $exitCode);
-
-        if ($exitCode !== 0 || !file_exists($outputFile)) {
-            \Log::error('Analytics failed (exit: ' . $exitCode . '). Output: ' . implode("\n", $execOutput));
-            @unlink($tempFile);
+        try {
+            $pythonPayload = $this->buildPythonPayload($gradesData, $section, $gradingPeriod);
+            if (file_put_contents($tempFile, json_encode($pythonPayload, JSON_THROW_ON_ERROR)) === false) {
+                return false;
+            }
+            $process = new \Symfony\Component\Process\Process([
+                config('services.python_path'), base_path('analytics/classify.py'), $tempFile, $outputFile,
+            ]);
+            $process->setTimeout(120);
+            $process->run();
+            if (!$process->isSuccessful() || !is_file($outputFile)) {
+                \Log::error('Analytics process failed.', ['exit_code' => $process->getExitCode()]);
+                return false;
+            }
+            $results = json_decode(file_get_contents($outputFile), true, 512, JSON_THROW_ON_ERROR);
+            $expectedIds = array_column($gradesData, 'student_id');
+            if (!is_array($results) || count($results) !== count($expectedIds)) return false;
+            $seen = [];
+            foreach ($results as $result) {
+                if (!is_array($result) || !isset($result['student_id'], $result['risk_level'], $result['average_grade'])
+                    || !in_array($result['student_id'], $expectedIds)
+                    || isset($seen[$result['student_id']])
+                    || !in_array($result['risk_level'], ['low', 'moderate', 'high'], true)
+                    || !is_numeric($result['average_grade'])) return false;
+                $seen[$result['student_id']] = true;
+            }
+        } catch (\Throwable $e) {
+            \Log::error('Analytics execution failed.', ['exception' => get_class($e)]);
             return false;
-        }
-
-        $raw = file_get_contents($outputFile);
-        @unlink($tempFile);
-        @unlink($outputFile);
-
-        $results = json_decode($raw, true);
-
-        if (json_last_error() !== JSON_ERROR_NONE || !$results) {
-            \Log::error('JSON decode error: ' . json_last_error_msg());
-            return false;
+        } finally {
+            if (is_file($tempFile)) @unlink($tempFile);
+            if (is_file($outputFile)) @unlink($outputFile);
         }
 
         // Keyed lookup so we can merge back the weakest-subject data
@@ -373,6 +374,11 @@ class ReportController extends Controller
                     'school_year'    => $section->school_year,
                 ],
                 [
+                    // "Multi-school-year academic history" work order,
+                    // PART 11 — the section this report was submitted for,
+                    // stored on the result so a promoted learner's old
+                    // results keep their old section.
+                    'section_id'            => $section->id,
                     'average_grade'         => $studentResult['average_grade'],
                     'risk_level'            => $finalRiskLevel,
                     'ml_risk_level'         => $mlRiskLevel,

@@ -40,3 +40,9 @@ Thumbs.db
 # Python bytecode cache
 __pycache__/
 *.pyc
+# Local secrets, uploads, and analytics scratch output
+.env.*
+!.env.example
+/storage/app/temp_*.json
+/storage/app/private/
+/analytics/datasets/

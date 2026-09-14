@@ -133,7 +133,7 @@ class SpecializationController extends Controller
     {
         $specialization = Specialization::findOrFail($id);
 
-        if ($specialization->sections()->count() > 0) {
+        if ($specialization->sections()->exists()) {
             return redirect()->route('admin.specializations')
                 ->with('error', 'Cannot delete specialization with existing sections.');
         }

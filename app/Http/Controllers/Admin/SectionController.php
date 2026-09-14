@@ -102,6 +102,19 @@ class SectionController extends Controller
             'curriculum'        => 'nullable|in:sshs,k12_2013',
         ]);
 
+        // Same one-section-per-adviser-per-school-year rule update() applies.
+        if ($request->adviser_id) {
+            $existingSection = Section::where('adviser_id', $request->adviser_id)
+                ->where('school_year', $request->school_year)
+                ->first();
+
+            if ($existingSection) {
+                return back()->withErrors([
+                    'adviser_id' => 'This adviser is already assigned to Section ' . $existingSection->name . ' for School Year ' . $request->school_year . '.'
+                ])->withInput();
+            }
+        }
+
         Section::create([
             'name'              => $request->name,
             'grade_level'       => $request->grade_level,
@@ -201,9 +214,14 @@ class SectionController extends Controller
             'curriculum'        => 'nullable|in:sshs,k12_2013',
         ]);
 
-        // Prevent assigning an adviser who is already assigned to another section
+        // Prevent assigning an adviser who is already assigned to another
+        // section IN THE SAME SCHOOL YEAR. "Multi-school-year academic
+        // history" work order — an adviser who handled Narra in 2026-2027
+        // must be assignable to Agila in 2027-2028; the old assignment is
+        // history, not a conflict.
         if ($adviserId) {
             $existingSection = Section::where('adviser_id', $adviserId)
+                ->where('school_year', $request->school_year)
                 ->where('id', '!=', $id) // exclude current section from check
                 ->first();
 
@@ -212,6 +230,22 @@ class SectionController extends Controller
                     'adviser_id' => 'This adviser is already assigned to Section ' . $existingSection->name . '.'
                 ])->withInput();
             }
+        }
+
+        // "Multi-school-year academic history" work order — a section's
+        // school_year (and grade level) is the join key every grade,
+        // assessment, report, risk result, and enrollment under it
+        // carries. Once any such record exists, moving the section to
+        // another year (or grade) would silently relabel that history,
+        // so it is refused; create a new section for the new year instead.
+        $yearOrGradeChanging = $request->school_year !== $section->school_year
+            || (int) $request->grade_level !== (int) $section->grade_level;
+
+        if ($yearOrGradeChanging && $this->sectionHasAcademicHistory($section)) {
+            return back()->withErrors([
+                'school_year' => 'Section ' . $section->name . ' already has academic records for School Year '
+                    . $section->school_year . ' (Grade ' . $section->grade_level . '). Its school year and grade level cannot be changed; create a new section for the new school year instead.',
+            ])->withInput();
         }
 
         $section->update([
@@ -228,6 +262,16 @@ class SectionController extends Controller
             ->with('success', 'Section updated successfully!');
     }
 
+    private function sectionHasAcademicHistory(Section $section): bool
+    {
+        return $section->grades()->exists()
+            || $section->assessments()->exists()
+            || $section->reportSubmissions()->exists()
+            || $section->riskResults()->exists()
+            || $section->interventions()->exists()
+            || $section->enrollments()->exists();
+    }
+
     /**
      * Delete a section.
      * Cannot delete a section that still has students enrolled.
@@ -237,7 +281,7 @@ class SectionController extends Controller
         $section = Section::findOrFail($id);
 
         // Prevent deletion if section has students
-        if ($section->students()->count() > 0) {
+        if ($section->students()->exists()) {
             return redirect()->route('admin.sections')
                 ->with('error', 'Cannot delete section with existing students.');
         }

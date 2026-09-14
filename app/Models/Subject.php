@@ -20,6 +20,8 @@ use Illuminate\Database\Eloquent\Model;
  */
 class Subject extends Model
 {
+    use \App\Models\Concerns\ProtectsAcademicHistory;
+
     use HasFactory;
 
     // Fields that can be mass-assigned

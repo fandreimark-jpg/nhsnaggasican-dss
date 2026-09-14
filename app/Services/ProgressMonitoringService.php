@@ -89,7 +89,9 @@ class ProgressMonitoringService
 
         $student    = $intervention->student;
         $subject    = $intervention->subject;
-        $section    = $student->section;
+        // PART 12 — the section the intervention was recorded under
+        // (its own stored context), never the learner's current section.
+        $section    = $intervention->contextSection();
         $beforeTerm = $riskResult->grading_period;
         $schoolYear = $riskResult->school_year;
 
@@ -215,7 +217,7 @@ class ProgressMonitoringService
 
         $student = $intervention->student;
         $subject = $intervention->subject;
-        $section = $student?->section;
+        $section = $intervention->contextSection();
 
         if (!$student || !$subject || !$section) {
             return null;

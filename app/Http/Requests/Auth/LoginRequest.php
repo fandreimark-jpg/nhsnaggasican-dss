@@ -59,13 +59,13 @@ class LoginRequest extends FormRequest
         // AFTER the password is verified, not before, so a disabled
         // account's existence/status is never revealed to someone who
         // doesn't actually know its password.
-        if (! Auth::user()->isActive()) {
+        if (! Auth::user()->isActive() || !in_array(Auth::user()->role, ['admin', 'adviser', 'principal'], true)) {
             Auth::guard('web')->logout();
             $this->session()->invalidate();
             $this->session()->regenerateToken();
 
             throw ValidationException::withMessages([
-                'email' => 'Your account has been disabled. Please contact the system administrator.',
+                'email' => 'Your account has been disabled. Contact the administrator.',
             ]);
         }
     }

@@ -7,8 +7,10 @@
 
 @section('content')
 
+@include('partials.section-school-year-context')
+
 @if(!$section)
-    <div class="bg-white rounded-xl shadow-sm">
+    <div class="card">
         <x-empty-state icon="bi-exclamation-circle" message="No section assigned to your account."
             hint="An Admin assigns sections to advisers — contact the admin to get one assigned." />
     </div>
@@ -24,11 +26,11 @@
 @include('partials.stale-risk-warning')
 
 @if(session('error'))
-<div class="bg-red-100 text-red-700 text-sm p-4 rounded-lg mb-4">{{ session('error') }}</div>
+<div class="alert alert-danger mb-4">{{ session('error') }}</div>
 @endif
 
 @if(session('success') && !session('edit_summary'))
-<div class="bg-green-100 text-green-700 text-sm p-4 rounded-lg mb-4">{{ session('success') }}</div>
+<div class="alert alert-success mb-4">{{ session('success') }}</div>
 @endif
 
 @include('partials.import-result')
@@ -92,15 +94,15 @@
 </div>
 @endif
 
-<div class="bg-white rounded-xl shadow-sm overflow-x-auto">
+<div class="card overflow-x-auto">
 
     {{-- Term Selector — "Correctness and interface pass" TASK 5a — clearer
          spacing between the term pills, and a visible divider from the
          filters (a bottom border when stacked on narrow screens, a right
          border once they sit side by side) instead of the two groups
          reading as one run-on row. --}}
-    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 px-6 py-4 border-b">
-        <div class="flex items-center gap-3 pb-3 border-b border-gray-100 md:pb-0 md:border-b-0 md:border-r md:pr-5 md:mr-1">
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 px-5 py-4 border-b border-line">
+        <div class="flex items-center gap-3 pb-3 border-b border-line md:pb-0 md:border-b-0 md:border-r md:pr-5 md:mr-1">
             <span class="text-sm font-semibold text-gray-700">Term:</span>
             <div class="flex gap-2.5">
                 @foreach([1, 2, 3] as $t)
@@ -108,7 +110,7 @@
                     class="px-4 py-1.5 rounded-full text-sm font-medium border transition flex items-center gap-1
                         {{ $selectedPeriod == $t
                             ? 'bg-brand-700 text-white border-brand-700 shadow-sm'
-                            : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50' }}">
+                            : 'bg-white text-gray-600 border-gray-300 hover:bg-surface' }}">
                     Term {{ $t }}
                     @if($openTerm !== $t)
                         <i class="bi bi-lock-fill text-xs {{ $selectedPeriod == $t ? 'text-white' : 'text-gray-400' }}"></i>
@@ -121,7 +123,7 @@
         <div class="flex items-center gap-3">
             <form method="GET" action="{{ route('adviser.assessments') }}" id="assessmentsFilterForm" class="flex items-center gap-2">
                 <input type="hidden" name="period" value="{{ $selectedPeriod }}">
-                <label class="text-sm text-gray-500">Subject:</label>
+                <label class="text-sm text-muted">Subject:</label>
                 <select name="subject_id" onchange="this.form.submit()"
                         class="w-48 border rounded-lg text-sm pl-3 pr-8 py-1.5">
                     @foreach($subjects as $subject)
@@ -138,7 +140,7 @@
                 <i class="bi bi-upload"></i> Upload Assessment Form
             </button>
             <button type="button" onclick="openAddAssessmentItemModal()"
-                class="bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-800 whitespace-nowrap">
+                class="btn btn-primary whitespace-nowrap">
                 <i class="bi bi-plus-circle"></i> Add Assessment Item
             </button>
             @endif
@@ -148,11 +150,16 @@
     @unless($isTermOpen)
     <div class="bg-gray-50 text-gray-500 text-sm px-6 py-3 border-b flex items-center gap-2">
         <i class="bi bi-lock-fill"></i>
-        Term {{ $selectedPeriod }} is currently closed for encoding.
-        @if($openTerm)
-            Term {{ $openTerm }} is the open term right now — you can view Term {{ $selectedPeriod }} but not upload to it.
+        @if(!$section->isInActiveSchoolYear())
+            <span class="badge badge-gray">Historical Record</span>
+            School Year {{ $section->school_year }} is not the active school year — its records are read-only. You can view every term but not upload to them.
         @else
-            No term is currently open. Contact the admin.
+            Term {{ $selectedPeriod }} is currently closed for encoding.
+            @if($openTerm)
+                Term {{ $openTerm }} is the open term right now — you can view Term {{ $selectedPeriod }} but not upload to it.
+            @else
+                No term is currently open. Contact the admin.
+            @endif
         @endif
     </div>
     @endunless
@@ -199,9 +206,9 @@
         <tbody>
             @forelse($items as $item)
             <tr>
-                <td class="font-medium text-gray-800">{{ $item->name }}</td>
+                <td class="font-medium text-ink">{{ $item->name }}</td>
                 <td>
-                    <span class="px-2 py-0.5 rounded-full text-xs font-medium {{ $componentColors[$item->component] ?? 'bg-gray-100 text-gray-600' }}">
+                    <span class="badge {{ $componentColors[$item->component] ?? 'bg-gray-100 text-gray-600' }}">
                         {{ $componentLabels[$item->component] ?? $item->component }}
                     </span>
                     @if($item->component === 'examination' && $item->exam_role)
@@ -250,11 +257,11 @@
      the status filter itself never disappears just because the CURRENTLY
      selected filter happens to match zero students. --}}
 @if($performanceByStudentId->isNotEmpty())
-<div class="bg-white rounded-xl shadow-sm mt-4 overflow-x-auto">
-    <div class="px-6 py-4 border-b">
+<div class="card mt-4 overflow-x-auto">
+    <div class="px-5 py-4 border-b border-line">
         <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
-                <h3 class="font-semibold text-gray-800 text-sm">Student Performance — {{ $selectedSubject->name }}, Term {{ $selectedPeriod }}</h3>
+                <h3 class="card-title">Student Performance — {{ $selectedSubject->name }}, Term {{ $selectedPeriod }}</h3>
                 <p class="text-xs text-gray-500 mt-1">
                     Component breakdown from assessment evidence — not just the final grade. A student can look fine
                     overall while one component quietly needs attention.
@@ -265,9 +272,9 @@
                  confused. Submits via the same form as the Subject select
                  above (see @push('scripts') below). --}}
             <div>
-                <label class="block text-xs text-gray-500 mb-1">Status</label>
+                <label class="form-label">Status</label>
                 <select name="status_filter" form="assessmentsFilterForm" onchange="this.form.submit()"
-                        class="border rounded-md text-sm px-2 py-1.5 min-w-[190px]">
+                        class="form-select-sm min-w-[190px]">
                     <option value="">All students</option>
                     <optgroup label="In-Term Status (evidence, during the term)">
                         <option value="On Track" {{ $statusFilter === 'On Track' ? 'selected' : '' }}>On Track</option>
@@ -393,7 +400,7 @@
         <tbody>
             @forelse($performance as $row)
             <tr data-performance-row data-student-id="{{ $row['student']->id }}">
-                <td class="font-medium text-gray-800 whitespace-nowrap">
+                <td class="font-medium text-ink whitespace-nowrap">
                     {{ $row['student']->last_name }}, {{ $row['student']->first_name }}
                     @if($row['has_additional_support'])
                         {{-- "Workflow completion pass" TASK 3a — neutral,
@@ -414,13 +421,13 @@
                             <span class="{{ $c['status'] === 'On Track' ? 'text-status-ontrack' : 'text-status-risk font-medium' }}">
                                 {{ number_format($c['percentage'], 2) }}%
                             </span>
-                            <span class="block text-xs text-gray-400">
+                            <span class="block text-xs text-muted">
                                 {{ $c['gap'] >= 0 ? '+' : '' }}{{ number_format($c['gap'], 1) }}
                             </span>
                         @endif
                     </td>
                 @endforeach
-                <td class="tbl-num {{ $row['complete'] ? 'text-gray-800' : 'text-gray-300' }}">
+                <td class="tbl-num {{ $row['complete'] ? 'text-ink' : 'text-gray-300' }}">
                     @if($row['complete'])
                         {{ number_format($row['computed_grade'], 2) }}
                         {{-- TASK 1b of "clarity, progress, and visual design" —
@@ -464,11 +471,11 @@
                 </td>
                 <td>
                     @if($row['weakest_component'] && ($row['components'][$row['weakest_component']]['status'] ?? null) === 'Needs Attention')
-                        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-status-attention/10 text-status-attention">
+                        <span class="badge bg-status-attention/10 text-status-attention">
                             {{ $componentLabels[$row['weakest_component']] ?? $row['weakest_component'] }}
                         </span>
                     @elseif($row['weakest_component'])
-                        <span class="text-xs text-gray-400">On track</span>
+                        <span class="text-xs text-muted">On track</span>
                     @else
                         <span class="text-xs text-gray-300">No data yet</span>
                     @endif
@@ -534,20 +541,20 @@
 {{-- UPLOAD MODAL --}}
 @if($selectedSubject)
 <div id="assessmentUploadModal" class="hidden opacity-0 fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box scale-95 opacity-0 bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
+    <div class="modal-box scale-95 opacity-0 bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200">
         <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-800">Upload Assessment Form — {{ $selectedSubject->name }}, Term {{ $selectedPeriod }}</h3>
+            <h3 class="text-lg font-semibold text-ink">Upload Assessment Form — {{ $selectedSubject->name }}, Term {{ $selectedPeriod }}</h3>
             <button type="button" onclick="closeAssessmentUploadModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
-        <p class="text-sm text-gray-500 mb-4">
+        <p class="text-sm text-muted mb-4">
             Expected columns: <code>lrn, last_name, first_name</code>, then one column per assessment item
             (e.g. <code>Quiz 1</code>, <code>Performance Task 1</code>, <code>Exam</code>). You'll verify how each
             column is classified — and set its maximum score — before anything is saved.
         </p>
 
         <form method="POST" action="{{ route('adviser.assessments.detect') }}"
-              enctype="multipart/form-data" class="space-y-4">
+              enctype="multipart/form-data" class="space-y-4" data-loading="Reading assessment form...">
             @csrf
             <input type="hidden" name="subject_id" value="{{ $selectedSubject->id }}">
             <input type="hidden" name="grading_period" value="{{ $selectedPeriod }}">
@@ -556,9 +563,9 @@
 
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="closeAssessmentUploadModal()"
-                        class="px-4 py-2 text-sm text-gray-500">Cancel</button>
+                        class="px-4 py-2 text-sm text-muted">Cancel</button>
                 <button type="submit"
-                        class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium">
+                        class="btn btn-primary">
                     Continue
                 </button>
             </div>
@@ -586,14 +593,14 @@
      intervention for this exact subject/term — see AssessmentController::index(). --}}
 <div id="addAssessmentItemModal"
      class="{{ $errors->addItem->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box {{ $errors->addItem->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-lg w-full max-w-2xl p-6 transition-all duration-200 max-h-[90vh] overflow-y-auto">
+    <div class="modal-box {{ $errors->addItem->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-modal w-full max-w-2xl p-6 transition-all duration-200 max-h-[90vh] overflow-y-auto">
         <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-800">Add Assessment Item — {{ $selectedSubject->name }}, Term {{ $selectedPeriod }}</h3>
+            <h3 class="text-lg font-semibold text-ink">Add Assessment Item — {{ $selectedSubject->name }}, Term {{ $selectedPeriod }}</h3>
             <button type="button" onclick="closeAddAssessmentItemModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         @if($errors->addItem->any())
-            <div class="bg-red-100 text-red-700 text-sm p-3 rounded-lg mb-4">
+            <div class="alert alert-danger mb-4">
                 <ul class="list-disc list-inside">
                     @foreach($errors->addItem->all() as $error)
                         <li>{{ $error }}</li>
@@ -616,22 +623,22 @@
 
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">Item Name</label>
+                    <label class="form-label">Item Name</label>
                     <input type="text" name="item_name" required value="{{ old('item_name') }}"
-                           class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+                           class="form-input"
                            placeholder="e.g. Remedial Quiz 1">
                 </div>
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">Max Score</label>
+                    <label class="form-label">Max Score</label>
                     <input type="number" name="max_score" step="0.01" min="0.01" required value="{{ old('max_score') }}"
-                           class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                           class="form-input">
                 </div>
             </div>
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Component</label>
+                <label class="form-label">Component</label>
                 <select name="component" id="aaiComponent" required
-                        class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                        class="form-input">
                     <option value="" {{ old('component', $prefillComponent) ? '' : 'selected' }} disabled>— Select —</option>
                     @foreach($componentLabels as $key => $label)
                         <option value="{{ $key }}" {{ old('component', $prefillComponent) === $key ? 'selected' : '' }}>{{ $label }}</option>
@@ -661,7 +668,7 @@
                             <span class="text-gray-700">{{ $student->last_name }}, {{ $student->first_name }}</span>
                             @if($performanceByStudentId->has($student->id))
                                 @php $c = $performanceByStudentId[$student->id]['components']; @endphp
-                                <span class="block text-xs text-gray-400" data-aai-current-pct>
+                                <span class="block text-xs text-muted" data-aai-current-pct>
                                     @foreach($componentLabels as $key => $label)
                                         <span class="{{ $key === old('component', $prefillComponent) ? '' : 'hidden' }}" data-aai-pct-for="{{ $key }}">
                                             Current {{ $label }}: {{ $c[$key]['percentage'] === null ? 'No data' : number_format($c[$key]['percentage'], 2) . '%' }}
@@ -682,9 +689,9 @@
 
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="closeAddAssessmentItemModal()"
-                        class="px-4 py-2 text-sm text-gray-500">Cancel</button>
+                        class="px-4 py-2 text-sm text-muted">Cancel</button>
                 <button type="submit"
-                        class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium">
+                        class="btn btn-primary">
                     Save Item
                 </button>
             </div>
@@ -704,9 +711,9 @@
 @endphp
 <div id="editAssessmentItemModal"
      class="{{ $errors->editItem->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box {{ $errors->editItem->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-lg w-full max-w-2xl p-6 transition-all duration-200 max-h-[90vh] overflow-y-auto">
+    <div class="modal-box {{ $errors->editItem->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-modal w-full max-w-2xl p-6 transition-all duration-200 max-h-[90vh] overflow-y-auto">
         <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-800">
+            <h3 class="text-lg font-semibold text-ink">
                 Edit Assessment Item
                 <span id="eaiTitleSuffix" class="text-gray-400 font-normal">{{ $editAssessment ? '— ' . $editAssessment->name : '' }}</span>
             </h3>
@@ -714,7 +721,7 @@
         </div>
 
         @if($errors->editItem->any())
-            <div class="bg-red-100 text-red-700 text-sm p-3 rounded-lg mb-4">
+            <div class="alert alert-danger mb-4">
                 <ul class="list-disc list-inside">
                     @foreach($errors->editItem->all() as $error)
                         <li>{{ $error }}</li>
@@ -723,10 +730,10 @@
             </div>
         @endif
 
-        <p class="text-sm text-gray-500 mb-4">
+        <p class="text-sm text-muted mb-4">
             Item: <strong id="eaiItemName">{{ $editAssessment->name ?? '' }}</strong> —
             Component: <span id="eaiComponent">{{ $componentLabels[$editAssessment->component ?? ''] ?? '' }}</span>
-            <span class="block text-xs text-gray-400 mt-0.5">Item name and component cannot be changed here — they identify which item this is. Add a new item instead if either is wrong.</span>
+            <span class="block text-xs text-muted mt-0.5">Item name and component cannot be changed here — they identify which item this is. Add a new item instead if either is wrong.</span>
         </p>
 
         <form method="POST" id="editAssessmentItemForm"
@@ -738,14 +745,14 @@
             <input type="hidden" name="assessment_id" value="{{ old('assessment_id', $editAssessment->id ?? '') }}">
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Max Score</label>
+                <label class="form-label">Max Score</label>
                 <input type="number" name="max_score" id="eaiMaxScore" step="0.01" min="0.01" required
                        value="{{ old('max_score', $editAssessment->max_score ?? '') }}"
-                       class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                       class="form-input">
             </div>
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Scores <span class="text-gray-400 text-xs">(leave blank to clear — the student is treated as not having taken this item)</span></label>
+                <label class="form-label">Scores <span class="text-gray-400 text-xs">(leave blank to clear — the student is treated as not having taken this item)</span></label>
                 <div class="border rounded-lg divide-y max-h-72 overflow-y-auto" id="eaiRoster">
                     @foreach($sectionStudents as $student)
                     <div class="flex items-center justify-between gap-3 px-3 py-2 text-sm">
@@ -760,9 +767,9 @@
 
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="closeEditAssessmentItemModal()"
-                        class="px-4 py-2 text-sm text-gray-500">Cancel</button>
+                        class="px-4 py-2 text-sm text-muted">Cancel</button>
                 <button type="submit"
-                        class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium">
+                        class="btn btn-primary">
                     Save Changes
                 </button>
             </div>
@@ -777,9 +784,9 @@
      moment new evidence is imported. Everything the confirmation
      requires (1d) must be visible before Confirm is ever clickable. --}}
 <div id="verifyAllRemainingModal" class="hidden opacity-0 fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box scale-95 opacity-0 bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200 max-h-[85vh] flex flex-col">
+    <div class="modal-box scale-95 opacity-0 bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200 max-h-[85vh] flex flex-col">
         <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-800">Verify All Remaining</h3>
+            <h3 class="text-lg font-semibold text-ink">Verify All Remaining</h3>
             <button type="button" onclick="window.hideModal('verifyAllRemainingModal')" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
@@ -810,9 +817,9 @@
         </div>
 
         <div class="flex justify-end gap-3 pt-4">
-            <button type="button" onclick="window.hideModal('verifyAllRemainingModal')" class="px-4 py-2 text-sm text-gray-500">Cancel</button>
+            <button type="button" onclick="window.hideModal('verifyAllRemainingModal')" class="px-4 py-2 text-sm text-muted">Cancel</button>
             <button type="button" id="varConfirmBtn"
-                    class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-brand-800 disabled:bg-gray-300 disabled:cursor-not-allowed">
+                    class="btn btn-primary disabled:bg-gray-300 disabled:cursor-not-allowed">
                 Verify
             </button>
         </div>

@@ -24,15 +24,15 @@
 </div>
 @endif
 
-<div class="bg-white rounded-xl shadow-sm p-6 mb-4">
+<div class="card p-6 mb-4">
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <div class="bg-gray-50 rounded-lg p-3">
             <p class="text-xs text-gray-500">Rows in file</p>
-            <p class="text-xl font-bold text-gray-800">{{ $preview['total_rows'] }}</p>
+            <p class="text-xl font-bold text-ink">{{ $preview['total_rows'] }}</p>
         </div>
         <div class="bg-gray-50 rounded-lg p-3">
             <p class="text-xs text-gray-500">Matched to a student</p>
-            <p class="text-xl font-bold text-gray-800">{{ $preview['matched_rows'] }}</p>
+            <p class="text-xl font-bold text-ink">{{ $preview['matched_rows'] }}</p>
         </div>
         <div class="bg-green-50 rounded-lg p-3">
             <p class="text-xs text-gray-500">Valid scores</p>
@@ -53,7 +53,7 @@
 
     @foreach($preview['column_stats'] ?? [] as $colName => $stat)
         @if($stat['suspicious_max'])
-        <div class="bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm p-3 rounded-lg mb-2">
+        <div class="alert alert-warning mb-2">
             <i class="bi bi-exclamation-triangle"></i>
             <strong>{{ $colName }}</strong> — the highest score in this file is
             {{ rtrim(rtrim(number_format($stat['highest'], 2), '0'), '.') }}
@@ -119,7 +119,7 @@
     </div>
 </div>
 
-<form method="POST" action="{{ route('adviser.assessments.import') }}">
+<form method="POST" action="{{ route('adviser.assessments.import') }}" data-loading="Importing E-Class Record...">
     @csrf
     <input type="hidden" name="subject_id" value="{{ $subject->id }}">
     <input type="hidden" name="grading_period" value="{{ $gradingPeriod }}">
@@ -135,9 +135,9 @@
 
     <div class="flex justify-end gap-3">
         <a href="{{ route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id]) }}"
-           class="px-4 py-2 text-sm text-gray-500">Cancel</a>
+           class="px-4 py-2 text-sm text-muted">Cancel</a>
         <button type="submit"
-                class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-brand-800">
+                class="btn btn-primary">
             <i class="bi bi-check-circle"></i> Confirm & Import {{ $preview['total_valid_cells'] }} Score(s)
         </button>
     </div>

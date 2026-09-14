@@ -18,7 +18,7 @@
         $importVisibleRows = array_slice($importErrorRows, 0, 5);
         $importRemainingCount = count($importErrorRows) - count($importVisibleRows);
     @endphp
-    <div data-dismissible class="bg-yellow-100 text-yellow-800 text-sm p-4 rounded-lg mb-4 relative">
+    <div data-dismissible class="alert alert-warning mb-4 relative">
         <button type="button" data-dismiss aria-label="Dismiss" class="absolute top-2 right-2 text-yellow-800 hover:text-yellow-900">
             <i class="bi bi-x-lg"></i>
         </button>

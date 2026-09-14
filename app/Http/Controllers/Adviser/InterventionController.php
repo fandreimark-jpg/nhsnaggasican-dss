@@ -49,7 +49,7 @@ class InterventionController extends Controller
      */
     public function index(Request $request)
     {
-        $section = Section::where('adviser_id', auth()->id())->first();
+        $section = Section::forAdviser(auth()->id());
 
         $subjects = $section
             ? Subject::forSection($section)->orderBy('type')->orderBy('name')->get()
@@ -65,7 +65,7 @@ class InterventionController extends Controller
             : ($section ? AcademicTerm::currentOpenTerm($section->school_year) : null);
 
         $interventions = $section
-            ? Intervention::whereHas('student', fn($q) => $q->where('section_id', $section->id))
+            ? Intervention::where('section_id', $section->id)
                 ->when($subjectId, fn($q) => $q->where('subject_id', $subjectId))
                 // An intervention with no recorded term (nullable on older
                 // rows — see the migration notes) isn't "about" any
@@ -133,9 +133,9 @@ class InterventionController extends Controller
      */
     public function acknowledge(Request $request, Intervention $intervention)
     {
-        $section = Section::where('adviser_id', auth()->id())->first();
+        $section = Section::forAdviser(auth()->id());
 
-        abort_if(!$section || $intervention->student?->section_id !== $section->id, 403);
+        abort_if(!$section || (int) $intervention->section_id !== (int) $section->id, 403);
 
         // "Correctness and interface pass" TASK 2a — the Principal must
         // have actually decided before an adviser can acknowledge. See
@@ -174,7 +174,7 @@ class InterventionController extends Controller
      */
     public function acknowledgeAll(Request $request)
     {
-        $section = Section::where('adviser_id', auth()->id())->first();
+        $section = Section::forAdviser(auth()->id());
 
         abort_if(!$section, 403);
 
@@ -186,7 +186,7 @@ class InterventionController extends Controller
         // Intervention::awaitingDecision()) — same guard as the single-row
         // acknowledge() action, applied here so the bulk count/action can
         // never include what individual acknowledgement would reject.
-        $interventions = Intervention::whereHas('student', fn($q) => $q->where('section_id', $section->id))
+        $interventions = Intervention::where('section_id', $section->id)
             ->whereNull('acknowledged_at')
             ->where('status', '!=', Intervention::STATUS_RECOMMENDED)
             ->whereNotNull('decided_by')
@@ -225,9 +225,9 @@ class InterventionController extends Controller
      */
     public function markDelivered(Request $request, Intervention $intervention)
     {
-        $section = Section::where('adviser_id', auth()->id())->first();
+        $section = Section::forAdviser(auth()->id());
 
-        abort_if(!$section || $intervention->student?->section_id !== $section->id, 403);
+        abort_if(!$section || (int) $intervention->section_id !== (int) $section->id, 403);
 
         // "Correctness and interface pass" TASK 2a — checked even though
         // acknowledge() already guards this, since acknowledged_at could
@@ -322,7 +322,7 @@ class InterventionController extends Controller
      */
     public function markDeliveredGroup(Request $request)
     {
-        $section = Section::where('adviser_id', auth()->id())->first();
+        $section = Section::forAdviser(auth()->id());
 
         abort_if(!$section, 403);
 
@@ -342,7 +342,7 @@ class InterventionController extends Controller
         // decision is simply not eligible and silently drops out of the
         // batch (reported as skipped), same as any other ineligible row.
         $eligible = Intervention::whereIn('id', $request->input('intervention_ids'))
-            ->whereHas('student', fn($q) => $q->where('section_id', $section->id))
+            ->where('section_id', $section->id)
             ->whereNotNull('acknowledged_at')
             ->whereNull('delivered_at')
             ->where('status', '!=', Intervention::STATUS_RECOMMENDED)

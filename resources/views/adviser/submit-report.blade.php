@@ -7,8 +7,10 @@
 
 @section('content')
 
+@include('partials.section-school-year-context')
+
 @if(!$section)
-    <div class="bg-yellow-50 border border-yellow-200 rounded-xl">
+    <div class="card border-amber-200">
         <x-empty-state message="No section assigned yet." hint="An Admin assigns sections to advisers — contact the admin to get one assigned to your account." />
     </div>
 @else
@@ -25,13 +27,13 @@
         $isSubmitted   = $termInfo['submitted'];
         $evidence      = $termInfo['assessment_evidence'];
     @endphp
-    <div class="bg-white rounded-xl shadow-sm p-5 border-t-4
+    <div class="card p-5 border-t-4
         {{ $isSubmitted ? 'border-green-500' : ($isComplete ? 'border-brand-500' : 'border-gray-300') }}">
 
         <div class="flex justify-between items-start mb-3">
             <div>
                 <p class="text-sm font-semibold text-gray-700">Term {{ $period }}</p>
-                <p class="text-xs text-gray-400 mt-0.5">
+                <p class="text-xs text-muted mt-0.5">
                     {{ $gradeCount }}/{{ $totalExpected }} grades encoded
                 </p>
                 @if(!($evidence['configured'] ?? true))
@@ -47,29 +49,29 @@
                 @endif
             </div>
             @if($isSubmitted)
-                <span class="text-xs px-2 py-1 rounded-full font-medium bg-green-100 text-green-700">
+                <span class="badge badge-success">
                     Submitted
                 </span>
             @else
-                <span class="text-xs px-2 py-1 rounded-full font-medium bg-gray-100 text-gray-500">
+                <span class="badge badge-gray">
                     Not Submitted
                 </span>
             @endif
         </div>
 
         @if($isSubmitted)
-            <p class="text-xs text-gray-400 mb-3">
+            <p class="text-xs text-muted mb-3">
                 Submitted: {{ $submission->submitted_at->format('M d, Y h:i A') }}
             </p>
 
             @if($isComplete)
                 <div class="border-t pt-3 mt-1">
-                    <p class="text-xs text-gray-400 mb-2">
+                    <p class="text-xs text-muted mb-2">
                         Found an error? You can correct grades and re-submit.
                     </p>
                     <div class="flex gap-2">
                         <a href="{{ route('adviser.grades') }}?period={{ $period }}"
-                           class="flex-1 text-center border border-brand-600 text-brand-600 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-brand-50">
+                           class="btn btn-outline btn-sm flex-1">
                             Edit Grades
                         </a>
                         <form method="POST"
@@ -79,8 +81,7 @@
                             @csrf
                             <input type="hidden" name="grading_period" value="{{ $period }}">
                             <input type="hidden" name="resubmit" value="1">
-                            <button type="submit"
-                                    class="w-full bg-yellow-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-yellow-600">
+                            <button type="submit" class="btn btn-warning btn-sm w-full">
                                 Re-submit
                             </button>
                         </form>
@@ -90,11 +91,11 @@
 
         @else
             @if($isComplete)
-                <form method="POST" action="{{ route('adviser.submit.report.post') }}">
+                <form method="POST" action="{{ route('adviser.submit.report.post') }}" data-loading="Analyzing learner performance...">
                     @csrf
                     <input type="hidden" name="grading_period" value="{{ $period }}">
                     <button type="submit"
-                            class="w-full mt-2 bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-800">
+                            class="w-full mt-2 btn btn-primary">
                         Submit Term {{ $period }} Report
                     </button>
                 </form>
@@ -110,10 +111,10 @@
 </div>
 
 {{-- Grade Summary Table --}}
-<div class="bg-white rounded-xl shadow-sm">
-    <div class="px-6 py-4 border-b">
-        <h3 class="font-semibold text-gray-800">Grade Summary</h3>
-        <p class="text-sm text-gray-500">Overview of encoded grades per student</p>
+<div class="card">
+    <div class="px-5 py-4 border-b border-line">
+        <h3 class="font-semibold text-ink">Grade Summary</h3>
+        <p class="text-sm text-muted">Overview of encoded grades per student</p>
     </div>
 
     <div class="tbl-scroll">
@@ -130,7 +131,7 @@
             <tbody>
                 @forelse($gradeSummary as $row)
                 <tr>
-                    <td class="font-medium text-gray-800">
+                    <td class="font-medium text-ink">
                         {{ $row['student']->last_name }}, {{ $row['student']->first_name }}
                     </td>
                     {{-- "Decision flow, report scoping, and dashboard
@@ -151,9 +152,9 @@
                     @endforeach
                     <td class="text-center">
                         @if($row['term1'] && $row['term2'] && $row['term3'])
-                            <span class="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700">Complete</span>
+                            <span class="badge badge-success">Complete</span>
                         @else
-                            <span class="text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-700">Incomplete</span>
+                            <span class="badge badge-warning">Incomplete</span>
                         @endif
                     </td>
                 </tr>

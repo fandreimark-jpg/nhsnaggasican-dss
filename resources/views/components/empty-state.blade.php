@@ -1,11 +1,13 @@
 @props(['message', 'hint' => null, 'icon' => null])
-<div {{ $attributes->class(['px-6 py-10 text-center text-gray-400']) }}>
-    @if($icon)
-        <i class="{{ $icon }} text-2xl block mb-2"></i>
-    @endif
-    <p class="text-gray-500 text-sm font-medium">{{ $message }}</p>
+{{-- Intentional empty state — an icon, a plain statement, and a short
+     explanation of what will make data appear. Never looks like an error. --}}
+<div {{ $attributes->class(['empty-state']) }}>
+    <div class="empty-state-icon" aria-hidden="true">
+        <i class="{{ $icon ?: 'bi bi-inbox' }}"></i>
+    </div>
+    <p class="empty-state-title">{{ $message }}</p>
     @if($hint)
-        <p class="text-xs text-gray-400 mt-1">{{ $hint }}</p>
+        <p class="empty-state-hint">{{ $hint }}</p>
     @endif
     @isset($action)
         <div class="mt-4">{{ $action }}</div>

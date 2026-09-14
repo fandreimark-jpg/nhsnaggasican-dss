@@ -35,7 +35,7 @@
         && $transmutedGrade >= 75;
     $itemCountText = $its['item_count'] . ' item' . ($its['item_count'] === 1 ? '' : 's') . ' scored so far';
 @endphp
-<span class="px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap {{ $inTermStatusColors[$its['status']] ?? 'bg-gray-100 text-gray-600' }}">
+<span class="badge whitespace-nowrap {{ $inTermStatusColors[$its['status']] ?? 'bg-gray-100 text-gray-600' }}">
     {{ $its['status'] }}@if($its['computed_grade'] !== null) &middot; computed {{ number_format($its['computed_grade'], 2) }}@endif
 </span>
 @if($passingOnPaper)
@@ -43,7 +43,7 @@
         <i class="bi bi-exclamation-triangle-fill"></i> passing on paper &middot; {{ $itemCountText }}
     </span>
 @else
-    <span class="block text-xs text-gray-400 mt-0.5">
+    <span class="block text-xs text-muted mt-0.5">
         {{ $itemCountText }}
     </span>
 @endif

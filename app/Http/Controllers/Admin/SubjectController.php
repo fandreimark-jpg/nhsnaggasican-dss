@@ -267,7 +267,7 @@ class SubjectController extends Controller
     {
         $subject = Subject::findOrFail($id);
 
-        if ($subject->grades()->count() > 0) {
+        if ($subject->grades()->exists()) {
             return redirect()->route('admin.subjects')
                 ->with('error', 'Cannot delete subject with existing grades.');
         }

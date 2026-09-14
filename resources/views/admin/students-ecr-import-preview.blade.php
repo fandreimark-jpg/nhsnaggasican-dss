@@ -10,8 +10,8 @@
     <strong>{{ $format === 'sshs' ? 'Strengthened SHS E-Class Record' : 'Grade 12 Class Record' }}</strong>
 </div>
 
-<div class="bg-white rounded-xl shadow-sm p-4 mb-4">
-    <h3 class="text-sm font-semibold text-gray-800 mb-2">Section &amp; Year Match</h3>
+<div class="card p-4 mb-4">
+    <h3 class="card-title mb-2">Section &amp; Year Match</h3>
     <table class="text-sm">
         <tr>
             <td class="pr-4 text-gray-500">Uploaded:</td>
@@ -40,8 +40,8 @@
     </table>
 </div>
 
-<div class="bg-white rounded-xl shadow-sm p-4 mb-4">
-    <h3 class="text-sm font-semibold text-gray-800 mb-2">Summary</h3>
+<div class="card p-4 mb-4">
+    <h3 class="card-title mb-2">Summary</h3>
     <div class="flex flex-wrap gap-4 text-sm">
         <span class="text-status-ontrack font-medium">{{ $counts['insert'] }} to Insert</span>
         <span class="text-gray-500 font-medium">{{ $counts['existing'] }} Existing (no change)</span>
@@ -50,10 +50,10 @@
     </div>
 </div>
 
-<div class="bg-white rounded-xl shadow-sm">
-    <div class="px-6 py-4 border-b">
-        <h3 class="text-sm font-semibold text-gray-800">Row-by-Row Preview</h3>
-        <p class="text-xs text-gray-400">Nothing has been saved yet. Only rows marked Insert will be written to the database when you confirm.</p>
+<div class="card">
+    <div class="px-5 py-4 border-b border-line">
+        <h3 class="card-title">Row-by-Row Preview</h3>
+        <p class="text-xs text-muted">Nothing has been saved yet. Only rows marked Insert will be written to the database when you confirm.</p>
     </div>
     <div class="tbl-scroll">
     <table class="tbl tbl-sticky">
@@ -78,12 +78,12 @@
                             'rejected' => 'bg-status-failing/10 text-status-failing',
                         ];
                     @endphp
-                    <span class="px-2 py-0.5 rounded-full text-xs font-medium {{ $statusColors[$row['status']] ?? 'bg-gray-100 text-gray-600' }}">
+                    <span class="badge {{ $statusColors[$row['status']] ?? 'bg-gray-100 text-gray-600' }}">
                         {{ ucfirst($row['status']) }}
                     </span>
                 </td>
                 <td>{{ $row['lrn'] ?: '—' }}</td>
-                <td class="font-medium text-gray-800">{{ $row['last_name'] }}</td>
+                <td class="font-medium text-ink">{{ $row['last_name'] }}</td>
                 <td>{{ $row['first_name'] }}</td>
                 <td class="text-xs text-gray-500">{{ $row['reason'] ?? '' }}</td>
             </tr>
@@ -94,13 +94,13 @@
     </table>
     </div>
 
-    <div class="px-6 py-4 border-t flex justify-end gap-3">
-        <a href="{{ route('admin.students') }}" class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Cancel</a>
+    <div class="px-5 py-4 border-t border-line flex justify-end gap-3">
+        <a href="{{ route('admin.students') }}" class="btn btn-outline">Cancel</a>
         <form method="POST" action="{{ route('admin.students.import-from-ecr.confirm') }}"
-              data-confirm="Insert {{ $counts['insert'] }} new learner(s) into {{ $section->name }}? Existing, Conflict, and Rejected rows will be skipped, not touched.">
+              data-import-confirm="Insert {{ $counts['insert'] }} new learner(s) into {{ $section->name }}? Existing, Conflict, and Rejected rows will be skipped and will not be modified.">
             @csrf
             <button type="submit" {{ $counts['insert'] === 0 ? 'disabled' : '' }}
-                    class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-brand-800 disabled:opacity-50 disabled:cursor-not-allowed">
+                    class="btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
                 Confirm — Insert {{ $counts['insert'] }} Learner(s)
             </button>
         </form>

@@ -9,8 +9,10 @@
 
 @section('content')
 
+@include('partials.section-school-year-context')
+
 @if(!$section)
-    <div class="bg-white rounded-xl shadow-sm">
+    <div class="card">
         <x-empty-state icon="bi-exclamation-circle" message="No section assigned to your account."
             hint="An Admin assigns sections to advisers — contact the admin to get one assigned." />
     </div>
@@ -21,17 +23,17 @@
 @endphp
 
 @if(session('error'))
-<div class="bg-red-100 text-red-700 text-sm p-4 rounded-lg mb-4">
+<div class="alert alert-danger mb-4">
     {{ session('error') }}
 </div>
 @endif
 
 @include('partials.import-result')
 
-<div class="bg-white rounded-xl shadow-sm overflow-x-auto">
+<div class="card overflow-x-auto">
 
     {{-- Term Selector --}}
-    <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 px-6 py-4 border-b">
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 px-5 py-4 border-b border-line">
         <div class="flex items-center gap-3">
             <span class="text-sm font-semibold text-gray-700">Term:</span>
             <div class="flex gap-2">
@@ -39,8 +41,8 @@
                 <a href="{{ route('adviser.grades') }}?period={{ $t }}"
                     class="px-4 py-1.5 rounded-full text-sm font-medium border transition flex items-center gap-1
                         {{ $selectedPeriod == $t
-                            ? 'bg-brand-700 text-white border-brand-700'
-                            : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50' }}">
+                            ? 'bg-brand-800 text-white border-brand-800'
+                            : 'bg-white text-gray-600 border-gray-300 hover:bg-surface' }}">
                     Term {{ $t }}
                     @if($openTerm !== $t)
                         <i class="bi bi-lock-fill text-xs {{ $selectedPeriod == $t ? 'text-white' : 'text-gray-400' }}"></i>
@@ -61,11 +63,16 @@
     @unless($isTermOpen)
     <div class="bg-gray-50 text-gray-500 text-sm px-6 py-3 border-b flex items-center gap-2">
         <i class="bi bi-lock-fill"></i>
-        Term {{ $selectedPeriod }} is currently closed for encoding.
-        @if($openTerm)
-            Term {{ $openTerm }} is the open term right now — you can view Term {{ $selectedPeriod }} but not edit it.
+        @if(!$section->isInActiveSchoolYear())
+            <span class="badge badge-gray">Historical Record</span>
+            School Year {{ $section->school_year }} is not the active school year — its records are read-only. You can view every term but not edit them.
         @else
-            No term is currently open. Contact the admin.
+            Term {{ $selectedPeriod }} is currently closed for encoding.
+            @if($openTerm)
+                Term {{ $openTerm }} is the open term right now — you can view Term {{ $selectedPeriod }} but not edit it.
+            @else
+                No term is currently open. Contact the admin.
+            @endif
         @endif
     </div>
     @endunless
@@ -93,7 +100,7 @@
             <tbody>
                 @forelse($students as $studentIndex => $student)
                 <tr>
-                    <td class="font-medium text-gray-800 sticky left-0 bg-white whitespace-nowrap">
+                    <td class="font-medium text-ink sticky left-0 bg-white whitespace-nowrap">
                         {{ $student->last_name }}, {{ $student->first_name }} {{$student->middle_name}}
                     </td>
                     @foreach($subjects as $subjectIndex => $subject)
@@ -120,7 +127,7 @@
                                        focus:outline-none focus:ring-2 focus:ring-brand-400
                                        {{ $isFailing
                                             ? 'border-status-risk/40 bg-status-risk/5 text-status-risk'
-                                            : 'border-gray-200 hover:border-gray-300' }}
+                                            : 'border-line hover:border-gray-300' }}
                                        {{ $isTermOpen ? '' : 'bg-gray-50 text-gray-400 cursor-not-allowed' }}"
                                 placeholder="—"
                             >
@@ -145,9 +152,9 @@
         </div>
 
         @if($isTermOpen)
-        <div class="px-6 py-4 border-t flex justify-end">
+        <div class="px-5 py-4 border-t border-line flex justify-end">
             <button type="submit"
-                class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-brand-800">
+                class="btn btn-primary">
                 <i class="bi bi-floppy"></i> Save All Grades
             </button>
         </div>
@@ -158,15 +165,15 @@
 {{-- IMPORT GRADES MODAL --}}
 <div id="gradeImportModal"
      class="{{ $errors->gradeImport->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box {{ $errors->gradeImport->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
+    <div class="modal-box {{ $errors->gradeImport->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200">
 
         <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-800">Import Grades — Term {{ $selectedPeriod }}</h3>
+            <h3 class="text-lg font-semibold text-ink">Import Grades — Term {{ $selectedPeriod }}</h3>
             <button type="button" onclick="closeGradeImportModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         @if($errors->gradeImport->any())
-            <div class="bg-red-100 text-red-700 text-sm p-3 rounded-lg mb-4">
+            <div class="alert alert-danger mb-4">
                 <ul class="list-disc list-inside">
                     @foreach($errors->gradeImport->all() as $error)
                         <li>{{ $error }}</li>
@@ -175,7 +182,7 @@
             </div>
         @endif
 
-        <p class="text-sm text-gray-500 mb-4">
+        <p class="text-sm text-muted mb-4">
             <a href="{{ route('adviser.grades.template') }}?period={{ $selectedPeriod }}" class="text-brand-700 underline">
                 Download the pre-filled template
             </a>
@@ -191,9 +198,9 @@
 
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="closeGradeImportModal()"
-                        class="px-4 py-2 text-sm text-gray-500">Cancel</button>
+                        class="px-4 py-2 text-sm text-muted">Cancel</button>
                 <button type="submit"
-                        class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium">
+                        class="btn btn-primary">
                     Upload & Import
                 </button>
             </div>

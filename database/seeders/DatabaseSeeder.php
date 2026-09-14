@@ -87,10 +87,18 @@ class DatabaseSeeder extends Seeder
             );
         }
 
+        // The demo year's AcademicYear row + Term 1/2/3. Activated ONLY when
+        // no year is active yet (a fresh install) — re-seeding a live
+        // database whose Admin has since activated a later year must never
+        // flip the active year back ("Multi-school-year academic history"
+        // work order: the active year is data, never a seeder side effect).
         AcademicTerm::ensureExistFor(self::SCHOOL_YEAR);
+        if (!\App\Models\AcademicYear::active()) {
+            \App\Models\AcademicYear::ensureFor(self::SCHOOL_YEAR)->forceFill(['is_active' => true])->save();
+        }
 
         $this->command?->info('');
-        $this->command?->info('Seeded accounts (password for all: "' . self::PASSWORD . '"):');
+        $this->command?->info('Demo accounts seeded. Change default credentials before use.');
         $this->command?->table(['Role', 'Email'], [
             ['Admin', $admin->email],
             ['Adviser', $adviser->email],
@@ -105,7 +113,11 @@ class DatabaseSeeder extends Seeder
      */
     private function makeUser(string $email, string $lastName, string $firstName, string $role): User
     {
-        $user = User::firstOrCreate(
+        $existing = User::where('email', $email)->first();
+        if ($existing) return $existing;
+        if (User::isSingletonRole($role) && ($existing = User::where('role', $role)->where('is_active', true)->first())) return $existing;
+
+        $user = User::firstOrNew(
             ['email' => $email],
             [
                 'name'       => $firstName . ' ' . $lastName,

@@ -28,9 +28,46 @@ document.addEventListener("DOMContentLoaded", function () {
     // a popup first and only submits if the user clicks "Yes".
     let pendingDeleteForm = null;
     let pendingResubmitForm = null;
+    let pendingImportForm = null;
+    let pendingActionForm = null;
 
     document.addEventListener("submit", function (e) {
         const form = e.target;
+
+        // ===== GENERIC NON-DESTRUCTIVE ACTION (activate / open / close /
+        // enroll) — "Multi-school-year academic history" work order, PART
+        // 19: a confirmation whose title, button, and icon match the
+        // action, in neutral (brand) styling. Never the red Delete modal —
+        // nothing here deletes anything.
+        //   data-action-confirm="message"  data-action-title="Confirm Close"
+        //   data-action-label="Yes, Close" data-action-icon="bi-lock"
+        //   data-action-loading="Closing..."
+        if (form.dataset.actionConfirm) {
+            e.preventDefault();
+            pendingActionForm = form;
+            document.getElementById("confirmActionMessage").textContent = form.dataset.actionConfirm;
+            document.getElementById("confirmActionTitle").textContent = form.dataset.actionTitle || "Confirm Action";
+            const icon = form.dataset.actionIcon || "bi-check-circle";
+            const iconEl = document.getElementById("confirmActionIcon");
+            if (iconEl) iconEl.className = `bi ${icon} text-brand-700 text-lg`;
+            const btn = document.getElementById("confirmActionBtn");
+            btn.disabled = false;
+            btn.dataset.loadingLabel = form.dataset.actionLoading || "Working...";
+            btn.innerHTML = `<i class="bi ${icon} mr-1"></i> ${form.dataset.actionLabel || "Yes, Continue"}`;
+            window.showModal("confirmActionModal");
+            return;
+        }
+
+        if (form.dataset.importConfirm) {
+            e.preventDefault();
+            pendingImportForm = form;
+            document.getElementById("confirmImportMessage").textContent = form.dataset.importConfirm;
+            const btn = document.getElementById("confirmImportBtn");
+            btn.disabled = false;
+            btn.textContent = "Yes, Import";
+            window.showModal("confirmImportModal");
+            return;
+        }
 
         if (form.dataset.confirm) {
             e.preventDefault();
@@ -60,10 +97,69 @@ document.addEventListener("DOMContentLoaded", function () {
             window.showModal("confirmResubmitModal");
             return;
         }
+
+        markFormAsProcessing(form);
     });
+
+    // ===== PROCESSING STATE ON SUBMIT ("UI modernization pass", PART 19)
+    // Any form that actually submits (not intercepted by a confirm modal
+    // above — those show their own in-flight label) gets its submit button
+    // disabled and relabelled so a slow request (an import, a term report
+    // that runs the classifier) cannot be double-submitted. The label comes
+    // from the form's data-loading attribute, else "Processing...".
+    function markFormAsProcessing(form) {
+        if (!form || typeof form.querySelector !== "function" || form.dataset.noLoading !== undefined) return;
+        const btn = form.querySelector('button[type="submit"], input[type="submit"]');
+        if (!btn) return;
+        const label = form.dataset.loading || "Processing...";
+        // Defer so the click's own value still posts and the browser has
+        // started navigation before the control is disabled.
+        setTimeout(function () {
+            btn.disabled = true;
+            btn.setAttribute("aria-busy", "true");
+            if (btn.tagName === "BUTTON") {
+                btn.dataset.originalHtml = btn.innerHTML;
+                btn.innerHTML = '<i class="bi bi-hourglass-split mr-1"></i> ' + label;
+            } else {
+                btn.value = label;
+            }
+        }, 0);
+        // Re-enable if the page is restored from bfcache (back button).
+        window.addEventListener("pageshow", function () {
+            btn.disabled = false;
+            btn.removeAttribute("aria-busy");
+            if (btn.dataset.originalHtml) btn.innerHTML = btn.dataset.originalHtml;
+        }, { once: true });
+    }
 
     window.closeConfirmDelete = () => window.hideModal("confirmDeleteModal");
     window.closeConfirmResubmit = () => window.hideModal("confirmResubmitModal");
+    window.closeConfirmAction = () => {
+        pendingActionForm = null;
+        window.hideModal("confirmActionModal");
+    };
+    window.proceedAction = function () {
+        if (!pendingActionForm) return;
+        const form = pendingActionForm;
+        pendingActionForm = null;
+        const btn = document.getElementById("confirmActionBtn");
+        btn.disabled = true;
+        btn.innerHTML = `<i class="bi bi-hourglass-split mr-1"></i> ${btn.dataset.loadingLabel || "Working..."}`;
+        form.submit();
+    };
+    window.closeConfirmImport = () => {
+        pendingImportForm = null;
+        window.hideModal("confirmImportModal");
+    };
+    window.proceedImport = function () {
+        if (!pendingImportForm) return;
+        const form = pendingImportForm;
+        pendingImportForm = null;
+        const btn = document.getElementById("confirmImportBtn");
+        btn.disabled = true;
+        btn.textContent = "Importing...";
+        form.submit();
+    };
 
     window.proceedDelete = function () {
         if (!pendingDeleteForm) return;
@@ -101,12 +197,16 @@ document.addEventListener("DOMContentLoaded", function () {
 
     window.bindModalOverlayClose("confirmDeleteModal", () => { pendingDeleteForm = null; });
     window.bindModalOverlayClose("confirmResubmitModal", () => { pendingResubmitForm = null; });
+    window.bindModalOverlayClose("confirmImportModal", () => { pendingImportForm = null; });
+    window.bindModalOverlayClose("confirmActionModal", () => { pendingActionForm = null; });
 
     // Pressing Escape closes either confirm popup, same as clicking Cancel
     document.addEventListener("keydown", function (e) {
         if (e.key !== "Escape") return;
         window.closeConfirmDelete();
         window.closeConfirmResubmit();
+        window.closeConfirmImport();
+        window.closeConfirmAction();
     });
 
     // ===== DISMISSIBLE PANELS (e.g. partials/import-result.blade.php) =====

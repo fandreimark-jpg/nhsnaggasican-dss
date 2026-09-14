@@ -65,7 +65,7 @@ class AssessmentController extends Controller
 
     public function index(Request $request)
     {
-        $section = Section::where('adviser_id', auth()->id())->first();
+        $section = Section::forAdviser(auth()->id());
 
         if (!$section) {
             return view('adviser.assessments', [
@@ -108,13 +108,16 @@ class AssessmentController extends Controller
             ->filter(fn($group) => $group->count() > 1)
             ->map(fn($group, $role) => $group->pluck('name')->implode(', '));
 
-        $openTerm = AcademicTerm::currentOpenTerm($section->school_year);
+        // A historical (non-active-year) section has no writable term at all —
+        // its terms may still be flagged open, but AcademicTerm::acceptsWrites()
+        // refuses every write, so the page must not offer one either.
+        $openTerm = $section->isInActiveSchoolYear() ? AcademicTerm::currentOpenTerm($section->school_year) : null;
 
         // Whole-section roster, needed for the Add/Edit Assessment Item
         // modals regardless of whether $performance below ends up
         // computed — every student is a candidate score row even before
         // any item exists yet to have a percentage from.
-        $sectionStudents = Student::where('section_id', $section->id)->orderBy('last_name')->get();
+        $sectionStudents = Student::enrolledIn($section)->orderBy('last_name')->get();
 
         // Only worth analyzing once at least one assessment item exists —
         // otherwise every student would just show "incomplete" for nothing.
@@ -176,7 +179,7 @@ class AssessmentController extends Controller
         if ($request->boolean('from_intervention') && $selectedSubject) {
             $interventionStudentIds = Intervention::where('subject_id', $selectedSubject->id)
                 ->where('grading_period', $selectedPeriod)
-                ->whereHas('student', fn($q) => $q->where('section_id', $section->id))
+                ->whereHas('student', fn($q) => $q->enrolledIn($section))
                 ->pluck('student_id')
                 ->unique();
 
@@ -234,7 +237,7 @@ class AssessmentController extends Controller
      */
     public function detect(Request $request)
     {
-        $section = Section::where('adviser_id', auth()->id())->firstOrFail();
+        $section = Section::forAdviser(auth()->id()) ?? abort(404);
         $gradingPeriod = (int) $request->input('grading_period', 1);
 
         // Validated by EXTENSION, not `mimes:` (MIME-sniffing) — see
@@ -253,9 +256,9 @@ class AssessmentController extends Controller
                 ->with('error', 'That subject is not offered to your section.');
         }
 
-        if (!AcademicTerm::isOpen($section->school_year, $gradingPeriod)) {
+        if (!AcademicTerm::acceptsWrites($section->school_year, $gradingPeriod)) {
             return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
-                ->with('error', 'Term ' . $gradingPeriod . ' is currently closed for encoding. Contact the admin.');
+                ->with('error', AcademicTerm::writeRefusalReason($section->school_year, $gradingPeriod));
         }
 
         $storedFilename = Str::uuid() . '.' . $request->file('file')->getClientOriginalExtension();
@@ -338,7 +341,7 @@ class AssessmentController extends Controller
      */
     public function preview(Request $request)
     {
-        $section = Section::where('adviser_id', auth()->id())->firstOrFail();
+        $section = Section::forAdviser(auth()->id()) ?? abort(404);
         $gradingPeriod = (int) $request->input('grading_period', 1);
 
         $request->validate([
@@ -358,9 +361,9 @@ class AssessmentController extends Controller
                 ->with('error', 'That subject is not offered to your section.');
         }
 
-        if (!AcademicTerm::isOpen($section->school_year, $gradingPeriod)) {
+        if (!AcademicTerm::acceptsWrites($section->school_year, $gradingPeriod)) {
             return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
-                ->with('error', 'Term ' . $gradingPeriod . ' is currently closed for encoding. Contact the admin.');
+                ->with('error', AcademicTerm::writeRefusalReason($section->school_year, $gradingPeriod));
         }
 
         $relativePath = self::TEMP_DIR . '/' . $request->input('stored_filename');
@@ -413,7 +416,7 @@ class AssessmentController extends Controller
      */
     public function import(Request $request)
     {
-        $section = Section::where('adviser_id', auth()->id())->firstOrFail();
+        $section = Section::forAdviser(auth()->id()) ?? abort(404);
         $gradingPeriod = (int) $request->input('grading_period', 1);
 
         $request->validate([
@@ -433,9 +436,9 @@ class AssessmentController extends Controller
                 ->with('error', 'That subject is not offered to your section.');
         }
 
-        if (!AcademicTerm::isOpen($section->school_year, $gradingPeriod)) {
+        if (!AcademicTerm::acceptsWrites($section->school_year, $gradingPeriod)) {
             return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
-                ->with('error', 'Term ' . $gradingPeriod . ' is currently closed for encoding. Contact the admin.');
+                ->with('error', AcademicTerm::writeRefusalReason($section->school_year, $gradingPeriod));
         }
 
         // The token is validated by the regex above (hex-uuid + known
@@ -548,7 +551,7 @@ class AssessmentController extends Controller
      */
     public function storeItem(Request $request)
     {
-        $section = Section::where('adviser_id', auth()->id())->firstOrFail();
+        $section = Section::forAdviser(auth()->id()) ?? abort(404);
         $gradingPeriod = (int) $request->input('grading_period', 1);
 
         $validator = Validator::make($request->all(), [
@@ -570,8 +573,8 @@ class AssessmentController extends Controller
             return back()->withErrors(['item_name' => 'That subject is not offered to your section.'], 'addItem')->withInput();
         }
 
-        if (!AcademicTerm::isOpen($section->school_year, $gradingPeriod)) {
-            return back()->withErrors(['item_name' => 'Term ' . $gradingPeriod . ' is currently closed for encoding. Contact the admin.'], 'addItem')->withInput();
+        if (!AcademicTerm::acceptsWrites($section->school_year, $gradingPeriod)) {
+            return back()->withErrors(['item_name' => AcademicTerm::writeRefusalReason($section->school_year, $gradingPeriod)], 'addItem')->withInput();
         }
 
         $itemName = trim($request->input('item_name'));
@@ -603,7 +606,7 @@ class AssessmentController extends Controller
             ], 'addItem')->withInput();
         }
 
-        $students = Student::where('section_id', $section->id)->get()->keyBy('id');
+        $students = Student::enrolledIn($section)->get()->keyBy('id');
         $parsedScores = [];
         $invalidStudents = [];
 
@@ -718,11 +721,11 @@ class AssessmentController extends Controller
      */
     public function updateItem(Request $request, Assessment $assessment)
     {
-        $section = Section::where('adviser_id', auth()->id())->first();
+        $section = Section::forAdviser(auth()->id());
         abort_if(!$section || $assessment->section_id !== $section->id, 403);
 
-        if (!AcademicTerm::isOpen($section->school_year, $assessment->grading_period)) {
-            return back()->with('error', 'Term ' . $assessment->grading_period . ' is currently closed for encoding. Contact the admin.');
+        if (!AcademicTerm::acceptsWrites($section->school_year, $assessment->grading_period)) {
+            return back()->with('error', AcademicTerm::writeRefusalReason($section->school_year, (int) $assessment->grading_period));
         }
 
         $validator = Validator::make($request->all(), [
@@ -735,7 +738,7 @@ class AssessmentController extends Controller
         }
 
         $newMaxScore = (float) $request->input('max_score');
-        $students = Student::where('section_id', $section->id)->get()->keyBy('id');
+        $students = Student::enrolledIn($section)->get()->keyBy('id');
 
         $parsedScores = []; // studentId => float|null (null = clear the score)
         $invalidStudents = [];

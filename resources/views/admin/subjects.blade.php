@@ -58,25 +58,25 @@
 
 @include('partials.import-result')
 
-<div class="bg-white rounded-xl shadow-sm mb-0">
-    <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 px-6 py-4 border-b">
+<div class="card mb-0">
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 px-5 py-4 border-b border-line">
         <div>
-            <h2 class="text-sm font-semibold text-gray-800">All Subjects</h2>
-            <p class="text-xs text-gray-400"><x-count-label :count="$subjects->count()" noun="subject" total /></p>
+            <h2 class="card-title">All Subjects</h2>
+            <p class="text-xs text-muted"><x-count-label :count="$subjects->count()" noun="subject" total /></p>
         </div>
         <div class="flex items-center gap-3 flex-wrap">
             <div class="flex gap-2">
                 <a href="{{ route('admin.subjects') }}"
-                   class="text-xs px-3 py-1.5 rounded-full {{ !request('type') ? 'bg-brand-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200' }}">All</a>
+                   class="text-xs px-3 py-1.5 rounded-full {{ !request('type') ? 'bg-brand-800 text-white' : 'bg-white border border-line text-gray-600 hover:bg-surface' }}">All</a>
                 <a href="{{ route('admin.subjects', ['type' => 'core']) }}"
-                   class="text-xs px-3 py-1.5 rounded-full {{ request('type') === 'core' ? 'bg-brand-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200' }}">Core</a>
+                   class="text-xs px-3 py-1.5 rounded-full {{ request('type') === 'core' ? 'bg-brand-800 text-white' : 'bg-white border border-line text-gray-600 hover:bg-surface' }}">Core</a>
                 <a href="{{ route('admin.subjects', ['type' => 'elective']) }}"
-                   class="text-xs px-3 py-1.5 rounded-full {{ request('type') === 'elective' ? 'bg-brand-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200' }}">Elective</a>
+                   class="text-xs px-3 py-1.5 rounded-full {{ request('type') === 'elective' ? 'bg-brand-800 text-white' : 'bg-white border border-line text-gray-600 hover:bg-surface' }}">Elective</a>
             </div>
             <div class="relative">
                 <input type="text" id="subjectSearch"
                     placeholder="Search subjects..."
-                    class="border rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 w-56">
+                    class="form-input !w-56 pl-9">
                 <i class="bi bi-search absolute left-3 top-2.5 text-gray-400 text-sm"></i>
             </div>
             <button type="button" onclick="openImportSubjectsModal()"
@@ -84,7 +84,7 @@
                 <i class="bi bi-upload"></i> Import Subjects
             </button>
             <button type="button" onclick="openAddSubjectModal()"
-                class="bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-800 whitespace-nowrap">
+                class="btn btn-primary whitespace-nowrap">
                 <i class="bi bi-plus-lg"></i> Add Subject
             </button>
         </div>
@@ -105,15 +105,15 @@
         <tbody>
             @forelse($subjects as $subject)
             <tr class="subject-row">
-                <td class="font-medium text-gray-800">{{ $subject->name }}</td>
+                <td class="font-medium text-ink">{{ $subject->name }}</td>
                 <td>Grade {{ $subject->grade_level }}</td>
                 <td>
                     @if($subject->type === 'core')
                         <span class="bg-green-100 text-green-700 text-xs font-semibold px-2 py-1 rounded">Core</span>
                     @else
-                        <span class="bg-orange-100 text-orange-700 text-xs font-semibold px-2 py-1 rounded">Elective</span>
+                        <span class="badge badge-warning">Elective</span>
                         @if($subject->subject_group)
-                            <span class="block text-xs text-gray-400 mt-0.5">{{ $subjectGroupLabel($subject->subject_group) }}</span>
+                            <span class="block text-xs text-muted mt-0.5">{{ $subjectGroupLabel($subject->subject_group) }}</span>
                         @endif
                     @endif
                 </td>
@@ -131,10 +131,16 @@
                                 : 'Profile: ' . $subjectGroupLabel($subject->subject_group) . ' — Source: configured grading policy';
                             $tooltip = "WW {$wwStr}% / PT {$ptStr}% / Exam {$exStr}. {$sourceLabel}. Effective: DO 015, s. 2026 (Grade 11).";
                         @endphp
-                        <span class="font-medium text-gray-700 cursor-help" title="{{ $tooltip }}">
-                            {{ $wwStr }}/{{ $ptStr }}/{{ $w['ex'] !== null ? rtrim(rtrim(number_format($w['ex'], 2), '0'), '.') : '—' }}
+                        {{-- Grading Profile — system-resolved, read-only: never an editable field. --}}
+                        <div class="inline-grid grid-cols-[auto_auto] gap-x-3 gap-y-0.5 text-[11px] leading-tight cursor-help" title="{{ $tooltip }}">
+                            <span class="text-muted">Written Work</span><span class="font-semibold text-ink tabular-nums text-right">{{ $wwStr }}%</span>
+                            <span class="text-muted">Performance Task</span><span class="font-semibold text-ink tabular-nums text-right">{{ $ptStr }}%</span>
+                            <span class="text-muted">Examination</span><span class="font-semibold text-ink tabular-nums text-right">{{ $w['ex'] !== null ? rtrim(rtrim(number_format($w['ex'], 2), '0'), '.') . '%' : 'none' }}</span>
+                        </div>
+                        <span class="block text-[10px] text-muted mt-0.5">
+                            {{ $w['source'] === 'catalog' ? 'From DepEd catalog match' : 'Assigned by grading group' }}
+                            <i class="bi bi-info-circle text-gray-300" title="{{ $tooltip }}" aria-hidden="true"></i>
                         </span>
-                        <i class="bi bi-info-circle text-gray-300" title="{{ $tooltip }}"></i>
                     @else
                         <span class="text-gray-400" title="No catalog match and no Subject Group set — grading weights cannot be resolved until this subject is classified.">Not configured</span>
                     @endif
@@ -144,7 +150,7 @@
                     <div class="flex items-center justify-end gap-2">
                         <button type="button"
                             onclick='openEditSubjectModal(@json($subject))'
-                            class="inline-flex items-center gap-1 text-brand-600 hover:text-brand-800 text-xs font-medium border border-brand-200 rounded px-2 py-1 hover:bg-brand-50 whitespace-nowrap">
+                            class="inline-flex items-center gap-1 btn btn-xs btn-secondary whitespace-nowrap">
                             <i class="bi bi-pencil-square"></i> Edit
                         </button>
                         <form method="POST"
@@ -154,7 +160,7 @@
                             @csrf
                             @method('DELETE')
                             <button type="submit"
-                                class="inline-flex items-center gap-1 text-red-600 hover:text-red-800 text-xs font-medium border border-red-200 rounded px-2 py-1 hover:bg-red-50 whitespace-nowrap">
+                                class="inline-flex items-center gap-1 btn btn-xs btn-danger-outline whitespace-nowrap">
                                 <i class="bi bi-trash"></i> Delete
                             </button>
                         </form>
@@ -181,10 +187,10 @@
 
 {{-- MODAL --}}
 <div id="subjectModal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200 opacity-0">
-    <div class="modal-box bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200 scale-95 opacity-0">
+    <div class="modal-box bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200 scale-95 opacity-0">
 
         <div class="flex justify-between items-center mb-4">
-            <h3 id="modalTitle" class="text-lg font-semibold text-gray-800">Add Subject</h3>
+            <h3 id="modalTitle" class="text-lg font-semibold text-ink">Add Subject</h3>
             <button type="button" onclick="closeSubjectModal()"
                     aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
@@ -196,26 +202,26 @@
             <input type="hidden" name="_method" id="formMethod" value="POST">
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Subject Name</label>
+                <label class="form-label">Subject Name</label>
                 <input type="text" name="name" id="subjectName" required
                        placeholder="e.g. Effective Communication"
-                       class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                       class="form-input">
             </div>
 
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">Type</label>
+                    <label class="form-label">Type</label>
                     <select name="type" id="subjectType" required onchange="toggleTrackFields(); refreshSubjectGroupField();"
-                            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                            class="form-input">
                         <option value="">— Select Type —</option>
                         <option value="core">Core</option>
                         <option value="elective">Elective</option>
                     </select>
                 </div>
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">Grade Level</label>
+                    <label class="form-label">Grade Level</label>
                     <select name="grade_level" id="subjectGrade" required onchange="refreshSubjectGroupField()"
-                            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                            class="form-input">
                         <option value="">— Select Grade —</option>
                         <option value="11">Grade 11</option>
                         <option value="12">Grade 12</option>
@@ -224,26 +230,26 @@
             </div>
 
             <div id="subjectGroupWrapper">
-                <label class="block text-sm text-gray-600 mb-1">
+                <label class="form-label">
                     Subject Group
                     <span class="text-gray-400 text-xs">(DO 015, s. 2026 grading weight group — Grade 11 only; Grade 12 weighs by section track instead)</span>
                 </label>
                 <select name="subject_group" id="subjectGroupField"
-                        class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                        class="form-input">
                     <option value="">— Select Subject Group —</option>
                     @foreach($subjectGroups as $group)
                         <option value="{{ $group }}" data-for-type="{{ $group === 'core_academic' ? 'core' : 'elective' }}">{{ $subjectGroupLabel($group) }}{{ $subjectGroupCoverText($group) ? ' — covers ' . $subjectGroupCoverText($group) : '' }}</option>
                     @endforeach
                 </select>
-                <p class="text-xs text-gray-400 mt-1">Resolved grading weights (WW / PT / Exam) are shown on the Subjects list — never typed in manually.</p>
+                <p class="text-xs text-muted mt-1">Resolved grading weights (WW / PT / Exam) are shown on the Subjects list — never typed in manually.</p>
             </div>
 
             <div id="trackFields" class="hidden space-y-4">
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">Track</label>
+                    <label class="form-label">Track</label>
                     <select name="track_id" id="subjectTrack"
                             onchange="loadSpecializations(this.value, 'subjectSpec', document.getElementById('subjectForm').dataset.specUrl)"
-                            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                            class="form-input">
                         <option value="">— Select Track —</option>
                         @foreach($tracks as $track)
                             <option value="{{ $track->id }}">{{ $track->name }}</option>
@@ -251,12 +257,12 @@
                     </select>
                 </div>
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">
+                    <label class="form-label">
                         Specialization
                         <span class="text-gray-400 text-xs">(optional)</span>
                     </label>
                     <select name="specialization_id" id="subjectSpec"
-                            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                            class="form-input">
                         <option value="">— All specializations in track —</option>
                     </select>
                 </div>
@@ -264,9 +270,9 @@
 
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="closeSubjectModal()"
-                        class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+                        class="btn btn-outline">Cancel</button>
                 <button type="submit"
-                        class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-brand-800">
+                        class="btn btn-primary">
                     Save Subject
                 </button>
             </div>
@@ -278,15 +284,15 @@
 {{-- IMPORT SUBJECTS MODAL --}}
 <div id="importSubjectsModal"
      class="{{ $errors->import->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box {{ $errors->import->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
+    <div class="modal-box {{ $errors->import->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200">
 
         <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-800">Import Subjects</h3>
+            <h3 class="text-lg font-semibold text-ink">Import Subjects</h3>
             <button type="button" onclick="closeImportSubjectsModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         @if($errors->import->any())
-            <div class="bg-red-100 text-red-700 text-sm p-3 rounded-lg mb-4">
+            <div class="alert alert-danger mb-4">
                 <ul class="list-disc list-inside">
                     @foreach($errors->import->all() as $error)
                         <li>{{ $error }}</li>
@@ -295,7 +301,7 @@
             </div>
         @endif
 
-        <p class="text-sm text-gray-500 mb-4">
+        <p class="text-sm text-muted mb-4">
             Upload an Excel (.xlsx) or CSV file. Required columns:
             <strong>name, type, grade_level</strong>. Never include WW/PT/Exam
             percentage columns — grading weights are always resolved
@@ -320,14 +326,14 @@
             @csrf
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Grade Level being uploaded</label>
+                <label class="form-label">Grade Level being uploaded</label>
                 <select name="grade_level" required
-                        class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                        class="form-input">
                     <option value="">— Select Grade Level —</option>
                     <option value="11">Grade 11</option>
                     <option value="12">Grade 12</option>
                 </select>
-                <p class="text-xs text-gray-400 mt-1">
+                <p class="text-xs text-muted mt-1">
                     Every row in the file must match this grade level — a row for
                     the other grade is rejected, not silently imported.
                 </p>
@@ -338,9 +344,9 @@
 
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="closeImportSubjectsModal()"
-                        class="px-4 py-2 text-sm text-gray-500">Cancel</button>
+                        class="px-4 py-2 text-sm text-muted">Cancel</button>
                 <button type="submit"
-                        class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium">
+                        class="btn btn-primary">
                     Upload & Import
                 </button>
             </div>

@@ -2,6 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
+/* =====================================================================
+   NAGGASICAN NHS DSS — DESIGN SYSTEM ("UI modernization pass", 2026-09-14)
+
+   One place for every visual primitive the app uses: page header, cards,
+   stat cards, buttons, badges, filter bar, forms, progress bars, alerts,
+   sidebar navigation, tables, modals, empty states. Blade views compose
+   these classes instead of carrying their own utility strings, so every
+   page reads as one product and a change here lands everywhere.
+
+   Colour rules (tailwind.config.js): brand green = IDENTITY (sidebar,
+   primary buttons, active nav). success/warning/danger/info = SEMANTIC
+   (badges, alerts, statuses). status.* = the four DSS states only.
+   ===================================================================== */
+
 /* Accessibility floor — applied globally instead of per-element so every
    button/link/select/input in the app gets a visible keyboard focus state
    without having to touch every Blade file individually. */
@@ -13,41 +27,164 @@
     button:focus-visible,
     select:focus-visible,
     input:focus-visible,
-    textarea:focus-visible {
-        @apply ring-2 ring-brand-600 ring-offset-2;
+    textarea:focus-visible,
+    summary:focus-visible {
+        @apply ring-2 ring-brand-500 ring-offset-2;
+    }
+    body {
+        @apply bg-surface text-ink antialiased;
+    }
+    ::selection {
+        @apply bg-brand-200 text-brand-950;
     }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    #sidebar {
+    #sidebar, .card-hover, .btn, .stat-card {
         transition: none !important;
     }
 }
 
-/* "Clarity, progress, and visual design pass" TASK 7b — tabular
-   (lining) numerals in every table cell app-wide, so digits align
-   vertically down a column and patterns (a whole column of failing
-   grades, say) are visible at a glance without reading each number.
-   Applied globally rather than per-column class: this table already
-   holds nearly every grade/percentage/count column in the app, and
-   tabular-nums has no effect on non-digit text, so it is safe here
-   with no risk to any other content in the same cell. */
+/* Tabular (lining) numerals in every table cell app-wide, so digits align
+   vertically down a column. tabular-nums has no effect on non-digit text. */
 table {
     font-variant-numeric: tabular-nums;
 }
 
 @layer components {
-    /* One definition for every table in the app. Previously each Blade
-       file carried its own class string — eight variants had drifted
-       apart, so the same column read differently on two screens. */
-    .tbl-wrap  { @apply bg-white rounded-lg shadow-sm overflow-hidden; }
-    .tbl-scroll{ @apply overflow-y-auto max-h-[32rem]; }
+    /* ---------- PAGE HEADER ------------------------------------------- */
+    .page-header  { @apply mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between; }
+    .page-title   { @apply text-2xl md:text-[28px] font-bold text-ink leading-tight tracking-tight; }
+    .page-subtitle{ @apply text-sm md:text-[15px] text-muted mt-1; }
+    .page-eyebrow { @apply text-xs font-semibold uppercase tracking-wider text-brand-700 mb-1; }
+    .page-context { @apply flex flex-wrap items-center gap-2; }
+
+    /* Section heading inside a page (between cards) */
+    .section-title    { @apply text-lg font-semibold text-ink; }
+    .section-subtitle { @apply text-sm text-muted; }
+    .section-divider  { @apply border-t border-line my-6; }
+
+    /* ---------- CARDS -------------------------------------------------- */
+    .card        { @apply bg-white rounded-xl border border-line shadow-card; }
+    .card-hover  { @apply transition duration-200 hover:shadow-card-hover hover:-translate-y-0.5; }
+    .card-header { @apply px-5 py-4 border-b border-line flex items-start justify-between gap-4; }
+    .card-body   { @apply p-5; }
+    .card-footer { @apply px-5 py-3 border-t border-line bg-surface/60 rounded-b-xl; }
+    .card-title  { @apply text-base font-semibold text-ink leading-snug; }
+    .card-subtitle { @apply text-sm text-muted mt-0.5; }
+
+    /* Metric / stat card */
+    .stat-card       { @apply card p-5 flex items-start gap-4 min-h-[6.5rem] transition duration-200 hover:shadow-card-hover hover:-translate-y-0.5; }
+    .stat-label      { @apply text-xs font-semibold uppercase tracking-wider text-muted; }
+    .stat-value      { @apply text-[30px] leading-none font-bold text-ink mt-2 tabular-nums; }
+    .stat-note       { @apply text-xs text-muted mt-2; }
+
+    /* Soft coloured icon container (stat cards, health rows, action cards) */
+    .icon-box         { @apply w-11 h-11 rounded-xl flex items-center justify-center text-xl shrink-0; }
+    .icon-box-sm      { @apply w-9 h-9 rounded-lg text-base; }
+    .icon-box-brand   { @apply bg-brand-100 text-brand-800; }
+    .icon-box-info    { @apply bg-info-soft text-info-text; }
+    .icon-box-success { @apply bg-success-soft text-success-text; }
+    .icon-box-warning { @apply bg-warning-soft text-warning-text; }
+    .icon-box-danger  { @apply bg-danger-soft text-danger-text; }
+    .icon-box-slate   { @apply bg-slate-100 text-slate-700; }
+    .icon-box-violet  { @apply bg-violet-100 text-violet-700; }
+    .icon-box-teal    { @apply bg-teal-100 text-teal-700; }
+    .icon-box-cyan    { @apply bg-cyan-100 text-cyan-700; }
+
+    /* ---------- BUTTONS ------------------------------------------------ */
+    .btn { @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium leading-5 transition duration-150 whitespace-nowrap select-none disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]; }
+    .btn-sm { @apply px-3 py-1.5 text-xs; }
+    .btn-xs { @apply px-2.5 py-1 text-xs rounded-md gap-1; }
+    .btn-lg { @apply px-5 py-2.5 text-base; }
+    .btn-primary   { @apply bg-brand-800 text-white hover:bg-brand-900 shadow-sm; }
+    .btn-secondary { @apply bg-brand-50 text-brand-800 border border-brand-200 hover:bg-brand-100; }
+    .btn-outline   { @apply bg-white text-ink border border-line hover:bg-surface hover:border-gray-300; }
+    .btn-ghost     { @apply bg-transparent text-muted hover:bg-surface hover:text-ink; }
+    .btn-danger    { @apply bg-danger text-white hover:bg-red-700 shadow-sm; }
+    .btn-danger-outline { @apply bg-white text-danger-text border border-red-200 hover:bg-danger-soft; }
+    .btn-warning   { @apply bg-warning text-white hover:bg-amber-600 shadow-sm; }
+    .btn-link      { @apply text-brand-700 hover:text-brand-900 hover:underline font-medium; }
+
+    /* ---------- BADGES ------------------------------------------------- */
+    .badge { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap leading-5; }
+    .badge-success { @apply bg-success-soft text-success-text; }
+    .badge-warning { @apply bg-warning-soft text-warning-text; }
+    .badge-danger  { @apply bg-danger-soft text-danger-text; }
+    .badge-info    { @apply bg-info-soft text-info-text; }
+    .badge-gray    { @apply bg-gray-100 text-gray-700; }
+    .badge-brand   { @apply bg-brand-100 text-brand-800; }
+    .badge-outline { @apply bg-white border border-line text-muted; }
+    .badge-dot::before { content: ''; @apply w-1.5 h-1.5 rounded-full bg-current opacity-80; }
+
+    /* Context pill (School Year / Term — in page headers) */
+    .pill { @apply inline-flex items-center gap-1.5 rounded-full bg-white border border-line px-3 py-1 text-xs font-medium text-ink shadow-sm; }
+    .pill-label { @apply text-muted font-normal; }
+
+    /* ---------- FILTER BAR / TOOLBAR ----------------------------------- */
+    .filter-bar   { @apply card px-4 py-3 mb-4 flex flex-wrap items-end gap-3; }
+    .filter-field { @apply flex flex-col min-w-[9rem]; }
+    .toolbar      { @apply flex flex-col md:flex-row md:items-center justify-between gap-3; }
+
+    /* ---------- FORMS -------------------------------------------------- */
+    .form-label   { @apply block text-[13px] font-medium text-ink mb-1; }
+    .form-input   { @apply w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink placeholder:text-gray-400 shadow-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/25 focus:outline-none disabled:bg-surface disabled:text-muted; }
+    .form-select  { @apply form-input pr-8; }
+    .form-select-sm { @apply rounded-md border border-line bg-white px-2.5 py-1.5 text-sm text-ink shadow-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/25 focus:outline-none; }
+    .form-help    { @apply text-xs text-muted mt-1; }
+    .form-error   { @apply text-xs text-danger-text mt-1; }
+    .form-readonly{ @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-muted; }
+
+    /* ---------- PROGRESS ----------------------------------------------- */
+    .progress        { @apply w-full h-2 rounded-full bg-gray-100 overflow-hidden; }
+    .progress-sm     { @apply h-1.5; }
+    .progress-bar    { @apply h-full rounded-full bg-brand-600 transition-all duration-300; }
+    .progress-success .progress-bar, .progress-bar-success { @apply bg-success; }
+    .progress-warning .progress-bar, .progress-bar-warning { @apply bg-warning; }
+    .progress-danger  .progress-bar, .progress-bar-danger  { @apply bg-danger; }
+    .progress-info    .progress-bar, .progress-bar-info    { @apply bg-info; }
+
+    /* ---------- ALERTS ------------------------------------------------- */
+    .alert         { @apply rounded-xl border px-4 py-3 text-sm; }
+    .alert-row     { @apply flex items-start gap-3; }
+    .alert-info    { @apply bg-info-soft/60 border-blue-200 text-info-text; }
+    .alert-success { @apply bg-success-soft/70 border-green-200 text-success-text; }
+    .alert-warning { @apply bg-warning-soft/70 border-amber-200 text-warning-text; }
+    .alert-danger  { @apply bg-danger-soft/70 border-red-200 text-danger-text; }
+    .help-text     { @apply text-xs text-muted leading-relaxed; }
+
+    /* ---------- SIDEBAR NAVIGATION ------------------------------------- */
+    .nav-group-label { @apply px-3 pt-5 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-brand-300/80 select-none; }
+    .nav-link { @apply flex items-center gap-3 rounded-lg px-3 py-2 text-[14px] font-medium text-brand-100/90 border-l-[3px] border-transparent transition duration-150 hover:bg-white/10 hover:text-white; }
+    .nav-link i { @apply text-base w-5 text-center opacity-90; }
+    .nav-link-active { @apply bg-white/15 text-white border-gold-500 shadow-sm; }
+
+    /* ---------- TABLES ------------------------------------------------- */
+    .tbl-wrap  { @apply card overflow-hidden; }
+    .tbl-scroll{ @apply overflow-x-auto overflow-y-auto max-h-[32rem]; }
     .tbl       { @apply w-full text-sm text-left; }
-    .tbl thead { @apply bg-gray-50 text-gray-500 text-xs uppercase tracking-wide; }
-    .tbl thead th { @apply px-4 py-3 font-medium whitespace-nowrap; }
-    .tbl tbody tr { @apply border-t border-gray-100; }
-    .tbl tbody tr:hover { @apply bg-brand-50; }
-    .tbl tbody td { @apply px-4 py-3 text-gray-700 align-middle; }
-    .tbl-sticky thead { @apply sticky top-0 z-10 shadow-[0_1px_0_rgb(229,231,235)]; }
+    .tbl thead { @apply bg-surface text-muted text-[12px] uppercase tracking-[0.06em]; }
+    .tbl thead th { @apply px-4 py-3 font-semibold whitespace-nowrap; }
+    .tbl tbody tr { @apply border-t border-line transition-colors duration-150; }
+    .tbl tbody tr:hover { @apply bg-brand-50/60; }
+    .tbl tbody td { @apply px-4 py-3.5 text-gray-700 align-middle; }
+    .tbl tbody tr { min-height: 3rem; }
+    .tbl-sticky thead { @apply sticky top-0 z-10 shadow-[0_1px_0_#E6EAF0]; }
     .tbl-num   { @apply text-right; }
+
+    /* ---------- MODALS ------------------------------------------------- */
+    /* Every dialog box: elevated, never wider than the viewport, and scrolls
+       inside itself on short screens so its buttons are always reachable. */
+    .modal-box { @apply shadow-modal mx-4 max-h-[92vh] overflow-y-auto; }
+
+    /* ---------- EMPTY STATE -------------------------------------------- */
+    .empty-state      { @apply px-6 py-10 text-center; }
+    .empty-state-icon { @apply icon-box icon-box-slate mx-auto mb-3; }
+    .empty-state-title{ @apply text-sm font-semibold text-ink; }
+    .empty-state-hint { @apply text-xs text-muted mt-1 max-w-md mx-auto; }
+
+    /* ---------- MISC --------------------------------------------------- */
+    .kbd-num { @apply tabular-nums; }
+    .link    { @apply text-brand-700 hover:text-brand-900 hover:underline; }
+    .action-card { @apply card p-4 flex items-start gap-3 card-hover; }
 }

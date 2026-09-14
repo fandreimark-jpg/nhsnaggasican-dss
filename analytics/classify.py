@@ -42,29 +42,12 @@ MODEL_PATH = os.path.join(os.path.dirname(__file__), 'model_cache.pkl')
 
 
 def get_model():
-    """
-    Load the cached model if it exists, otherwise train a new one and cache it.
+    """Load the deployed model. Missing artifacts require explicit operator action."""
+    import joblib
 
-    Why caching:
-    - Training takes 1-2 seconds on first run
-    - Loading a cached model takes ~0.1 seconds
-    - Result: faster report submission after the first time
-    """
-    try:
-        import joblib
-
-        if os.path.exists(MODEL_PATH):
-            # Load existing trained model from disk
-            return joblib.load(MODEL_PATH)
-
-        # First run — train and save the model
-        model = train_model()
-        joblib.dump(model, MODEL_PATH)
-        return model
-
-    except ImportError:
-        # joblib not installed — train without caching
-        return train_model()
+    if not os.path.isfile(MODEL_PATH):
+        raise FileNotFoundError('The deployed analytics model is missing. Restore the approved model artifact; automatic training is disabled.')
+    return joblib.load(MODEL_PATH)
 
 
 def train_model():

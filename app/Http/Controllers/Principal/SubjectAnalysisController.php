@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Principal;
 
 use App\Http\Controllers\Controller;
 use App\Models\AcademicTerm;
+use App\Models\AcademicYear;
 use App\Models\Section;
 use App\Services\SubjectAnalysisService;
 use Illuminate\Http\Request;
@@ -27,7 +28,9 @@ class SubjectAnalysisController extends Controller
 
     public function index(Request $request)
     {
-        $schoolYear = Section::activeSchoolYear();
+        // "Multi-school-year academic history" work order, PART 13 — one
+        // school year at a time, the active one by default.
+        $schoolYear = AcademicYear::resolveSelected($request->input('school_year'));
         $sectionId  = $request->integer('section_id') ?: null;
         $term       = $request->integer('term') ?: null;
 
@@ -36,7 +39,10 @@ class SubjectAnalysisController extends Controller
             'sections'       => Section::where('school_year', $schoolYear)->orderBy('name')->get(),
             'selectedSection' => $sectionId,
             'selectedTerm'    => $term,
-            'currentTerm'     => AcademicTerm::currentOpenTerm($schoolYear),
+            'currentTerm'     => $schoolYear === Section::activeSchoolYear() ? AcademicTerm::currentOpenTerm($schoolYear) : null,
+            'schoolYear'      => $schoolYear,
+            'schoolYears'     => AcademicYear::selectableSchoolYears(),
+            'isHistoricalYear' => $schoolYear !== Section::activeSchoolYear(),
         ]);
     }
 }

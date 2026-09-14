@@ -53,7 +53,7 @@ class TermReadinessService
         }
 
         $subjects = $this->electiveStatus->expectedSubjectsForTerm($section, $gradingPeriod);
-        $students = Student::where('section_id', $section->id)->get();
+        $students = Student::enrolledIn($section)->get();
 
         $expected = $students->count() * $subjects->count();
         $complete = 0;

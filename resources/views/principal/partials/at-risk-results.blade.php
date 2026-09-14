@@ -13,7 +13,7 @@
      See the "honest model evaluation" prompt: a 99% confidence reads as
      near-certainty about the student, when it actually only describes how
      much the model's own trees agreed with each other. --}}
-<p class="text-xs text-gray-400 px-5 pt-1">
+<p class="text-xs text-muted px-5 pt-1">
     Risk levels are derived from grade thresholds; confidence reflects how much the model's decision trees agreed with each other, not predictive certainty about any individual student.
 </p>
 <div class="tbl-scroll mt-2">
@@ -31,7 +31,7 @@
     <tbody>
         @forelse($atRiskStudents as $student)
         <tr>
-            <td class="font-medium text-gray-800 align-top">
+            <td class="font-medium text-ink align-top">
                 @if(auth()->user()->role === 'principal' && isset($student['student_id']))
                     <a href="{{ route('principal.students.show', $student['student_id']) }}" class="hover:underline hover:text-brand-700">
                         {{ $student['name'] }}
@@ -46,11 +46,11 @@
             </td>
             <td class="text-center align-top">
                 @if($student['risk_level'] === 'high')
-                    <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-status-risk/10 text-status-risk">High</span>
+                    <span class="badge bg-status-risk/10 text-status-risk">High</span>
                 @elseif($student['risk_level'] === 'moderate')
-                    <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-status-attention/10 text-status-attention">Moderate</span>
+                    <span class="badge bg-status-attention/10 text-status-attention">Moderate</span>
                 @else
-                    <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">{{ ucfirst($student['risk_level']) }}</span>
+                    <span class="badge bg-gray-100 text-gray-500">{{ ucfirst($student['risk_level']) }}</span>
                 @endif
                 @if($student['was_overridden'])
                     <div class="mt-1" title="Model originally said '{{ ucfirst($student['ml_risk_level']) }}' — bumped up due to a failing subject">
@@ -132,18 +132,18 @@
 </div>
 
 @if($atRiskStudents->hasPages())
-<div class="px-5 py-3 border-t flex flex-col items-center gap-2 text-sm text-gray-500">
+<div class="px-5 py-3 border-t flex flex-col items-center gap-2 text-sm text-muted">
     <div class="flex items-center gap-1">
         @if($atRiskStudents->onFirstPage())
-            <span class="px-3 py-1 rounded border text-gray-300 cursor-not-allowed">← Prev</span>
+            <span class="px-3 py-1 rounded-md border border-line text-gray-300 cursor-not-allowed">← Prev</span>
         @else
-            <a href="{{ $atRiskStudents->previousPageUrl() }}" class="px-3 py-1 rounded border hover:bg-gray-50 text-gray-600">← Prev</a>
+            <a href="{{ $atRiskStudents->previousPageUrl() }}" class="px-3 py-1 rounded-md border border-line hover:bg-surface text-gray-600">← Prev</a>
         @endif
-        <span class="px-3 py-1 rounded border bg-brand-700 text-white font-medium">{{ $atRiskStudents->currentPage() }}</span>
+        <span class="px-3 py-1 rounded-md border border-brand-800 bg-brand-800 text-white font-medium">{{ $atRiskStudents->currentPage() }}</span>
         @if($atRiskStudents->hasMorePages())
-            <a href="{{ $atRiskStudents->nextPageUrl() }}" class="px-3 py-1 rounded border hover:bg-gray-50 text-gray-600">Next →</a>
+            <a href="{{ $atRiskStudents->nextPageUrl() }}" class="px-3 py-1 rounded-md border border-line hover:bg-surface text-gray-600">Next →</a>
         @else
-            <span class="px-3 py-1 rounded border text-gray-300 cursor-not-allowed">Next →</span>
+            <span class="px-3 py-1 rounded-md border border-line text-gray-300 cursor-not-allowed">Next →</span>
         @endif
     </div>
     <span class="text-xs">Showing {{ $atRiskStudents->firstItem() }}–{{ $atRiskStudents->lastItem() }} of <x-count-label :count="$atRiskStudents->total()" noun="student" /></span>

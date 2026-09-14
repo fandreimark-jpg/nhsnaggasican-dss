@@ -4,8 +4,6 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
-use App\Models\Section;
-use App\Models\Grade;
 use App\Helpers\LogActivity;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
@@ -115,7 +113,7 @@ class UserController extends Controller
 
         try {
             $user = DB::transaction(function () use ($request, $fullName, $email) {
-                $user = User::create([
+                $user = new User([
                     'name'        => $fullName,
                     'last_name'   => $request->last_name,
                     'first_name'  => $request->first_name,
@@ -269,7 +267,7 @@ class UserController extends Controller
 
     /**
      * Delete a user account.
-     * Unassigns them from any section before deleting.
+     * Referenced accounts must be disabled instead; attribution is preserved.
      * Cannot delete your own account.
      */
     public function destroy($id)
@@ -281,12 +279,6 @@ class UserController extends Controller
             return redirect()->route('admin.users')
                 ->with('error', 'You cannot delete your own account.');
         }
-
-        // Unassign adviser from their section before deleting
-        Section::where('adviser_id', $user->id)->update(['adviser_id' => null]);
-
-        // Set encoded_by to null for grades they encoded
-        Grade::where('encoded_by', $user->id)->update(['encoded_by' => null]);
 
         $user->delete();
 

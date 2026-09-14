@@ -51,12 +51,49 @@ class DashboardController extends Controller
             $inTermStatusSummary,
             $this->analytics->getFailingSummary(),
             [
-                'staleRiskTerms' => AcademicTerm::staleRiskTerms(Section::activeSchoolYear()),
+                // "UI modernization pass" — Component Performance chart data:
+                // the mean of each subject's component average from the SAME
+                // SubjectAnalysisService the Subject Analysis page uses. A
+                // presentation summary of existing figures, not a new metric.
+                'componentPerformance' => $this->componentPerformance(),
+                // Compact "pending interventions" list for Zone 2 — the five
+                // most recent rows the same Intervention::scopeUndecided()
+                // rule counts on the Awaiting Your Decision card (CLAUDE.md
+                // Design Decision #3), for the selected school year only.
+                'pendingInterventions' => \App\Models\Intervention::undecided()
+                    ->where('school_year', $this->analytics->selectedSchoolYear())
+                    ->with(['student:id,last_name,first_name', 'section:id,name,grade_level', 'subject:id,name'])
+                    ->latest()->take(5)->get(),
+                'staleRiskTerms' => AcademicTerm::staleRiskTerms($this->analytics->selectedSchoolYear()),
                 'transmutationBanner' => $this->buildTransmutationBanner(),
                 'inTermStatusTrend' => $inTermStatusTrend,
                 'previousTermCounts' => $previousTermCounts,
             ]
         ));
+    }
+
+    /**
+     * @return array<int, array{key: string, label: string, average: float, subjects: int}>
+     */
+    private function componentPerformance(): array
+    {
+        $summaries = (new \App\Services\SubjectAnalysisService())->getSubjectSummaries($this->analytics->selectedSchoolYear());
+        $labels = ['written_work' => 'Written Work', 'performance_task' => 'Performance Task', 'examination' => 'Examination'];
+        $out = [];
+
+        foreach ($labels as $key => $label) {
+            $values = collect($summaries)
+                ->map(fn($row) => $row['components'][$key]['avg_percentage'] ?? null)
+                ->filter(fn($v) => $v !== null);
+
+            if ($values->isEmpty()) {
+                continue;
+            }
+
+            $out[] = ['key' => $key, 'label' => $label, 'average' => round($values->avg(), 2), 'subjects' => $values->count()];
+        }
+
+        return $out;
     }
 
     /**
@@ -73,7 +110,7 @@ class DashboardController extends Controller
             return null;
         }
 
-        $schoolYear = Section::activeSchoolYear();
+        $schoolYear = $this->analytics->selectedSchoolYear();
         $transmutation = new TransmutationService();
 
         $affectedGradeLevels = collect([11, 12])

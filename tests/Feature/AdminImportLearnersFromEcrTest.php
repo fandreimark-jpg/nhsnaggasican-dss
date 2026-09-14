@@ -21,6 +21,97 @@ class AdminImportLearnersFromEcrTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function academicSnapshot(Student $student): array
+    {
+        $grade = \App\Models\Grade::factory()->create(['student_id' => $student->id, 'section_id' => $student->section_id]);
+        $assessment = \App\Models\Assessment::factory()->create(['section_id' => $student->section_id, 'subject_id' => $grade->subject_id]);
+        \App\Models\AssessmentScore::factory()->create(['student_id' => $student->id, 'assessment_id' => $assessment->id]);
+        $risk = \App\Models\RiskResult::create(['student_id' => $student->id, 'grading_period' => 1, 'school_year' => '2026-2027', 'average_grade' => 85, 'risk_level' => 'low', 'generated_at' => now()]);
+        \App\Models\Intervention::factory()->create(['student_id' => $student->id, 'risk_result_id' => $risk->id, 'subject_id' => $grade->subject_id]);
+
+        $snapshot = [];
+        foreach (['students', 'grades', 'assessments', 'assessment_scores', 'risk_results', 'interventions'] as $table) {
+            $snapshot[$table] = \DB::table($table)->orderBy('id')->get()->map(fn ($row) => (array) $row)->all();
+        }
+        return $snapshot;
+    }
+
+    private function assertSnapshotPreserved(array $snapshot): void
+    {
+        foreach ($snapshot as $table => $rows) {
+            foreach ($rows as $row) {
+                $this->assertSame($row, (array) \DB::table($table)->find($row['id']), $table.' history changed');
+            }
+            if ($table !== 'students') $this->assertDatabaseCount($table, count($rows));
+        }
+    }
+
+    private function previewRoster(Section $section, array $roster)
+    {
+        $path = $this->buildFilledSshsFixture($roster);
+        try {
+            return $this->post('/admin/students/import-from-ecr/preview', [
+                'section_id' => $section->id,
+                'file' => new UploadedFile($path, 'anonymous-roster.xlsx', null, null, true),
+            ])->assertOk();
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function test_import_adds_twelve_to_six_narra_learners_without_changing_any_history(): void
+    {
+        $this->actingAs(User::factory()->admin()->create());
+        $section = Section::factory()->create(['name' => 'Narra', 'grade_level' => 11]);
+        $original = Student::factory()->count(6)->create(['section_id' => $section->id]);
+        $snapshot = $this->academicSnapshot($original->first());
+        $roster = array_map(fn ($n) => [sprintf('990000000%03d', $n), 'Demo'.$n.', Learner'], range(1, 12));
+
+        $preview = $this->previewRoster($section, $roster);
+        $this->assertSame(12, $preview->viewData('counts')['insert']);
+        $this->assertSame(6, $section->students()->count(), 'Preview must not write students.');
+        $preview->assertSee('data-import-confirm="Insert 12 new learner(s) into Narra? Existing, Conflict, and Rejected rows will be skipped and will not be modified."', false);
+        $html = new \DOMDocument();
+        @$html->loadHTML($preview->getContent());
+        $xpath = new \DOMXPath($html);
+        $this->assertSame(0, $xpath->query('//form[contains(@action, "import-from-ecr/confirm") and @data-confirm]')->length);
+        $this->assertStringContainsString('Confirm Import', $xpath->query('//*[@id="confirmImportModal"]')->item(0)->textContent);
+        $this->assertSame('Yes, Import', trim($xpath->query('//*[@id="confirmImportBtn"]')->item(0)->textContent));
+        $this->assertStringContainsString('bg-brand-700', $xpath->query('//*[@id="confirmImportBtn"]')->item(0)->getAttribute('class'));
+        $this->assertStringContainsString('bg-red-600', $xpath->query('//*[@id="confirmDeleteBtn"]')->item(0)->getAttribute('class'));
+        $this->assertStringContainsString('Yes, Delete', $xpath->query('//*[@id="confirmDeleteBtn"]')->item(0)->textContent);
+
+        $this->post('/admin/students/import-from-ecr/confirm')->assertRedirect(route('admin.students'))->assertSessionHas('success');
+        $this->assertSame(18, $section->students()->count());
+        foreach ($roster as [$lrn]) $this->assertDatabaseHas('students', ['lrn' => $lrn, 'section_id' => $section->id]);
+        $this->assertSnapshotPreserved($snapshot);
+    }
+
+    public function test_mixed_preview_writes_only_five_insert_rows_and_preserves_all_other_rows(): void
+    {
+        $this->actingAs(User::factory()->admin()->create());
+        $section = Section::factory()->create(['name' => 'Narra', 'grade_level' => 11]);
+        $other = Section::factory()->create(['name' => 'Molave', 'grade_level' => 11]);
+        $existing = Student::factory()->count(3)->create(['section_id' => $section->id]);
+        $conflicts = Student::factory()->count(2)->create(['section_id' => $other->id]);
+        $snapshot = $this->academicSnapshot($existing->first());
+        $roster = array_map(fn ($n) => [sprintf('990000000%03d', $n), 'Demo'.$n.', Learner'], range(1, 5));
+        foreach ($existing->concat($conflicts) as $student) $roster[] = [$student->lrn, 'Changed, Must Not Apply'];
+        $roster[] = ['', 'RejectedOne, Demo'];
+        $roster[] = ['', 'RejectedTwo, Demo'];
+
+        $preview = $this->previewRoster($section, $roster);
+        $this->assertSame(['insert' => 5, 'existing' => 3, 'conflict' => 2, 'rejected' => 2], $preview->viewData('counts'));
+        $this->post('/admin/students/import-from-ecr/confirm')->assertRedirect(route('admin.students'))->assertSessionHas('success');
+        $this->assertDatabaseCount('students', 10);
+        $this->assertSame(8, $section->students()->count());
+        $this->assertSame(2, $other->students()->count());
+        $this->assertDatabaseMissing('students', ['last_name' => 'Changed']);
+        $this->assertDatabaseMissing('students', ['last_name' => 'RejectedOne']);
+        $this->assertDatabaseMissing('students', ['last_name' => 'RejectedTwo']);
+        $this->assertSnapshotPreserved($snapshot);
+    }
+
     private function sshsFixture(): UploadedFile
     {
         return new UploadedFile(
@@ -38,7 +129,7 @@ class AdminImportLearnersFromEcrTest extends TestCase
     }
 
     /** Same technique DraftRosterExtractionTest already uses -- clone the real checked-in SSHS template and fill in a few roster cells, never touching the real fixture on disk. */
-    private function buildFilledSshsFixture(): string
+    private function buildFilledSshsFixture(?array $roster = null): string
     {
         $source = base_path('tests/Fixtures/SSHS-E-Class-Record-SY-2026-2027.xlsx');
         $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($source);
@@ -46,10 +137,15 @@ class AdminImportLearnersFromEcrTest extends TestCase
         $spreadsheet = $reader->load($source);
         $inputData = $spreadsheet->getSheetByName('INPUT DATA');
 
-        $inputData->setCellValue('N11', '110000000001');
-        $inputData->setCellValueExplicit('O11', 'Dela Cruz, Juan Miguel', \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
-        $inputData->setCellValue('N12', '110000000002'); // will collide with an existing student in a DIFFERENT section
-        $inputData->setCellValueExplicit('O12', 'Reyes, Ana', \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+        $roster ??= [
+            ['110000000001', 'Dela Cruz, Juan Miguel'],
+            ['110000000002', 'Reyes, Ana'],
+        ];
+        foreach ($roster as $index => [$lrn, $name]) {
+            $row = 11 + $index;
+            $inputData->setCellValueExplicit('N'.$row, $lrn, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+            $inputData->setCellValueExplicit('O'.$row, $name, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+        }
 
         $path = tempnam(sys_get_temp_dir(), 'ecr_learner_import_fixture_') . '.xlsx';
         (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet))->save($path);

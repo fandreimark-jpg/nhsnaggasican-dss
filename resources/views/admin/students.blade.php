@@ -7,6 +7,13 @@
 
 @include('partials.import-result')
 
+@if($errors->enroll->any())
+    <div class="alert alert-warning mb-4">
+        <p class="font-medium"><i class="bi bi-exclamation-triangle-fill"></i> Enrollment not recorded</p>
+        @foreach($errors->enroll->all() as $error)<p class="mt-1">{{ $error }}</p>@endforeach
+    </div>
+@endif
+
 {{-- Rejected-rows re-upload feature — students.import() stores just the
      rejected rows (in the same shape the upload expects) in session so
      fixing what was wrong means re-uploading only those rows, not the
@@ -15,13 +22,13 @@
      available across repeat downloads until the next import() call
      (success or failure) replaces or clears it. --}}
 @if(session('rejected_students'))
-    <div class="bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm p-4 rounded-lg mb-4 flex items-center justify-between gap-3 flex-wrap">
+    <div class="alert alert-warning mb-4 flex items-center justify-between gap-3 flex-wrap">
         <p>
             <i class="bi bi-file-earmark-arrow-down"></i>
             Fix the rows above, then re-upload just those — not the whole original file.
         </p>
         <a href="{{ route('admin.students.rejected.download') }}"
-           class="inline-flex items-center gap-1 bg-brand-700 text-white px-4 py-2 rounded-lg text-xs font-medium hover:bg-brand-800 shrink-0">
+           class="btn btn-primary btn-sm shrink-0">
             <i class="bi bi-download"></i> Download rejected rows
         </a>
     </div>
@@ -58,17 +65,17 @@
             multi-word middle name (e.g. Spanish-style double surnames) before importing.
         </p>
         <a href="{{ route('admin.students.extract-roster.download') }}"
-           class="inline-flex items-center gap-1 bg-brand-700 text-white px-4 py-2 rounded-lg text-xs font-medium hover:bg-brand-800">
+           class="btn btn-primary btn-sm">
             <i class="bi bi-download"></i> Download CSV
         </a>
     </div>
 @endif
 
-<div class="bg-white rounded-xl shadow-sm mb-0">
-    <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 px-6 py-4 border-b">
+<div class="card mb-0">
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 px-5 py-4 border-b border-line">
         <div>
-            <h2 class="text-sm font-semibold text-gray-800">All Students</h2>
-            <p class="text-xs text-gray-400"><x-count-label :count="$students->total()" noun="student" total /></p>
+            <h2 class="card-title">All Students</h2>
+            <p class="text-xs text-muted"><x-count-label :count="$students->total()" noun="student" total /></p>
         </div>
         <div class="flex items-center gap-3 flex-wrap">
             <form method="GET">
@@ -86,7 +93,7 @@
             <div class="relative">
                 <input type="text" id="studentSearch"
                     placeholder="Search students..."
-                    class="border rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 w-56">
+                    class="form-input !w-56 pl-9">
                 <i class="bi bi-search absolute left-3 top-2.5 text-gray-400 text-sm"></i>
             </div>
             {{-- "One entry point" pass — a single primary action opening a
@@ -95,7 +102,7 @@
                  neither can do the other's job). See addStudentsChooserModal
                  below and CLAUDE.md's note on this restructure. --}}
             <button type="button" onclick="openAddStudentsChooserModal()"
-                class="bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-800 whitespace-nowrap">
+                class="btn btn-primary whitespace-nowrap">
                 <i class="bi bi-plus-lg"></i> Add Students
             </button>
         </div>
@@ -115,7 +122,8 @@
                 <th scope="col">Middle Name</th>
                 <th scope="col">Birthdate</th>
                 <th scope="col">Gender</th>
-                <th scope="col">Section</th>
+                <th scope="col">Section <span class="font-normal text-gray-400">(current)</span></th>
+                <th scope="col">Enrollment History</th>
                 <th scope="col" class="text-right">Actions</th>
             </tr>
         </thead>
@@ -123,7 +131,7 @@
             @forelse($students as $student)
             <tr class="student-row">
                 <td>{{ $student->lrn }}</td>
-                <td class="font-medium text-gray-800">{{ $student->last_name }}</td>
+                <td class="font-medium text-ink">{{ $student->last_name }}</td>
                 <td>{{ $student->first_name }}</td>
                 <td class="text-gray-500">{{ $student->middle_name ?? '—' }}</td>
                 <td class="capitalize">{{ $student->formatted_birthdate }}</td>
@@ -131,14 +139,51 @@
                 <td>
                     {{ $student->section->name ?? '—' }}
                     <span class="text-gray-400 text-xs">
-                        {{ $student->section ? '(Grade ' . $student->section->grade_level . ')' : '' }}
+                        {{ $student->section ? '(Grade ' . $student->section->grade_level . ', SY ' . $student->section->school_year . ')' : '' }}
                     </span>
+                </td>
+                {{-- "Multi-school-year academic history" work order, PART 5 —
+                     one line per school year the learner was enrolled in;
+                     the identity row above never changes on promotion. --}}
+                <td class="text-xs text-gray-500">
+                    @forelse($student->enrollments as $en)
+                        <span class="block whitespace-nowrap">
+                            SY {{ $en->school_year }} — Grade {{ $en->grade_level }} {{ $en->section->name ?? '—' }}
+                            @if($en->school_year === $activeSchoolYear)
+                                <span class="text-green-700">(current)</span>
+                            @else
+                                <span class="text-gray-400">(historical)</span>
+                            @endif
+                        </span>
+                    @empty
+                        <span class="text-gray-300">No enrollment on record</span>
+                    @endforelse
                 </td>
                 <td class="text-right">
                     <div class="flex items-center justify-end gap-2">
+                        @php
+                            $enrolledYears = $student->enrollments->pluck('school_year');
+                            $canEnrollThisYear = !$enrolledYears->contains($activeSchoolYear) && $activeYearSections->isNotEmpty();
+                            $enrollPayload = [
+                                'id'      => $student->id,
+                                'name'    => $student->last_name . ', ' . $student->first_name,
+                                'lrn'     => $student->lrn,
+                                'history' => $student->enrollments->map(function ($en) {
+                                    return 'SY ' . $en->school_year . ' — Grade ' . $en->grade_level . ' ' . ($en->section->name ?? '');
+                                })->values()->all(),
+                            ];
+                        @endphp
+                        @if($canEnrollThisYear)
+                        <button type="button"
+                            onclick='openEnrollStudentModal(@json($enrollPayload))'
+                            class="inline-flex items-center gap-1 text-green-700 hover:text-green-900 text-xs font-medium border border-green-200 rounded px-2 py-1 hover:bg-green-50 whitespace-nowrap"
+                            title="Enroll or promote this learner into a section of School Year {{ $activeSchoolYear }}. Previous enrollments are kept.">
+                            <i class="bi bi-arrow-up-right-circle"></i> Enroll {{ $activeSchoolYear }}
+                        </button>
+                        @endif
                         <button type="button"
                             onclick='openEditStudentModal(@json($student))'
-                            class="inline-flex items-center gap-1 text-brand-600 hover:text-brand-800 text-xs font-medium border border-brand-200 rounded px-2 py-1 hover:bg-brand-50 whitespace-nowrap">
+                            class="inline-flex items-center gap-1 btn btn-xs btn-secondary whitespace-nowrap">
                             <i class="bi bi-pencil-square"></i> Edit
                         </button>
                         <form method="POST"
@@ -148,7 +193,7 @@
                             @csrf
                             @method('DELETE')
                             <button type="submit"
-                                class="inline-flex items-center gap-1 text-red-600 hover:text-red-800 text-xs font-medium border border-red-200 rounded px-2 py-1 hover:bg-red-50 whitespace-nowrap">
+                                class="inline-flex items-center gap-1 btn btn-xs btn-danger-outline whitespace-nowrap">
                                 <i class="bi bi-trash"></i> Delete
                             </button>
                         </form>
@@ -157,7 +202,7 @@
             </tr>
             @empty
             <tr>
-                <td colspan="7">
+                <td colspan="8">
                     <x-empty-state message="No students yet." icon="bi-people"
                         hint='Use "Add Student" or "Import Students" above. Each student needs a section.' />
                 </td>
@@ -173,22 +218,22 @@
     </div>
 
     @if($students->hasPages())
-    <div class="px-6 py-4 border-t flex flex-col items-center gap-2 text-sm text-gray-500">
+    <div class="px-5 py-4 border-t border-line flex flex-col items-center gap-2 text-sm text-muted">
         <div class="flex items-center gap-1">
             @if($students->onFirstPage())
-                <span class="px-3 py-1 rounded border text-gray-300 cursor-not-allowed">← Prev</span>
+                <span class="px-3 py-1 rounded-md border border-line text-gray-300 cursor-not-allowed">← Prev</span>
             @else
                 <a href="{{ $students->previousPageUrl() }}"
-                   class="px-3 py-1 rounded border hover:bg-gray-50 text-gray-600">← Prev</a>
+                   class="px-3 py-1 rounded-md border border-line hover:bg-surface text-gray-600">← Prev</a>
             @endif
-            <span class="px-3 py-1 rounded border bg-brand-700 text-white font-medium">
+            <span class="px-3 py-1 rounded-md border border-brand-800 bg-brand-800 text-white font-medium">
                 {{ $students->currentPage() }}
             </span>
             @if($students->hasMorePages())
                 <a href="{{ $students->nextPageUrl() }}"
-                   class="px-3 py-1 rounded border hover:bg-gray-50 text-gray-600">Next →</a>
+                   class="px-3 py-1 rounded-md border border-line hover:bg-surface text-gray-600">Next →</a>
             @else
-                <span class="px-3 py-1 rounded border text-gray-300 cursor-not-allowed">Next →</span>
+                <span class="px-3 py-1 rounded-md border border-line text-gray-300 cursor-not-allowed">Next →</span>
             @endif
         </div>
         <span class="text-xs">Showing {{ $students->firstItem() }}–{{ $students->lastItem() }} of <x-count-label :count="$students->total()" noun="student" /></span>
@@ -196,19 +241,60 @@
     @endif
 </div>
 
+{{-- ENROLL / PROMOTE MODAL — "Multi-school-year academic history" work
+     order, PART 15. Places ONE learner into a section of the ACTIVE
+     school year; the previous year's enrollment row is never rewritten.
+     Not a delete — uses the neutral action confirmation, never the red
+     Delete modal. --}}
+<div id="enrollStudentModal" role="dialog" aria-modal="true" aria-labelledby="enrollStudentTitle"
+     class="hidden opacity-0 fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
+    <div class="modal-box scale-95 opacity-0 bg-white rounded-xl shadow-modal w-full max-w-md p-6 transition-all duration-200">
+        <div class="flex justify-between items-center mb-4">
+            <h3 id="enrollStudentTitle" class="text-lg font-semibold text-ink">Enroll in School Year {{ $activeSchoolYear }}</h3>
+            <button type="button" onclick="closeEnrollStudentModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
+        </div>
+
+        <p class="text-sm text-gray-700 mb-1"><span id="enrollStudentName" class="font-medium"></span> <span class="text-xs text-muted">LRN <span id="enrollStudentLrn"></span></span></p>
+        <div id="enrollStudentHistory" class="text-xs text-gray-500 mb-4"></div>
+
+        <form id="enrollStudentForm" method="POST" class="space-y-4"
+              data-action-confirm="Enroll this learner in the selected section for School Year {{ $activeSchoolYear }}? Their previous enrollment record is kept as history — the same learner, one more school year."
+              data-action-title="Confirm Enrollment" data-action-label="Yes, Enroll" data-action-icon="bi-arrow-up-right-circle" data-action-loading="Enrolling...">
+            @csrf
+            <div>
+                <label class="form-label">Section for {{ $activeSchoolYear }}</label>
+                <select name="section_id" required
+                        class="form-input">
+                    <option value="">Select a section</option>
+                    @foreach($activeYearSections as $s)
+                        <option value="{{ $s->id }}">{{ $s->name }} — Grade {{ $s->grade_level }}@if($s->track) ({{ $s->track->name }}@if($s->specialization) / {{ $s->specialization->name }}@endif)@endif</option>
+                    @endforeach
+                </select>
+                <p class="text-xs text-muted mt-1">Only sections of the active school year are listed. Create the new year's sections under Sections first.</p>
+            </div>
+            <div class="flex justify-end gap-3 pt-2">
+                <button type="button" onclick="closeEnrollStudentModal()" class="btn btn-outline">Cancel</button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-arrow-up-right-circle"></i> Enroll
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
 {{-- EDIT STUDENT MODAL (opened via openEditStudentModal() in modal.js) --}}
 <div id="adminStudentModal"
-     class="{{ $errors->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box {{ $errors->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
+     class="{{ ($errors->any() && !$errors->has('deletion')) ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
+    <div class="modal-box {{ ($errors->any() && !$errors->has('deletion')) ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200">
 
         <div class="flex justify-between items-center mb-4">
-            <h3 id="studentModalTitle" class="text-lg font-semibold text-gray-800">Edit Student</h3>
+            <h3 id="studentModalTitle" class="text-lg font-semibold text-ink">Edit Student</h3>
             <button type="button" onclick="closeStudentModal()"
                     aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
-        @if($errors->any())
-            <div class="bg-red-100 text-red-700 text-sm p-3 rounded-lg mb-4">
+        @if(($errors->any() && !$errors->has('deletion')))
+            <div class="alert alert-danger mb-4">
                 <ul class="list-disc list-inside">
                     @foreach($errors->all() as $error)
                         <li>{{ $error }}</li>
@@ -223,56 +309,56 @@
             <input type="hidden" name="_method" id="studentMethod" value="PUT">
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">LRN (12 digits)</label>
+                <label class="form-label">LRN (12 digits)</label>
                 <input type="text" name="lrn" id="ps_lrn" maxlength="12" required
                        value="{{ old('lrn') }}"
-                       class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                       class="form-input">
             </div>
 
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">Last Name</label>
+                    <label class="form-label">Last Name</label>
                     <input type="text" name="last_name" id="ps_last_name" required
                            value="{{ old('last_name') }}"
-                           class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                           class="form-input">
                 </div>
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">First Name</label>
+                    <label class="form-label">First Name</label>
                     <input type="text" name="first_name" id="ps_first_name" required
                            value="{{ old('first_name') }}"
-                           class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                           class="form-input">
                 </div>
             </div>
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Middle Name</label>
+                <label class="form-label">Middle Name</label>
                 <input type="text" name="middle_name" id="ps_middle_name"
                        value="{{ old('middle_name') }}"
-                       class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                       class="form-input">
             </div>
 
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">Gender</label>
+                    <label class="form-label">Gender</label>
                     <select name="gender" id="ps_gender" required
-                            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                            class="form-input">
                         <option value="">Select</option>
                         <option value="male">Male</option>
                         <option value="female">Female</option>
                     </select>
                 </div>
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">Birthdate</label>
+                    <label class="form-label">Birthdate</label>
                     <input type="date" name="birthdate" id="ps_birthdate"
                            value="{{ old('birthdate') }}"
-                           class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                           class="form-input">
                 </div>
             </div>
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Section</label>
+                <label class="form-label">Section</label>
                 <select name="section_id" id="ps_section_id" required
-                        class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                        class="form-input">
                     <option value="">Select Section</option>
                     @foreach($sections as $section)
                         <option value="{{ $section->id }}">
@@ -285,9 +371,9 @@
 
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="closeStudentModal()"
-                        class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+                        class="btn btn-outline">Cancel</button>
                 <button type="submit" id="studentSubmitBtn"
-                        class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-brand-800">
+                        class="btn btn-primary">
                     Update Student
                 </button>
             </div>
@@ -301,16 +387,16 @@
      admin gets to the one they already need. --}}
 <div id="addStudentsChooserModal"
      class="hidden opacity-0 fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box scale-95 opacity-0 bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
+    <div class="modal-box scale-95 opacity-0 bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200">
         <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-800">Add Students</h3>
+            <h3 class="text-lg font-semibold text-ink">Add Students</h3>
             <button type="button" onclick="closeAddStudentsChooserModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         <div class="space-y-3">
             <button type="button" onclick="closeAddStudentsChooserModal(); openExtractRosterModal();"
-                class="w-full text-left border rounded-lg p-4 hover:bg-gray-50 hover:border-brand-300 transition-colors">
-                <p class="font-medium text-gray-800">
+                class="w-full text-left border rounded-lg p-4 hover:bg-surface hover:border-brand-300 transition-colors">
+                <p class="font-medium text-ink">
                     <i class="bi bi-file-earmark-spreadsheet text-brand-700"></i> From an E-Class Record
                 </p>
                 <p class="text-xs text-gray-500 mt-1.5">
@@ -323,8 +409,8 @@
             </button>
 
             <button type="button" onclick="closeAddStudentsChooserModal(); openImportLearnersFromEcrModal();"
-                class="w-full text-left border rounded-lg p-4 hover:bg-gray-50 hover:border-brand-300 transition-colors">
-                <p class="font-medium text-gray-800">
+                class="w-full text-left border rounded-lg p-4 hover:bg-surface hover:border-brand-300 transition-colors">
+                <p class="font-medium text-ink">
                     <i class="bi bi-file-earmark-person text-brand-700"></i> Import Learners from ECR
                 </p>
                 <p class="text-xs text-gray-500 mt-1.5">
@@ -334,16 +420,16 @@
             </button>
 
             <button type="button" onclick="closeAddStudentsChooserModal(); openImportStudentsModal();"
-                class="w-full text-left border rounded-lg p-4 hover:bg-gray-50 hover:border-brand-300 transition-colors">
-                <p class="font-medium text-gray-800">
+                class="w-full text-left border rounded-lg p-4 hover:bg-surface hover:border-brand-300 transition-colors">
+                <p class="font-medium text-ink">
                     <i class="bi bi-upload text-brand-700"></i> I already have a CSV
                 </p>
                 <p class="text-xs text-gray-500 mt-1.5">Import a roster file directly — lrn, last_name, first_name, middle_name, gender, birthdate.</p>
             </button>
 
             <button type="button" onclick="closeAddStudentsChooserModal(); openAddStudentModal();"
-                class="w-full text-left border rounded-lg p-4 hover:bg-gray-50 hover:border-brand-300 transition-colors">
-                <p class="font-medium text-gray-800">
+                class="w-full text-left border rounded-lg p-4 hover:bg-surface hover:border-brand-300 transition-colors">
+                <p class="font-medium text-ink">
                     <i class="bi bi-person-plus text-brand-700"></i> One at a time
                 </p>
                 <p class="text-xs text-gray-500 mt-1.5">Add a single student by hand.</p>
@@ -361,14 +447,14 @@
      class record). --}}
 <div id="importLearnersFromEcrModal"
      class="{{ $errors->ecrLearnerImport->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box {{ $errors->ecrLearnerImport->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
+    <div class="modal-box {{ $errors->ecrLearnerImport->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200">
         <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-800">Import Learners from ECR</h3>
+            <h3 class="text-lg font-semibold text-ink">Import Learners from ECR</h3>
             <button type="button" onclick="closeImportLearnersFromEcrModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         @if($errors->ecrLearnerImport->any())
-            <div class="bg-red-100 text-red-700 text-sm p-3 rounded-lg mb-4">
+            <div class="alert alert-danger mb-4">
                 <ul class="list-disc list-inside">
                     @foreach($errors->ecrLearnerImport->all() as $error)
                         <li>{{ $error }}</li>
@@ -377,7 +463,7 @@
             </div>
         @endif
 
-        <p class="text-sm text-gray-500 mb-4">
+        <p class="text-sm text-muted mb-4">
             Supports the Strengthened SHS E-Class Record and the Grade 12 class-record workbook. Choose the section
             this file's roster belongs to, then upload — you'll see exactly what will be inserted before anything is
             saved.
@@ -387,9 +473,9 @@
               enctype="multipart/form-data" class="space-y-4">
             @csrf
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Section</label>
+                <label class="form-label">Section</label>
                 <select name="section_id" required
-                        class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                        class="form-input">
                     <option value="">— Select Section —</option>
                     @foreach($sections as $section)
                         <option value="{{ $section->id }}">{{ $section->name }} — Grade {{ $section->grade_level }}</option>
@@ -401,9 +487,9 @@
 
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="closeImportLearnersFromEcrModal()"
-                        class="px-4 py-2 text-sm text-gray-500">Cancel</button>
+                        class="px-4 py-2 text-sm text-muted">Cancel</button>
                 <button type="submit"
-                        class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium">
+                        class="btn btn-primary">
                     Preview
                 </button>
             </div>
@@ -413,17 +499,17 @@
 
 {{-- ADD STUDENT MODAL --}}
 <div id="addStudentModal"
-     class="{{ $errors->any() && !$errors->import->any() && !$errors->extractRoster->any() && !$errors->ecrLearnerImport->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box {{ $errors->any() && !$errors->import->any() && !$errors->extractRoster->any() && !$errors->ecrLearnerImport->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
+     class="{{ ($errors->any() && !$errors->has('deletion')) && !$errors->import->any() && !$errors->extractRoster->any() && !$errors->ecrLearnerImport->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
+    <div class="modal-box {{ ($errors->any() && !$errors->has('deletion')) && !$errors->import->any() && !$errors->extractRoster->any() && !$errors->ecrLearnerImport->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200">
 
         <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-800">Add Student</h3>
+            <h3 class="text-lg font-semibold text-ink">Add Student</h3>
             <button type="button" onclick="closeAddStudentModal()"
                     aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
-        @if($errors->any() && !$errors->import->any() && !$errors->extractRoster->any() && !$errors->ecrLearnerImport->any())
-            <div class="bg-red-100 text-red-700 text-sm p-3 rounded-lg mb-4">
+        @if(($errors->any() && !$errors->has('deletion')) && !$errors->import->any() && !$errors->extractRoster->any() && !$errors->ecrLearnerImport->any())
+            <div class="alert alert-danger mb-4">
                 <ul class="list-disc list-inside">
                     @foreach($errors->all() as $error)
                         <li>{{ $error }}</li>
@@ -436,59 +522,59 @@
             @csrf
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">LRN (12 digits)</label>
+                <label class="form-label">LRN (12 digits)</label>
                 <input type="text" name="lrn" maxlength="12" required
                        inputmode="numeric" pattern="[0-9]*"
                        oninput="this.value = this.value.replace(/[^0-9]/g, '')"
                        value="{{ old('lrn') }}"
-                       class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                       class="form-input">
             </div>
 
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">Last Name</label>
+                    <label class="form-label">Last Name</label>
                     <input type="text" name="last_name" required
                            value="{{ old('last_name') }}"
-                           class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                           class="form-input">
                 </div>
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">First Name</label>
+                    <label class="form-label">First Name</label>
                     <input type="text" name="first_name" required
                            value="{{ old('first_name') }}"
-                           class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                           class="form-input">
                 </div>
             </div>
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Middle Name</label>
+                <label class="form-label">Middle Name</label>
                 <input type="text" name="middle_name"
                        value="{{ old('middle_name') }}"
-                       class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                       class="form-input">
             </div>
 
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">Gender</label>
+                    <label class="form-label">Gender</label>
                     <select name="gender" required
-                            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                            class="form-input">
                         <option value="">Select</option>
                         <option value="male" {{ old('gender') == 'male' ? 'selected' : '' }}>Male</option>
                         <option value="female" {{ old('gender') == 'female' ? 'selected' : '' }}>Female</option>
                     </select>
                 </div>
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">Birthdate</label>
+                    <label class="form-label">Birthdate</label>
                     <input type="date" name="birthdate"
                            max="{{ date('Y-m-d') }}"
                            value="{{ old('birthdate') }}"
-                           class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                           class="form-input">
                 </div>
             </div>
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Section</label>
+                <label class="form-label">Section</label>
                 <select name="section_id" required
-                        class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                        class="form-input">
                     <option value="">Select Section</option>
                     @foreach($sections as $section)
                         <option value="{{ $section->id }}" {{ old('section_id') == $section->id ? 'selected' : '' }}>
@@ -500,9 +586,9 @@
 
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="closeAddStudentModal()"
-                        class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+                        class="btn btn-outline">Cancel</button>
                 <button type="submit"
-                        class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-brand-800">
+                        class="btn btn-primary">
                     Save Student
                 </button>
             </div>
@@ -513,15 +599,15 @@
 {{-- IMPORT STUDENTS MODAL --}}
 <div id="importStudentsModal"
      class="{{ $errors->import->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box {{ $errors->import->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
+    <div class="modal-box {{ $errors->import->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200">
 
         <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-800">Import Students</h3>
+            <h3 class="text-lg font-semibold text-ink">Import Students</h3>
             <button type="button" onclick="closeImportStudentsModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         @if($errors->import->any())
-            <div class="bg-red-100 text-red-700 text-sm p-3 rounded-lg mb-4">
+            <div class="alert alert-danger mb-4">
                 <ul class="list-disc list-inside">
                     @foreach($errors->import->all() as $error)
                         <li>{{ $error }}</li>
@@ -530,20 +616,20 @@
             </div>
         @endif
 
-        <p class="text-sm text-gray-500 mb-4">
+        <p class="text-sm text-muted mb-4">
             Upload an Excel (.xlsx) or CSV file. Required columns:
             <strong>lrn, last_name, first_name, middle_name, gender, birthdate</strong>.
             All rows are imported into the section selected below.
         </p>
 
-        <form method="POST" action="{{ route('admin.students.import') }}"
+        <form method="POST" action="{{ route('admin.students.import') }}" data-loading="Importing students..."
               enctype="multipart/form-data" class="space-y-4">
             @csrf
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Target Section</label>
+                <label class="form-label">Target Section</label>
                 <select name="section_id" required
-                        class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                        class="form-input">
                     <option value="">Select Section</option>
                     @foreach($sections as $section)
                         <option value="{{ $section->id }}">
@@ -558,9 +644,9 @@
 
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="closeImportStudentsModal()"
-                        class="px-4 py-2 text-sm text-gray-500">Cancel</button>
+                        class="px-4 py-2 text-sm text-muted">Cancel</button>
                 <button type="submit"
-                        class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium">
+                        class="btn btn-primary">
                     Upload & Import
                 </button>
             </div>
@@ -572,10 +658,10 @@
      student. See StudentController::extractRosterPreview(). --}}
 <div id="extractRosterModal"
      class="{{ $errors->extractRoster->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box {{ $errors->extractRoster->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
+    <div class="modal-box {{ $errors->extractRoster->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200">
 
         <div class="flex justify-between items-center mb-1">
-            <h3 class="text-lg font-semibold text-gray-800">Extract Roster from E-Class Record</h3>
+            <h3 class="text-lg font-semibold text-ink">Extract Roster from E-Class Record</h3>
             <button type="button" onclick="closeExtractRosterModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
         <p class="text-xs font-medium text-brand-700 mb-3">
@@ -583,7 +669,7 @@
         </p>
 
         @if($errors->extractRoster->any())
-            <div class="bg-red-100 text-red-700 text-sm p-3 rounded-lg mb-4">
+            <div class="alert alert-danger mb-4">
                 <ul class="list-disc list-inside">
                     @foreach($errors->extractRoster->all() as $error)
                         <li>{{ $error }}</li>
@@ -592,12 +678,12 @@
             </div>
         @endif
 
-        <p class="text-sm text-gray-500 mb-2">
+        <p class="text-sm text-muted mb-2">
             Upload an official SSHS E-Class Record (.xlsx). This reads the roster from its <strong>INPUT DATA</strong>
             sheet and produces a downloadable draft CSV in the same shape Import Students already accepts —
             it does <strong>not</strong> create any student.
         </p>
-        <p class="text-xs text-gray-400 mb-4">
+        <p class="text-xs text-muted mb-4">
             Name split: everything before the comma is the last name; after it, the last word becomes the middle
             name and the rest becomes the first name. Gender comes from which block (male/female) the row is in.
             Birthdate is always left blank — it isn't in the E-Class Record. Review the CSV before importing it.
@@ -612,9 +698,9 @@
 
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="closeExtractRosterModal()"
-                        class="px-4 py-2 text-sm text-gray-500">Cancel</button>
+                        class="px-4 py-2 text-sm text-muted">Cancel</button>
                 <button type="submit"
-                        class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium">
+                        class="btn btn-primary">
                     Upload & Extract
                 </button>
             </div>
@@ -631,3 +717,26 @@
 @endpush
 
 @endsection
+
+@push('scripts')
+<script>
+    // Enroll / Promote modal — PART 15. Pure display; the form posts to
+    // admin.students.enroll and the server enforces every rule.
+    window.openEnrollStudentModal = function (data) {
+        document.getElementById('enrollStudentName').textContent = data.name;
+        document.getElementById('enrollStudentLrn').textContent = data.lrn;
+        const history = document.getElementById('enrollStudentHistory');
+        history.textContent = '';
+        (data.history || []).forEach(function (line) {
+            const row = document.createElement('div');
+            row.textContent = line + ' (kept as history)';
+            history.appendChild(row);
+        });
+        const form = document.getElementById('enrollStudentForm');
+        form.action = @json(url('/admin/students')) + '/' + data.id + '/enroll';
+        form.querySelector('select[name="section_id"]').value = '';
+        window.showModal('enrollStudentModal');
+    };
+    window.closeEnrollStudentModal = () => window.hideModal('enrollStudentModal');
+</script>
+@endpush

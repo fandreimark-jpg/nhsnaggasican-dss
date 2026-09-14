@@ -34,9 +34,9 @@ class StudentController extends Controller
     public function index()
     {
         // Get only the section assigned to this adviser
-        $section  = Section::where('adviser_id', auth()->id())->first();
+        $section  = Section::forAdviser(auth()->id());
         $students = $section
-            ? Student::where('section_id', $section->id)->orderBy('last_name')->paginate(self::PER_PAGE)->withQueryString()
+            ? Student::enrolledIn($section)->orderBy('last_name')->paginate(self::PER_PAGE)->withQueryString()
             // No section assigned — an empty paginator (not a plain
             // Collection) so the view can call ->total()/->hasPages()
             // unconditionally either way, same shape either branch.
@@ -51,7 +51,7 @@ class StudentController extends Controller
      */
     public function update(Request $request, $id)
     {
-        $section = Section::where('adviser_id', auth()->id())->first();
+        $section = Section::forAdviser(auth()->id());
 
         // BUG FIX: without this check, an adviser with no assigned section
         // would crash here trying to read ->id from null.
@@ -62,7 +62,7 @@ class StudentController extends Controller
 
         // Security check — ensure student belongs to adviser's section
         $student = Student::where('id', $id)
-            ->where('section_id', $section->id)
+            ->enrolledIn($section)
             ->firstOrFail();
 
         $request->validate([

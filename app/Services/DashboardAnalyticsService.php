@@ -11,6 +11,7 @@ use App\Models\RiskResult;
 use App\Models\Section;
 use App\Models\Specialization;
 use App\Models\Student;
+use App\Models\StudentEnrollment;
 use App\Models\Subject;
 use App\Models\SubjectGroupWeight;
 use App\Models\Track;
@@ -44,13 +45,35 @@ class DashboardAnalyticsService
      * risk distribution, section chart) for the currently active school
      * year.
      */
+    /**
+     * "Multi-school-year academic history" work order, PART 13 — the ONE
+     * school year every Principal-facing figure in this class describes.
+     * Defaults to the active year; a historical year is selectable via
+     * the page's own ?school_year= parameter (validated by
+     * AcademicYear::resolveSelected() — an unknown value falls back to the
+     * active year, never to "all years"). The Admin-facing methods
+     * (getAdminSummary/getDataHealthChecks/getOpenTermPanel) deliberately
+     * keep reading Section::activeSchoolYear() directly — master-data
+     * health is about the current year only.
+     */
+    public function selectedSchoolYear(): string
+    {
+        return \App\Models\AcademicYear::resolveSelected(request('school_year'));
+    }
+
     public function getSummaryData(): array
     {
-        $totalStudents = Student::count();
-        $totalSections = Section::count();
-        $totalAdvisers = User::where('role', 'adviser')->count();
+        $schoolYear = $this->selectedSchoolYear();
 
-        $schoolYear = Section::activeSchoolYear();
+        // Scoped to the selected year (PART 13): learners ENROLLED that
+        // year (student_enrollments), sections OF that year, and advisers
+        // assigned to one of them — never a whole-history total under a
+        // single-year label.
+        $totalStudents = StudentEnrollment::where('school_year', $schoolYear)->distinct()->count('student_id');
+        $totalSections = Section::where('school_year', $schoolYear)->count();
+        $totalAdvisers = User::where('role', 'adviser')
+            ->whereIn('id', Section::where('school_year', $schoolYear)->whereNotNull('adviser_id')->select('adviser_id'))
+            ->count();
 
         $latestPerStudent = RiskResult::whereIn('id',
             RiskResult::where('school_year', $schoolYear)
@@ -73,8 +96,12 @@ class DashboardAnalyticsService
         // are accounted for than actually are.
         $riskLevelTerms = $latestPerStudent->pluck('grading_period')->unique()->sort()->values()->all();
 
-        $sections = Section::with([
-            'students.riskResults' => fn($q) => $q->where('school_year', $schoolYear),
+        // Sections of THIS year, and each one's risk results read through
+        // risk_results.section_id (the section the learner was in when
+        // classified — PART 11), not through students.section_id, which
+        // moves on promotion.
+        $sections = Section::where('school_year', $schoolYear)->with([
+            'riskResults' => fn($q) => $q->where('school_year', $schoolYear),
             'adviser',
             'track',
             'specialization',
@@ -90,8 +117,8 @@ class DashboardAnalyticsService
 
         $sectionRiskData = $sections->map(function ($section) {
             $low = $moderate = $high = 0;
-            foreach ($section->students as $student) {
-                $latest = $student->riskResults->sortByDesc('grading_period')->first();
+            foreach ($section->riskResults->groupBy('student_id') as $studentResults) {
+                $latest = $studentResults->sortByDesc('grading_period')->first();
                 if ($latest) {
                     match ($latest->risk_level) {
                         'low'      => $low++,
@@ -110,6 +137,9 @@ class DashboardAnalyticsService
         });
 
         return [
+            'schoolYear'      => $schoolYear,
+            'isHistoricalYear' => $schoolYear !== Section::activeSchoolYear(),
+            'schoolYears'     => \App\Models\AcademicYear::selectableSchoolYears(),
             'totalStudents'   => $totalStudents,
             'totalSections'   => $totalSections,
             'totalAdvisers'   => $totalAdvisers,
@@ -155,7 +185,7 @@ class DashboardAnalyticsService
         $subjectGroups = Subject::pluck('subject_group', 'id');
         // "ECR alignment" work order, PART 3a — curriculum, not just grade
         // level, decides the scheme now; see TransmutationService::schemeFor().
-        $sectionSchemes = Section::select('id', 'grade_level', 'curriculum')->get()
+        $sectionSchemes = Section::where('school_year', $schoolYear)->select('id', 'grade_level', 'curriculum')->get()
             ->mapWithKeys(fn($section) => [
                 $section->id => (new TransmutationService())->schemeFor((int) $section->grade_level, $schoolYear, $section->curriculum),
             ]);
@@ -396,9 +426,11 @@ class DashboardAnalyticsService
      */
     public function getPrincipalSummary(): array
     {
-        $schoolYear = Section::activeSchoolYear();
+        $schoolYear = $this->selectedSchoolYear();
 
-        $interventionCounts = Intervention::selectRaw('status, COUNT(*) as count')
+        // PART 12/13 — intervention figures for THIS year only.
+        $interventionCounts = Intervention::where('school_year', $schoolYear)
+            ->selectRaw('status, COUNT(*) as count')
             ->groupBy('status')
             ->pluck('count', 'status');
 
@@ -410,14 +442,19 @@ class DashboardAnalyticsService
         // DECIDED_STATUSES), so counting it here as still-awaiting was
         // the bug. Now the same query-level scope the Interventions page
         // banner uses — see CLAUDE.md Design Decision #3.
-        $awaitingDecision   = Intervention::undecided()->count();
+        $awaitingDecision   = Intervention::undecided()->where('school_year', $schoolYear)->count();
         $completedCount     = $interventionCounts->get('completed', 0);
 
-        // Expected = one score per (assessment item, student in that item's
-        // section) pair; actual = how many of those have actually been
-        // scored — a single join-count each, not a loop.
+        // Expected = one score per (assessment item, student ENROLLED in
+        // that item's section for that year) pair; actual = how many of
+        // those have actually been scored — a single join-count each, not
+        // a loop. Joins student_enrollments (PART 5) so a historical
+        // year's completion is computed against that year's roster.
         $expectedScores = DB::table('assessments')
-            ->join('students', 'students.section_id', '=', 'assessments.section_id')
+            ->join('student_enrollments', function ($join) {
+                $join->on('student_enrollments.section_id', '=', 'assessments.section_id')
+                     ->on('student_enrollments.school_year', '=', 'assessments.school_year');
+            })
             ->where('assessments.school_year', $schoolYear)
             ->count();
 
@@ -433,7 +470,7 @@ class DashboardAnalyticsService
             // TASK 2 of "bulk dialog and intervention closure" — see
             // InTermStatusService::readyForReviewCount()'s docblock; this
             // is a signal count, never a count of anything auto-closed.
-            'ready_for_review'    => $this->inTermStatus->readyForReviewCount(),
+            'ready_for_review'    => $this->inTermStatus->readyForReviewCount($schoolYear),
             'assessment_completion' => [
                 'has_data'   => $expectedScores > 0,
                 'expected'   => $expectedScores,
@@ -474,8 +511,8 @@ class DashboardAnalyticsService
      */
     public function getInTermStatusSummary(): array
     {
-        $schoolYear = Section::activeSchoolYear();
-        $term = AcademicTerm::currentOpenTerm($schoolYear) ?? 1;
+        $schoolYear = $this->selectedSchoolYear();
+        $term = $this->displayTermFor($schoolYear);
 
         $counts = $this->computeInTermStatusCounts($schoolYear, $term);
 
@@ -519,7 +556,9 @@ class DashboardAnalyticsService
                 continue;
             }
 
-            $students = Student::where('section_id', $section->id)->get();
+            // PART 5/6 — the roster as enrolled THAT year, not whoever
+            // currently points at this section.
+            $students = $section->enrolledStudents()->get();
             if ($students->isEmpty()) {
                 continue;
             }
@@ -559,7 +598,7 @@ class DashboardAnalyticsService
      */
     public function getInTermStatusTrend(): array
     {
-        $schoolYear = Section::activeSchoolYear();
+        $schoolYear = $this->selectedSchoolYear();
 
         return collect([1, 2, 3])->map(function (int $term) use ($schoolYear) {
             $counts = $this->computeInTermStatusCounts($schoolYear, $term);
@@ -588,8 +627,8 @@ class DashboardAnalyticsService
      */
     public function getFailingSummary(): array
     {
-        $schoolYear = Section::activeSchoolYear();
-        $term = AcademicTerm::currentOpenTerm($schoolYear) ?? 1;
+        $schoolYear = $this->selectedSchoolYear();
+        $term = $this->displayTermFor($schoolYear);
 
         $failingCount = Grade::where('school_year', $schoolYear)
             ->where('grading_period', $term)
@@ -600,6 +639,25 @@ class DashboardAnalyticsService
             ->count('student_id');
 
         return ['failingCount' => $failingCount];
+    }
+
+    /**
+     * The term the dashboard's current-term tiles describe: the open
+     * term for the active year; for a historical (completed) year, which
+     * has no open term, the LAST term that has any evidence, so the
+     * tiles describe the year as it ended rather than defaulting to
+     * Term 1.
+     */
+    private function displayTermFor(string $schoolYear): int
+    {
+        if ($schoolYear === Section::activeSchoolYear()) {
+            return AcademicTerm::currentOpenTerm($schoolYear) ?? 1;
+        }
+
+        $lastWithEvidence = DB::table('assessments')->where('school_year', $schoolYear)->max('grading_period')
+            ?? Grade::where('school_year', $schoolYear)->max('grading_period');
+
+        return (int) ($lastWithEvidence ?: (AcademicTerm::currentOpenTerm($schoolYear) ?? 1));
     }
 
     /** Rows per page for the at-risk widget — see Task 3a in the "remaining system issues" prompt. */
@@ -643,30 +701,37 @@ class DashboardAnalyticsService
         $atRiskComponent     = request('ar_component');
         $page                = max(1, (int) request('page', 1));
 
-        $rows = Student::with(['section.track', 'section.specialization', 'riskResults.weakestSubject'])
-        ->whereHas('riskResults')
-        ->when($atRiskGradeLevel, fn($q) =>
-            $q->whereHas('section', fn($s) => $s->where('grade_level', $atRiskGradeLevel))
-        )
-        ->when($atRiskSection, fn($q) =>
-            $q->whereHas('section', fn($s) => $s->where('name', $atRiskSection))
-        )
+        // PART 11/13 — risk results of the SELECTED school year only,
+        // and each row's section is the one stored ON the risk result
+        // (the learner's section when classified), so a promoted learner
+        // is listed under their Grade 11 section for the Grade 11 year.
+        $schoolYear = $this->selectedSchoolYear();
+
+        $rows = Student::with([
+                'riskResults' => fn($q) => $q->where('school_year', $schoolYear)->with(['weakestSubject', 'section.track', 'section.specialization']),
+            ])
+        ->whereHas('riskResults', function ($q) use ($schoolYear, $atRiskGradeLevel, $atRiskSection) {
+            $q->where('school_year', $schoolYear)
+              ->when($atRiskGradeLevel, fn($r) => $r->whereHas('section', fn($s) => $s->where('grade_level', $atRiskGradeLevel)))
+              ->when($atRiskSection, fn($r) => $r->whereHas('section', fn($s) => $s->where('name', $atRiskSection)));
+        })
         ->get()
         ->map(function ($student) {
             $history    = $student->riskResults->sortBy('grading_period')->values();
             $latestRisk = $history->last();
+            $section    = $latestRisk?->section;
 
             return [
                 'student_id'              => $student->id,
                 'name'                    => $student->last_name . ', ' . $student->first_name,
-                'section'                 => $student->section->name ?? '—',
-                'grade_level'             => $student->section->grade_level ?? null,
+                'section'                 => $section->name ?? '—',
+                'grade_level'             => $section->grade_level ?? null,
                 // Section already determines these — displayed read-only
                 // next to the Section filter rather than offered as
                 // separate selectable dropdowns (CLAUDE.md: Track/
                 // Specialization must not be manually selectable).
-                'track'                   => $student->section->track->name ?? null,
-                'specialization'          => $student->section->specialization->name ?? null,
+                'track'                   => $section->track->name ?? null,
+                'specialization'          => $section->specialization->name ?? null,
                 'average'                 => $latestRisk->average_grade ?? '—',
                 'risk_level'              => $latestRisk->risk_level ?? '—',
                 'weakest_subject'         => $latestRisk->weakest_subject ?? null,
@@ -718,7 +783,8 @@ class DashboardAnalyticsService
             ['path' => request()->url(), 'query' => request()->query()]
         );
 
-        $atRiskGradeLevels = Section::select('grade_level')
+        $atRiskGradeLevels = Section::where('school_year', $schoolYear)
+            ->select('grade_level')
             ->distinct()
             ->orderBy('grade_level')
             ->pluck('grade_level');
@@ -726,7 +792,8 @@ class DashboardAnalyticsService
         // Track/Specialization are carried as data-* attributes on each
         // <option> so the page can display them read-only the instant a
         // Section is picked, with no extra request.
-        $atRiskSections = Section::select('id', 'name', 'grade_level', 'track_id', 'specialization_id')
+        $atRiskSections = Section::where('school_year', $schoolYear)
+            ->select('id', 'name', 'grade_level', 'track_id', 'specialization_id')
             ->with(['track:id,name', 'specialization:id,name'])
             ->orderBy('grade_level')
             ->orderBy('name')
@@ -759,14 +826,19 @@ class DashboardAnalyticsService
 
     private function weakestSubjectComponent(Student $student, ?RiskResult $latestRisk): ?array
     {
-        if (!$latestRisk?->weakest_subject_id || !$latestRisk->weakestSubject || !$student->section) {
+        // The section the result was generated under (PART 11), with the
+        // learner's enrollment for that year as the fallback for a result
+        // created before section_id existed — never the current section.
+        $section = $latestRisk?->section ?? ($latestRisk ? $student->sectionFor($latestRisk->school_year) : null);
+
+        if (!$latestRisk?->weakest_subject_id || !$latestRisk->weakestSubject || !$section) {
             return null;
         }
 
         $analysis = $this->performanceAnalysis->analyzeStudent(
             $student,
             $latestRisk->weakestSubject,
-            $student->section,
+            $section,
             $latestRisk->grading_period,
             $latestRisk->school_year
         );

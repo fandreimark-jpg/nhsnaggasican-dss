@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Student;
+use App\Services\StudentEnrollmentService;
 use App\Models\Section;
 use App\Http\Controllers\Concerns\SummarizesImportFailures;
 use App\Http\Controllers\Concerns\ValidatesSpreadsheetUpload;
@@ -37,7 +38,12 @@ class StudentController extends Controller
      */
     public function index()
     {
-        $query = Student::with(['section'])->orderBy('last_name');
+        // "Multi-school-year academic history" work order, PART 5/15 —
+        // each row also carries the learner's enrollment history so the
+        // table can show every school year they were placed in, and the
+        // Enroll / Promote action can offer the sections of the active
+        // year they are not yet enrolled in.
+        $query = Student::with(['section', 'enrollments.section'])->orderBy('last_name');
 
         // "Decision flow, report scoping, and dashboard pass" TASK 4b —
         // the Admin dashboard's "learners not assigned to any section"
@@ -51,10 +57,54 @@ class StudentController extends Controller
 
         $students = $query->paginate(10);
         $sections = Section::with(['track', 'specialization'])
+            ->orderByDesc('school_year')
             ->orderBy('grade_level')
             ->get();
 
-        return view('admin.students', compact('students', 'sections'));
+        $activeSchoolYear = Section::activeSchoolYear();
+        $activeYearSections = $sections->where('school_year', $activeSchoolYear)->values();
+
+        return view('admin.students', compact('students', 'sections', 'activeSchoolYear', 'activeYearSections'));
+    }
+
+    /**
+     * "Multi-school-year academic history" work order, PART 15 — the
+     * explicit Admin action that places ONE learner into a section of a
+     * school year they are not yet enrolled in (typically: promoting a
+     * Grade 11 learner into a Grade 12 section of the newly activated
+     * year). The existing enrollment row is left untouched; a new row is
+     * created; students.section_id moves to the new section only if that
+     * year is the active one. Nothing is automatic — every promotion is
+     * one confirmed click per learner, and a learner already enrolled in
+     * the target year is refused rather than silently moved.
+     */
+    public function enroll(Request $request, Student $student, StudentEnrollmentService $enrollments)
+    {
+        // Own error bag so a refused enrollment shows as its own notice and
+        // never auto-opens the Edit Student modal (which reads the default bag).
+        $request->validateWithBag('enroll', [
+            'section_id' => 'required|exists:sections,id',
+        ]);
+
+        $section = Section::findOrFail($request->section_id);
+
+        try {
+            $enrollment = $enrollments->enroll($student, $section);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return redirect()->route('admin.students')->withErrors($e->errors(), 'enroll');
+        }
+
+        LogActivity::log(
+            'enroll_student',
+            'Enrolled ' . $student->last_name . ', ' . $student->first_name . ' (LRN ' . $student->lrn . ') in Section '
+                . $section->name . ' (Grade ' . $section->grade_level . ') for School Year ' . $section->school_year,
+            'student_enrollments',
+            $enrollment->id
+        );
+
+        return redirect()->route('admin.students')
+            ->with('success', $student->last_name . ', ' . $student->first_name . ' enrolled in ' . $section->name
+                . ' (Grade ' . $section->grade_level . ') for School Year ' . $section->school_year . '. Previous enrollments are unchanged.');
     }
 
     /**
@@ -106,6 +156,10 @@ class StudentController extends Controller
 
         $import = new StudentsImport((int) $request->section_id);
         Excel::import($import, $request->file('file'));
+
+        // Batch inserts bypass Student::saved, so the enrollment rows for
+        // this section's school year are written here instead (PART 5).
+        app(StudentEnrollmentService::class)->ensureForSection(Section::findOrFail((int) $request->section_id));
 
         $failures = $import->failures();
         $createdCount = $import->createdCount();

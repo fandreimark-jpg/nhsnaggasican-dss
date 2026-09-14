@@ -5,7 +5,7 @@
     can never drift between them. Two sentences each, on purpose — this
     is an orientation, not documentation.
 --}}
-<div class="bg-white rounded-lg shadow-sm p-4 mb-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-gray-600">
+<div class="card p-4 mb-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-gray-600">
     <div>
         <p class="font-semibold text-gray-700 mb-1"><i class="bi bi-clipboard-data text-brand-600"></i> In-Term Status</p>
         <p>One subject, one term, from the assessment evidence entered so far. Available immediately, and it changes as more evidence is added.</p>

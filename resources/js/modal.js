@@ -27,10 +27,19 @@ window.closeSidebar = function () {
     document.getElementById("sidebarOverlay")?.classList.add("hidden");
 };
 
+// Accessibility ("UI modernization pass"): the element that opened a modal
+// gets focus back when it closes; focus moves into the dialog on open;
+// Escape closes whichever modal is on top. Confirm dialogs in confirm.js
+// keep their own Escape handling — this only covers modals opened here.
+const openModalStack = [];
+
 window.showModal = function (id) {
     const el = document.getElementById(id);
     if (!el) return;
     const box = el.querySelector(".modal-box");
+
+    el.dataset.returnFocusTo = document.activeElement && document.activeElement.id ? document.activeElement.id : "";
+    if (!openModalStack.includes(id)) openModalStack.push(id);
 
     el.classList.remove("hidden");
 
@@ -45,6 +54,17 @@ window.showModal = function (id) {
         box.classList.remove("scale-95", "opacity-0");
         box.classList.add("scale-100", "opacity-100");
     }
+
+    // Move focus into the dialog: first focusable control, else the box.
+    setTimeout(function () {
+        const target = el.querySelector(
+            'input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]):not([aria-label="Close"]), [href]'
+        ) || box;
+        if (target) {
+            if (!target.hasAttribute("tabindex") && target === box) target.setAttribute("tabindex", "-1");
+            try { target.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
+        }
+    }, 30);
 };
 
 window.hideModal = function (id) {
@@ -65,7 +85,25 @@ window.hideModal = function (id) {
     setTimeout(function () {
         el.classList.add("hidden");
     }, 200);
+
+    const idx = openModalStack.indexOf(id);
+    if (idx !== -1) openModalStack.splice(idx, 1);
+
+    // Return focus to whatever opened the dialog.
+    const returnTo = el.dataset.returnFocusTo ? document.getElementById(el.dataset.returnFocusTo) : null;
+    if (returnTo && typeof returnTo.focus === "function") {
+        try { returnTo.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
+    }
 };
+
+// Escape closes the top-most modal opened through showModal().
+document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape" || openModalStack.length === 0) return;
+    const id = openModalStack[openModalStack.length - 1];
+    const el = document.getElementById(id);
+    if (!el || el.classList.contains("hidden")) { openModalStack.pop(); return; }
+    window.hideModal(id);
+});
 
 // Makes a modal close when the user clicks the dark overlay outside it.
 // extraCleanup is optional — for modals that need to reset something
@@ -612,4 +650,37 @@ document.addEventListener("DOMContentLoaded", function () {
         window.closeImportSectionsModal = () => window.hideModal("importSectionsModal");
         window.bindModalOverlayClose("importSectionsModal");
     }
+});
+// Academic editing uses the existing modal helpers.
+document.addEventListener("DOMContentLoaded", () => {
+    for (const kind of ["Year", "Term"]) {
+        const id = `editAcademic${kind}Modal`;
+        const modal = document.getElementById(id);
+        if (!modal) continue;
+        window[`closeEditAcademic${kind}Modal`] = () => window.hideModal(id);
+        window.bindModalOverlayClose(id);
+        modal.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") window.hideModal(id);
+        });
+    }
+    document.querySelectorAll("[data-academic-edit]").forEach((button) => {
+        button.addEventListener("click", () => {
+            const kind = button.dataset.academicEdit;
+            const record = JSON.parse(button.dataset.record);
+            const form = document.getElementById(`academic${kind}EditForm`);
+            form.action = button.dataset.url;
+            form.reset();
+            for (const [field, key] of [["StartDate", "start_date"], ["EndDate", "end_date"]]) {
+                document.getElementById(`editAcademic${kind}${field}`).value = window.toDateInputValue(record[key]);
+            }
+            if (kind === "Year") {
+                document.getElementById("editAcademicYearSchoolYear").value = record.school_year;
+                document.getElementById("editAcademicYearLockedNote").classList.toggle("hidden", !record.rename_blocked);
+            } else {
+                document.getElementById("editAcademicTermName").value = `Term ${record.term}`;
+            }
+            window.showModal(`editAcademic${kind}Modal`);
+            form.querySelector("input:not([type=hidden]):not([disabled])").focus();
+        });
+    });
 });

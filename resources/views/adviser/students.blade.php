@@ -5,11 +5,13 @@
 
 @section('content')
 
-<div class="bg-white rounded-xl shadow-sm overflow-x-auto">
-    <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 px-6 py-4 border-b">
+@include('partials.section-school-year-context')
+
+<div class="card overflow-x-auto">
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 px-5 py-4 border-b border-line">
         <div>
-            <h2 class="text-sm font-semibold text-gray-800">Students</h2>
-            <p class="text-xs text-gray-400"><x-count-label :count="$students->total()" noun="student" /> in your section</p>
+            <h2 class="card-title">Students</h2>
+            <p class="text-xs text-muted"><x-count-label :count="$students->total()" noun="student" /> in your section</p>
         </div>
         <div class="flex items-center gap-3 flex-wrap">
             {{-- Search box--}}
@@ -17,7 +19,7 @@
                 <div class="relative">
                     <input type="text" id="adviserStudentSearch"
                         placeholder="Search this page..."
-                        class="border rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 w-56">
+                        class="form-input !w-56 pl-9">
                     <i class="bi bi-search absolute left-3 top-2.5 text-gray-400 text-sm"></i>
                 </div>
                 {{-- TASK 5d of "clarity, progress, and visual design pass"
@@ -28,7 +30,7 @@
                 <p class="text-[11px] text-gray-400 mt-1">Searches this page only ({{ $students->firstItem() }}–{{ $students->lastItem() }} of {{ $students->total() }}).</p>
                 @endif
             </div>
-            <p class="text-xs text-gray-400">
+            <p class="text-xs text-muted">
                 <i class="bi bi-info-circle"></i> Adding new students is done by the Admin.
             </p>
         </div>
@@ -51,7 +53,7 @@
 
             <tr class="student-row">
                 <td>{{ $student->lrn }}</td>
-                <td class="font-medium text-gray-800">{{ $student->last_name }}</td>
+                <td class="font-medium text-ink">{{ $student->last_name }}</td>
                 <td>{{ $student->first_name }}</td>
                 <td>{{ $student->middle_name ?? '—' }}</td>
                 <td class="capitalize">{{ $student->formatted_birthdate }}</td>
@@ -73,18 +75,18 @@
     </table>
 
     @if($students->hasPages())
-    <div class="px-6 py-4 border-t flex flex-col items-center gap-2 text-sm text-gray-500">
+    <div class="px-5 py-4 border-t border-line flex flex-col items-center gap-2 text-sm text-muted">
         <div class="flex items-center gap-1">
             @if($students->onFirstPage())
-                <span class="px-3 py-1 rounded border text-gray-300 cursor-not-allowed">← Prev</span>
+                <span class="px-3 py-1 rounded-md border border-line text-gray-300 cursor-not-allowed">← Prev</span>
             @else
-                <a href="{{ $students->previousPageUrl() }}" class="px-3 py-1 rounded border hover:bg-gray-50 text-gray-600">← Prev</a>
+                <a href="{{ $students->previousPageUrl() }}" class="px-3 py-1 rounded-md border border-line hover:bg-surface text-gray-600">← Prev</a>
             @endif
-            <span class="px-3 py-1 rounded border bg-brand-700 text-white font-medium">{{ $students->currentPage() }}</span>
+            <span class="px-3 py-1 rounded-md border border-brand-800 bg-brand-800 text-white font-medium">{{ $students->currentPage() }}</span>
             @if($students->hasMorePages())
-                <a href="{{ $students->nextPageUrl() }}" class="px-3 py-1 rounded border hover:bg-gray-50 text-gray-600">Next →</a>
+                <a href="{{ $students->nextPageUrl() }}" class="px-3 py-1 rounded-md border border-line hover:bg-surface text-gray-600">Next →</a>
             @else
-                <span class="px-3 py-1 rounded border text-gray-300 cursor-not-allowed">Next →</span>
+                <span class="px-3 py-1 rounded-md border border-line text-gray-300 cursor-not-allowed">Next →</span>
             @endif
         </div>
         <span class="text-xs">Showing {{ $students->firstItem() }}–{{ $students->lastItem() }} of <x-count-label :count="$students->total()" noun="student" /></span>
@@ -95,10 +97,10 @@
 {{-- EDIT MODAL ONLY --}}
 <div id="editModal"
      class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200 opacity-0">
-    <div class="modal-box bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200 scale-95 opacity-0">
+    <div class="modal-box bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200 scale-95 opacity-0">
 
         <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-800">Edit Student</h3>
+            <h3 class="text-lg font-semibold text-ink">Edit Student</h3>
             <button type="button" onclick="closeEditModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
@@ -108,26 +110,26 @@
 
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">Last Name</label>
+                    <label class="form-label">Last Name</label>
                     <input type="text" name="last_name" id="edit_last_name" required
                            class="w-full border rounded-lg px-3 py-2 text-sm">
                 </div>
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">First Name</label>
+                    <label class="form-label">First Name</label>
                     <input type="text" name="first_name" id="edit_first_name" required
                            class="w-full border rounded-lg px-3 py-2 text-sm">
                 </div>
             </div>
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Middle Name</label>
+                <label class="form-label">Middle Name</label>
                 <input type="text" name="middle_name" id="edit_middle_name"
                        class="w-full border rounded-lg px-3 py-2 text-sm">
             </div>
 
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">Gender</label>
+                    <label class="form-label">Gender</label>
                     <select name="gender" id="edit_gender" required
                             class="w-full border rounded-lg px-3 py-2 text-sm">
                         <option value="male">Male</option>
@@ -135,7 +137,7 @@
                     </select>
                 </div>
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">Birthdate</label>
+                    <label class="form-label">Birthdate</label>
                     <input type="date" name="birthdate" id="edit_birthdate"
                            max="{{ date('Y-m-d') }}"
                            class="w-full border rounded-lg px-3 py-2 text-sm">
@@ -144,9 +146,9 @@
 
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="closeEditModal()"
-                        class="px-4 py-2 text-sm text-gray-500">Cancel</button>
+                        class="px-4 py-2 text-sm text-muted">Cancel</button>
                 <button type="submit"
-                        class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium">
+                        class="btn btn-primary">
                     Update Student
                 </button>
             </div>

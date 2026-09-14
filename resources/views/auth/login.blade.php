@@ -7,22 +7,22 @@
     <title>Login — Naggasican NHS DSS</title>
     <link rel="icon" type="image/png" href="{{ asset('images/nagga-logo.png') }}">
     @vite(['resources/css/app.css', 'resources/js/app.js'])
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="{{ asset('vendor/bootstrap-icons/bootstrap-icons.min.css') }}">
 </head>
-<body class="min-h-screen bg-gray-100 flex items-center justify-center">
+<body class="min-h-screen bg-surface flex items-center justify-center px-4 py-8">
 
     <div class="w-full max-w-sm">
 
         {{-- Login Card --}}
-        <div class="bg-white rounded-2xl shadow-lg overflow-hidden">
+        <div class="bg-white rounded-2xl shadow-modal border border-line overflow-hidden">
 
             {{-- White Header with Logo --}}
-            <div class="px-8 pt-8 pb-6 text-center border-b">
+            <div class="px-8 pt-8 pb-6 text-center border-b border-line bg-gradient-to-b from-brand-50/60 to-white">
                 {{-- School Icon --}}
                 <img src="{{ asset('images/nagga-logo.png') }}" 
                     class="w-28 h-28 object-contain mx-auto mb-4" 
                     alt="Naggasican NHS Logo">
-                <h1 class="text-gray-800 text-xl font-bold leading-tight">Naggasican NHS</h1>
+                <h1 class="text-ink text-xl font-bold leading-tight">Naggasican NHS</h1>
                 <p class="text-gray-500 text-sm mt-1">A Decision Support System</p>
                 <p class="text-gray-400 text-xs mt-0.5">for Monitoring Learner's</p>
                 <p class="text-gray-400 text-xs mt-0.5">Academic Performance</p>
@@ -33,14 +33,14 @@
 
                 {{-- Session Status --}}
                 @if(session('status'))
-                    <div class="mb-4 p-3 bg-green-100 text-green-700 rounded-lg text-sm">
+                    <div class="alert alert-success mb-4">
                         {{ session('status') }}
                     </div>
                 @endif
 
                 {{-- Errors --}}
                 @if($errors->any())
-                    <div class="mb-4 p-3 bg-red-100 text-red-700 rounded-lg text-sm">
+                    <div class="alert alert-danger mb-4">
                         @foreach($errors->all() as $error)
                             <p>{{ $error }}</p>
                         @endforeach
@@ -52,7 +52,7 @@
 
                     {{-- Email/Username --}}
                     <div>
-                        <label for="email" class="block text-sm text-gray-600 mb-1 font-medium">
+                        <label for="email" class="form-label font-medium">
                             Email
                         </label>
                         <div class="relative">
@@ -65,7 +65,7 @@
                                 required
                                 autofocus
                                 placeholder="email@naggasican.edu.ph"
-                                class="w-full border border-gray-200 rounded-lg pl-9 pr-4 py-2.5 text-sm
+                                class="w-full border border-line rounded-lg pl-9 pr-4 py-2.5 text-sm
                                        focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent
                                        placeholder-gray-300">
                         </div>
@@ -73,7 +73,7 @@
 
                     {{-- Password --}}
                     <div>
-                        <label for="password" class="block text-sm text-gray-600 mb-1 font-medium">
+                        <label for="password" class="form-label font-medium">
                             Password
                         </label>
                         <div class="relative">
@@ -84,7 +84,7 @@
                                 name="password"
                                 required
                                 placeholder="Enter your password"
-                                class="w-full border border-gray-200 rounded-lg pl-9 pr-10 py-2.5 text-sm
+                                class="w-full border border-line rounded-lg pl-9 pr-10 py-2.5 text-sm
                                        focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent
                                        placeholder-gray-300">
                             <button type="button" onclick="togglePassword()"
@@ -96,19 +96,18 @@
 
                     {{-- Submit --}}
                     <button type="submit"
-                        class="w-full bg-brand-700 hover:bg-brand-800 text-white py-2.5 rounded-lg
-                               text-sm font-semibold transition">
+                        class="btn btn-primary w-full py-2.5 font-semibold">
                         <i class="bi bi-box-arrow-in-right mr-1"></i>Log in
                     </button>
                 </form>
             </div>
 
             {{-- Footer --}}
-            <div class="px-8 py-4 bg-gray-50 border-t text-center">
-                <p class="text-xs text-gray-400">
+            <div class="px-8 py-4 bg-surface border-t border-line text-center">
+                <p class="text-xs text-muted">
                     Naggasican National High School
                 </p>
-                <p class="text-xs text-gray-300 mt-0.5">Authorized personnel only</p>
+                <p class="text-xs text-gray-400 mt-0.5">Authorized personnel only</p>
             </div>
         </div>
 

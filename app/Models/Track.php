@@ -16,6 +16,8 @@ use Illuminate\Database\Eloquent\Model;
  */
 class Track extends Model
 {
+    use \App\Models\Concerns\ProtectsAcademicHistory;
+
     use HasFactory;
 
     // Fields that can be mass-assigned

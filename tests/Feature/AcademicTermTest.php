@@ -240,7 +240,7 @@ class AcademicTermTest extends TestCase
     {
         $status = AcademicTerm::completionStatus('2026-2027', 1);
 
-        $this->assertTrue($status['complete']); // vacuously true — unchanged behavior
+        $this->assertFalse($status['complete']); // Empty terms cannot permit progression.
         $this->assertFalse($status['has_anything_expected']); // but this is what actually distinguishes it
     }
 
@@ -282,5 +282,63 @@ class AcademicTermTest extends TestCase
         $response->assertOk();
         $response->assertSee('All sections fully encoded for this term');
         $response->assertDontSee('No section has both students and subjects assigned yet');
+    }
+
+    public function test_term_dates_and_immutable_structure(): void
+    {
+        $this->actingAs(User::factory()->admin()->create());
+        AcademicTerm::ensureExistFor('2030-2031');
+        $term = AcademicTerm::where('term', 3)->first();
+        foreach (['2030-06-01', '2030-05-01'] as $end) {
+            $this->put(route('admin.academic-terms.update', $term), ['start_date' => '2030-06-01', 'end_date' => $end])->assertSessionHasErrors('end_date');
+        }
+        foreach (['term' => 1, 'term_number' => 4, 'school_year' => '2031-2032', 'academic_year_id' => 99, 'is_open' => true] as $field => $value) {
+            $this->put(route('admin.academic-terms.update', $term), [$field => $value])->assertSessionHasErrors($field);
+        }
+        $this->put(route('admin.academic-terms.update', $term), ['start_date' => '2030-06-01', 'end_date' => '2030-07-01'])->assertSessionHas('success');
+        $this->assertSame('2030-06-01', $term->fresh()->start_date->format('Y-m-d'));
+        $this->assertSame(3, $term->fresh()->term);
+    }
+
+    public function test_edit_forms_render_method_and_csrf_and_post_method_spoofing_updates(): void
+    {
+        $this->actingAs(User::factory()->admin()->create());
+        $year = \App\Models\AcademicYear::create(['school_year' => '2030-2031', 'is_active' => true]);
+        AcademicTerm::ensureExistFor($year->school_year);
+        $this->get(route('admin.academic-terms'))->assertOk()
+            ->assertSee('name="_token"', false)->assertSee('value="PUT"', false)->assertDontSee('value="DELETE"', false)
+            ->assertSee('data-academic-edit="Year"', false)->assertSee('data-academic-edit="Term"', false);
+        $this->post(route('admin.academic-years.update', $year), ['_method' => 'PUT', 'school_year' => $year->school_year])->assertSessionHas('success');
+        $this->post(route('admin.academic-years.update', $year), [])->assertStatus(405);
+    }
+
+    public function test_academic_configuration_has_no_delete_endpoints_or_page_actions(): void
+    {
+        $year = \App\Models\AcademicYear::create(['school_year' => '2030-2031', 'is_active' => true]);
+        \App\Models\AcademicYear::create(['school_year' => '2031-2032']);
+        AcademicTerm::ensureExistFor($year->school_year);
+        $term = AcademicTerm::first();
+        foreach (['admin', 'adviser', 'principal'] as $role) {
+            $this->actingAs(User::factory()->create(['role' => $role]));
+            foreach (['academic-years' => $year, 'academic-terms' => $term] as $resource => $record) {
+                $this->assertFalse(\Illuminate\Support\Facades\Route::has("admin.$resource.destroy"));
+                $this->delete("/admin/$resource/{$record->id}")->assertStatus(405);
+                $this->post("/admin/$resource/{$record->id}", ['_method' => 'DELETE'])->assertStatus(405);
+                $this->assertModelExists($record);
+            }
+            if ($role === 'admin') {
+                $html = $this->get(route('admin.academic-terms'))->assertOk()->getContent();
+                $page = new \DOMDocument();
+                @$page->loadHTML($html);
+                $xpath = new \DOMXPath($page);
+                // The shared layout has a generic confirmation popup for other
+                // pages. Check this page's action forms and icons specifically.
+                $this->assertSame(0, $xpath->query('//form[starts-with(@action, "http") and contains(@action, "/admin/academic-")]//input[@name="_method" and @value="DELETE"]')->length);
+                $source = file_get_contents(resource_path('views/admin/academic-terms.blade.php'));
+                $this->assertStringNotContainsString('bi-trash', $source);
+                $this->assertStringNotContainsString('Delete', $source);
+                $this->assertStringContainsString('flex-wrap', $source);
+            }
+        }
     }
 }

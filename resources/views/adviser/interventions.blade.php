@@ -5,15 +5,17 @@
 
 @section('content')
 
+@include('partials.section-school-year-context')
+
 @if(session('success'))
-<div class="bg-green-100 text-green-700 text-sm p-4 rounded-lg mb-4">{{ session('success') }}</div>
+<div class="alert alert-success mb-4">{{ session('success') }}</div>
 @endif
 @if(session('error'))
-<div class="bg-red-100 text-red-700 text-sm p-4 rounded-lg mb-4">{{ session('error') }}</div>
+<div class="alert alert-danger mb-4">{{ session('error') }}</div>
 @endif
 
 @if(!$section)
-    <div class="bg-yellow-50 border border-yellow-200 rounded-xl">
+    <div class="card border-amber-200">
         <x-empty-state message="No section assigned yet." hint="An Admin assigns sections to advisers — contact the admin to get one assigned to your account." />
     </div>
 @else
@@ -93,7 +95,7 @@
      wrote it themselves and simply hasn't approved it. --}}
 @if($awaitingPrincipalOrigin->isNotEmpty())
 <div class="bg-amber-50 border border-amber-200 rounded-xl mb-4">
-    <div class="px-6 py-4 border-b border-amber-200">
+    <div class="px-5 py-4 border-b border-line border-amber-200">
         <h3 class="font-semibold text-amber-900 text-sm">
             <i class="bi bi-hourglass-split"></i> Recorded by the Principal, not yet approved
             <span class="font-normal text-amber-700">({{ $awaitingPrincipalOrigin->count() }})</span>
@@ -134,7 +136,7 @@
      source exists, instead of needing a second pass to add it. --}}
 @if($awaitingSystemOrigin->isNotEmpty())
 <div class="bg-amber-50 border border-amber-200 rounded-xl mb-4">
-    <div class="px-6 py-4 border-b border-amber-200">
+    <div class="px-5 py-4 border-b border-line border-amber-200">
         <h3 class="font-semibold text-amber-900 text-sm">
             <i class="bi bi-hourglass-split"></i> Recommended by the DSS, awaiting the Principal's decision
             <span class="font-normal text-amber-700">({{ $awaitingSystemOrigin->count() }})</span>
@@ -169,9 +171,9 @@
 </div>
 @endif
 
-<div class="bg-white rounded-xl shadow-sm overflow-x-auto">
-    <div class="px-6 py-4 border-b">
-        <h3 class="font-semibold text-gray-800 text-sm">Interventions for {{ $section->name }}</h3>
+<div class="card overflow-x-auto">
+    <div class="px-5 py-4 border-b border-line">
+        <h3 class="card-title">Interventions for {{ $section->name }}</h3>
         <p class="text-xs text-gray-500 mt-1">
             These are decisions the Principal already made for your students. You can read them and mark that you've
             seen one — only the Principal moves an intervention's status forward.
@@ -184,8 +186,8 @@
         <div class="flex flex-wrap items-end justify-between gap-3 mt-3 pt-3 border-t">
             <form method="GET" id="ivFilterForm" class="flex flex-wrap items-end gap-3">
                 <div>
-                    <label class="block text-xs text-gray-500 mb-1">Subject</label>
-                    <select name="subject_id" class="border rounded-md text-sm px-2 py-1.5 min-w-[150px]">
+                    <label class="form-label">Subject</label>
+                    <select name="subject_id" class="form-select-sm min-w-[150px]">
                         <option value="">All subjects</option>
                         @foreach($subjects as $subj)
                             <option value="{{ $subj->id }}" {{ (string) request('subject_id') === (string) $subj->id ? 'selected' : '' }}>{{ $subj->name }}</option>
@@ -193,8 +195,8 @@
                     </select>
                 </div>
                 <div>
-                    <label class="block text-xs text-gray-500 mb-1">Term</label>
-                    <select name="grading_period" class="border rounded-md text-sm px-2 py-1.5 min-w-[110px]">
+                    <label class="form-label">Term</label>
+                    <select name="grading_period" class="form-select-sm min-w-[110px]">
                         <option value="">All terms</option>
                         @foreach([1, 2, 3] as $t)
                             <option value="{{ $t }}" {{ $gradingPeriod == $t ? 'selected' : '' }}>Term {{ $t }}</option>
@@ -202,7 +204,7 @@
                     </select>
                 </div>
                 @if($ivFiltersActive)
-                    <a href="{{ route('adviser.interventions') }}" class="text-sm text-gray-500 hover:underline pb-1.5">Clear</a>
+                    <a href="{{ route('adviser.interventions') }}" class="text-sm text-muted hover:underline pb-1.5">Clear</a>
                 @endif
             </form>
 
@@ -216,7 +218,7 @@
                  only ever counts rows not already acknowledged. --}}
             @if($unacknowledgedCount > 0)
             <button type="button" onclick="window.showModal('acknowledgeAllModal')"
-                    class="bg-brand-700 text-white text-xs px-3 py-1.5 rounded-lg font-medium hover:bg-brand-800 whitespace-nowrap shrink-0">
+                    class="btn btn-primary btn-sm shrink-0">
                 <i class="bi bi-eye"></i> Acknowledge all ({{ $unacknowledgedCount }})
             </button>
             @endif
@@ -266,7 +268,7 @@
         <tbody>
             @forelse($interventions as $iv)
             <tr class="align-top" data-intervention-row data-student-name="{{ $iv->student->last_name }}, {{ $iv->student->first_name }}">
-                <td class="font-medium text-gray-800 whitespace-nowrap">
+                <td class="font-medium text-ink whitespace-nowrap">
                     {{ $iv->student->last_name }}, {{ $iv->student->first_name }}
                 </td>
                 <td class="text-gray-600 whitespace-nowrap">{{ $iv->subject->name ?? '—' }}</td>
@@ -276,11 +278,11 @@
                         <p class="text-xs text-gray-500 mt-1">{{ $iv->recommendation_reason }}</p>
                     @endif
                     @if($iv->principal_notes)
-                        <p class="text-xs text-gray-400 mt-1 italic">"{{ $iv->principal_notes }}"</p>
+                        <p class="text-xs text-muted mt-1 italic">"{{ $iv->principal_notes }}"</p>
                     @endif
                 </td>
                 <td>
-                    <span class="px-2 py-0.5 rounded-full text-xs font-medium {{ $statusColors[$iv->status] ?? 'bg-gray-100 text-gray-600' }}">
+                    <span class="badge {{ $statusColors[$iv->status] ?? 'bg-gray-100 text-gray-600' }}">
                         {{ $statusLabels[$iv->status] ?? $iv->status }}
                     </span>
                 </td>
@@ -366,7 +368,7 @@
                                 <i class="bi bi-check2-square"></i> Mark as Delivered
                             </summary>
                             <form method="POST" action="{{ route('adviser.interventions.deliver', $iv->id) }}"
-                                  data-deliver-form class="mt-2 w-64 whitespace-normal"
+                                  data-deliver-form data-no-loading class="mt-2 w-64 whitespace-normal"
                                   data-add-item-url="{{ ($iv->subject_id && $iv->grading_period) ? route('adviser.assessments', array_filter([
                                         'period'            => $iv->grading_period,
                                         'subject_id'        => $iv->subject_id,
@@ -386,7 +388,7 @@
                                 </div>
                                 <div class="flex justify-end gap-2 mt-2">
                                     <button type="button" data-deliver-cancel class="text-xs text-gray-500 hover:text-gray-700">Cancel</button>
-                                    <button type="submit" data-deliver-submit class="bg-brand-700 text-white text-xs px-3 py-1 rounded-lg hover:bg-brand-800">
+                                    <button type="submit" data-deliver-submit class="btn btn-primary btn-xs">
                                         Confirm Delivered
                                     </button>
                                 </div>
@@ -445,9 +447,9 @@
      gets stamped always matches what the count here promised. --}}
 @if($unacknowledgedCount > 0)
 <div id="acknowledgeAllModal" class="hidden opacity-0 fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box scale-95 opacity-0 bg-white rounded-xl shadow-lg w-full max-w-md p-6 transition-all duration-200">
+    <div class="modal-box scale-95 opacity-0 bg-white rounded-xl shadow-modal w-full max-w-md p-6 transition-all duration-200">
         <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-800">Acknowledge All</h3>
+            <h3 class="text-lg font-semibold text-ink">Acknowledge All</h3>
             <button type="button" onclick="window.hideModal('acknowledgeAllModal')" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
         <p class="text-sm text-gray-600 mb-4">
@@ -464,8 +466,8 @@
             <input type="hidden" name="subject_id" value="{{ request('subject_id') }}">
             <input type="hidden" name="grading_period" value="{{ request('grading_period', $gradingPeriod) }}">
             <div class="flex justify-end gap-3 pt-2">
-                <button type="button" onclick="window.hideModal('acknowledgeAllModal')" class="px-4 py-2 text-sm text-gray-500">Cancel</button>
-                <button type="submit" class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-brand-800">
+                <button type="button" onclick="window.hideModal('acknowledgeAllModal')" class="px-4 py-2 text-sm text-muted">Cancel</button>
+                <button type="submit" class="btn btn-primary">
                     Acknowledge {{ $unacknowledgedCount }}
                 </button>
             </div>
@@ -482,9 +484,9 @@
      checkboxes are currently checked — nothing here is server-rendered
      per-row, since the selection changes as the Adviser clicks. --}}
 <div id="groupDeliverModal" class="hidden opacity-0 fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box scale-95 opacity-0 bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
+    <div class="modal-box scale-95 opacity-0 bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200">
         <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-800">Mark Selected as Delivered Together</h3>
+            <h3 class="text-lg font-semibold text-ink">Mark Selected as Delivered Together</h3>
             <button type="button" onclick="window.hideModal('groupDeliverModal')" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
@@ -496,13 +498,13 @@
 
         <textarea id="gdNoteText" form="groupDeliverForm" name="delivery_notes" rows="3" minlength="20" required
                   placeholder="Describe the shared activity — at least 20 characters (e.g. &quot;Ran a group re-teaching session on quadratic equations for these students.&quot;)"
-                  class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"></textarea>
-        <p class="text-xs text-gray-400 mt-1">Minimum 20 characters, not counting leading/trailing spaces.</p>
+                  class="form-input"></textarea>
+        <p class="text-xs text-muted mt-1">Minimum 20 characters, not counting leading/trailing spaces.</p>
 
         <div class="flex justify-end gap-3 pt-4">
-            <button type="button" onclick="window.hideModal('groupDeliverModal')" class="px-4 py-2 text-sm text-gray-500">Cancel</button>
+            <button type="button" onclick="window.hideModal('groupDeliverModal')" class="px-4 py-2 text-sm text-muted">Cancel</button>
             <button type="submit" id="gdConfirmBtn" form="groupDeliverForm" disabled
-                    class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-brand-800 disabled:bg-gray-300 disabled:cursor-not-allowed">
+                    class="btn btn-primary disabled:bg-gray-300 disabled:cursor-not-allowed">
                 Confirm — Mark Delivered
             </button>
         </div>

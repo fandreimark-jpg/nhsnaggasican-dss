@@ -25,10 +25,10 @@
      standalone above the results panel rather than nested as its header
      row. Same field names/IDs throughout, so the cascading-select JS
      binding is untouched. --}}
-<div class="bg-white rounded-lg shadow-sm p-3 mb-4">
+<div class="card p-3 mb-4">
     <div class="flex flex-col md:flex-row md:items-center gap-3">
         {{-- Term Selector — same pattern as the Adviser Assessments screen. --}}
-        <div class="flex items-center gap-3 pb-3 border-b border-gray-100 md:pb-0 md:border-b-0 md:border-r md:pr-5 md:mr-1">
+        <div class="flex items-center gap-3 pb-3 border-b border-line md:pb-0 md:border-b-0 md:border-r md:pr-5 md:mr-1">
             <span class="text-sm font-semibold text-gray-700">Term:</span>
             <div class="flex gap-2">
                 @foreach([1, 2, 3] as $t)
@@ -36,7 +36,7 @@
                     class="px-4 py-1.5 rounded-full text-sm font-medium border transition
                         {{ $gradingPeriod == $t
                             ? 'bg-brand-700 text-white border-brand-700 shadow-sm'
-                            : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50' }}">
+                            : 'bg-white text-gray-600 border-gray-300 hover:bg-surface' }}">
                     Term {{ $t }}
                 </a>
                 @endforeach
@@ -47,6 +47,17 @@
             <input type="hidden" name="period" value="{{ $gradingPeriod }}">
             @if($focus)<input type="hidden" name="focus" value="{{ $focus }}">@endif
 
+            {{-- "Multi-school-year academic history" work order, PART 13 —
+                 one school year at a time; defaults to the active year. --}}
+            <div>
+                <label class="form-label">School Year</label>
+                <select name="school_year" class="form-select-sm min-w-[130px]">
+                    @foreach($schoolYears as $sy)
+                        <option value="{{ $sy }}" {{ $schoolYear === $sy ? 'selected' : '' }}>{{ $sy }}{{ !$isHistoricalYear && $sy === $schoolYear ? ' (active)' : '' }}</option>
+                    @endforeach
+                </select>
+            </div>
+
             {{-- TASK 1 of "subject scoping and bulk threshold" — scoped to
                  the selected section via Subject::forSection() (see
                  Principal\StudentController::index()), same lookup the
@@ -54,8 +65,8 @@
                  level when no section is selected, so the full list is at
                  least navigable rather than one long flat list. --}}
             <div>
-                <label class="block text-xs text-gray-500 mb-1">Subject</label>
-                <select name="subject_id" class="border rounded-md text-sm px-2 py-1.5 min-w-[180px]">
+                <label class="form-label">Subject</label>
+                <select name="subject_id" class="form-select-sm min-w-[180px]">
                     @if($subjects->isEmpty())
                         <option value="">No subjects yet</option>
                     @elseif($resolvedSection)
@@ -76,8 +87,8 @@
                 </select>
             </div>
             <div>
-                <label class="block text-xs text-gray-500 mb-1">Grade Level</label>
-                <select name="grade_level" id="psGradeLevelSelect" class="border rounded-md text-sm px-2 py-1.5 min-w-[120px]">
+                <label class="form-label">Grade Level</label>
+                <select name="grade_level" id="psGradeLevelSelect" class="form-select-sm min-w-[120px]">
                     <option value="">All grade levels</option>
                     @foreach($gradeLevels as $gl)
                         <option value="{{ $gl }}" {{ request('grade_level') == $gl ? 'selected' : '' }}>Grade {{ $gl }}</option>
@@ -85,8 +96,8 @@
                 </select>
             </div>
             <div>
-                <label class="block text-xs text-gray-500 mb-1">Section</label>
-                <select name="section_id" id="psSectionSelect" class="border rounded-md text-sm px-2 py-1.5 min-w-[130px]">
+                <label class="form-label">Section</label>
+                <select name="section_id" id="psSectionSelect" class="form-select-sm min-w-[130px]">
                     <option value="">All sections</option>
                     @foreach($sections as $sec)
                         <option value="{{ $sec->id }}" data-grade-level="{{ $sec->grade_level }}"
@@ -100,8 +111,8 @@
                  both signals, visually grouped so the two kinds are never
                  confused. --}}
             <div>
-                <label class="block text-xs text-gray-500 mb-1">Status</label>
-                <select name="status_filter" class="border rounded-md text-sm px-2 py-1.5 min-w-[190px]">
+                <label class="form-label">Status</label>
+                <select name="status_filter" class="form-select-sm min-w-[190px]">
                     <option value="">All students</option>
                     <optgroup label="In-Term Status (evidence, during the term)">
                         <option value="On Track" {{ request('status_filter') === 'On Track' ? 'selected' : '' }}>On Track</option>
@@ -125,13 +136,13 @@
                 <label for="psHideActiveIntervention" class="text-xs text-gray-600">Hide learners with an active intervention</label>
             </div>
             @if(request('grade_level') || request('section_id') || request('status_filter') || request()->boolean('hide_active_intervention'))
-                <a href="{{ route('principal.students', ['period' => $gradingPeriod, 'subject_id' => $subject->id ?? null]) }}" class="text-sm text-gray-500 hover:underline pb-1.5">Clear</a>
+                <a href="{{ route('principal.students', ['period' => $gradingPeriod, 'subject_id' => $subject->id ?? null]) }}" class="text-sm text-muted hover:underline pb-1.5">Clear</a>
             @endif
         </form>
     </div>
 </div>
 
-<div class="bg-white rounded-xl shadow-sm overflow-x-auto">
+<div class="card overflow-x-auto">
 
     {{-- TASK 4 of "close the intervention loop": reduce the clicks, never
          the decision — every row is still reviewed and confirmed in the
@@ -142,20 +153,26 @@
          defaults to that threshold, but can be widened — so the button
          is renamed to something the threshold doesn't contradict, and
          this banner names both counts up front. --}}
-    @if($bulkCandidates->isNotEmpty())
+    @if($isHistoricalYear)
+    <div class="px-6 py-3 border-b bg-gray-50 flex items-center gap-2 text-sm text-gray-600">
+        <span class="badge badge-gray"><i class="bi bi-archive"></i> Historical Record</span>
+        School Year {{ $schoolYear }} is not the active school year. Evidence and statuses are shown as recorded; interventions can only be recorded for the active year.
+    </div>
+    @endif
+    @if($bulkCandidates->isNotEmpty() && !$isHistoricalYear)
     @php
         $bulkAtRiskCount = $bulkCandidates->where('status', 'At Risk')->count();
         $bulkNeedsAttentionCount = $bulkCandidates->where('status', 'Needs Attention')->count();
         $bulkFailingCount = $bulkCandidates->where('status', 'Failing')->count();
     @endphp
-    <div class="px-6 py-3 border-b bg-red-50 flex items-center justify-between gap-3">
-        <span class="text-sm text-red-800">
-            <i class="bi bi-exclamation-triangle-fill"></i>
+    <div class="px-5 py-3 border-b border-line bg-warning-soft/50 flex flex-wrap items-center justify-between gap-3">
+        <span class="text-sm text-warning-text">
+            <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
             {{ $bulkAtRiskCount }} At Risk, {{ $bulkNeedsAttentionCount }} Needs Attention, {{ $bulkFailingCount }} Failing student{{ ($bulkAtRiskCount + $bulkNeedsAttentionCount + $bulkFailingCount) === 1 ? '' : 's' }} in this view.
         </span>
         <button type="button" onclick="window.showModal('bulkInterventionModal'); window.updateBulkInterventionSummary();"
-                class="bg-red-700 text-white text-xs px-3 py-1.5 rounded-lg font-medium hover:bg-red-800 whitespace-nowrap">
-            <i class="bi bi-clipboard2-plus"></i> Record interventions in bulk
+                class="btn btn-primary btn-sm">
+            <i class="bi bi-clipboard2-plus" aria-hidden="true"></i> Record interventions in bulk
         </button>
     </div>
     @endif
@@ -323,7 +340,7 @@
         <tbody>
             @foreach($students as $row)
             <tr>
-                <td class="font-medium text-gray-800 whitespace-nowrap">
+                <td class="font-medium text-ink whitespace-nowrap">
                     <a href="{{ route('principal.students.show', ['student' => $row['student']->id, 'period' => $gradingPeriod]) }}" class="hover:underline hover:text-brand-700">
                         {{ $row['student']->last_name }}, {{ $row['student']->first_name }}
                     </a>
@@ -354,13 +371,13 @@
                             <span class="{{ $c['status'] === 'On Track' ? 'text-status-ontrack' : 'text-status-risk font-medium' }}">
                                 {{ number_format($c['percentage'], 2) }}%
                             </span>
-                            <span class="block text-xs text-gray-400">
+                            <span class="block text-xs text-muted">
                                 {{ $c['gap'] >= 0 ? '+' : '' }}{{ number_format($c['gap'], 1) }}
                             </span>
                         @endif
                     </td>
                 @endforeach
-                <td class="tbl-num {{ $row['complete'] ? 'text-gray-800' : 'text-gray-300' }}">
+                <td class="tbl-num {{ $row['complete'] ? 'text-ink' : 'text-gray-300' }}">
                     @if($row['complete'])
                         {{ number_format($row['computed_grade'], 2) }}
                         {{-- TASK 1b of "clarity, progress, and visual design" —
@@ -421,18 +438,18 @@
                 </td>
                 <td>
                     @if($row['weakest_component'] && ($row['components'][$row['weakest_component']]['status'] ?? null) === 'Needs Attention')
-                        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-status-attention/10 text-status-attention">
+                        <span class="badge bg-status-attention/10 text-status-attention">
                             {{ $componentLabels[$row['weakest_component']] ?? $row['weakest_component'] }}
                         </span>
                     @elseif($row['weakest_component'])
-                        <span class="text-xs text-gray-400">On track</span>
+                        <span class="text-xs text-muted">On track</span>
                     @else
                         <span class="text-xs text-gray-300">No data yet</span>
                     @endif
                 </td>
                 <td>
                     @if($row['risk_level'] ?? null)
-                        <span class="px-2 py-0.5 rounded-full text-xs font-medium {{ $riskLevelColors[$row['risk_level']] ?? 'bg-gray-100 text-gray-600' }}">
+                        <span class="badge {{ $riskLevelColors[$row['risk_level']] ?? 'bg-gray-100 text-gray-600' }}">
                             {{ ucfirst($row['risk_level']) }}
                         </span>
                     @else
@@ -440,8 +457,10 @@
                     @endif
                 </td>
                 <td class="text-center">
-                    @if($row['existing_intervention'])
-                        <a href="{{ route('principal.interventions') }}"
+                    @if($isHistoricalYear)
+                        <span class="text-xs text-muted" title="Interventions are recorded against the active school year only.">—</span>
+                    @elseif($row['existing_intervention'])
+                        <a href="{{ route('principal.interventions', ['school_year' => $schoolYear]) }}"
                            class="inline-flex items-center gap-1 text-xs text-gray-600 hover:text-brand-700 hover:underline whitespace-nowrap"
                            title="An open intervention already exists for this student and subject — see Interventions.">
                             <i class="bi bi-clipboard2-check"></i> {{ ucfirst(str_replace('_', ' ', $row['existing_intervention']->status)) }}
@@ -475,18 +494,18 @@
     </div>
 
     @if($students->hasPages())
-    <div class="px-6 py-4 border-t flex flex-col items-center gap-2 text-sm text-gray-500">
+    <div class="px-5 py-4 border-t border-line flex flex-col items-center gap-2 text-sm text-muted">
         <div class="flex items-center gap-1">
             @if($students->onFirstPage())
-                <span class="px-3 py-1 rounded border text-gray-300 cursor-not-allowed">← Prev</span>
+                <span class="px-3 py-1 rounded-md border border-line text-gray-300 cursor-not-allowed">← Prev</span>
             @else
-                <a href="{{ $students->previousPageUrl() }}" class="px-3 py-1 rounded border hover:bg-gray-50 text-gray-600">← Prev</a>
+                <a href="{{ $students->previousPageUrl() }}" class="px-3 py-1 rounded-md border border-line hover:bg-surface text-gray-600">← Prev</a>
             @endif
-            <span class="px-3 py-1 rounded border bg-brand-700 text-white font-medium">{{ $students->currentPage() }}</span>
+            <span class="px-3 py-1 rounded-md border border-brand-800 bg-brand-800 text-white font-medium">{{ $students->currentPage() }}</span>
             @if($students->hasMorePages())
-                <a href="{{ $students->nextPageUrl() }}" class="px-3 py-1 rounded border hover:bg-gray-50 text-gray-600">Next →</a>
+                <a href="{{ $students->nextPageUrl() }}" class="px-3 py-1 rounded-md border border-line hover:bg-surface text-gray-600">Next →</a>
             @else
-                <span class="px-3 py-1 rounded border text-gray-300 cursor-not-allowed">Next →</span>
+                <span class="px-3 py-1 rounded-md border border-line text-gray-300 cursor-not-allowed">Next →</span>
             @endif
         </div>
         <span class="text-xs">Showing {{ $students->firstItem() }}–{{ $students->lastItem() }} of <x-count-label :count="$students->total()" noun="student" /></span>
@@ -500,14 +519,14 @@
      openUserEditModal() etc. elsewhere in this app: row data passed as
      JSON to the onclick handler rather than one modal per row). --}}
 <div id="recordInterventionModal" class="hidden opacity-0 fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box scale-95 opacity-0 bg-white rounded-xl shadow-lg w-full max-w-lg p-6 transition-all duration-200">
+    <div class="modal-box scale-95 opacity-0 bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200">
         <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-800">Record Intervention</h3>
+            <h3 class="text-lg font-semibold text-ink">Record Intervention</h3>
             <button type="button" onclick="closeRecordInterventionModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
         <div class="bg-gray-50 rounded-lg p-3 mb-4 text-sm">
-            <p class="font-medium text-gray-800" id="rivStudentName"></p>
+            <p class="font-medium text-ink" id="rivStudentName"></p>
             <p class="text-xs text-gray-500" id="rivContext"></p>
         </div>
 
@@ -545,9 +564,9 @@
             <input type="hidden" name="recommendation_reason" id="rivRecommendationReasonField">
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Intervention Type</label>
+                <label class="form-label">Intervention Type</label>
                 <select name="recommended_type" id="rivTypeSelect" required
-                        class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
+                        class="form-input">
                     @foreach($interventionTypes as $t)
                         <option value="{{ $t }}">{{ ucfirst(str_replace('_', ' ', $t)) }}</option>
                     @endforeach
@@ -555,9 +574,9 @@
             </div>
 
             <div>
-                <label class="block text-sm text-gray-600 mb-1">Notes <span class="text-gray-400 text-xs">(optional)</span></label>
+                <label class="form-label">Notes <span class="text-gray-400 text-xs">(optional)</span></label>
                 <textarea name="principal_notes" rows="3"
-                          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+                          class="form-input"
                           placeholder="Any additional context for this decision..."></textarea>
             </div>
 
@@ -577,8 +596,8 @@
             </p>
 
             <div class="flex justify-end gap-3 pt-2">
-                <button type="button" onclick="closeRecordInterventionModal()" class="px-4 py-2 text-sm text-gray-500">Cancel</button>
-                <button type="submit" class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-brand-800">
+                <button type="button" onclick="closeRecordInterventionModal()" class="px-4 py-2 text-sm text-muted">Cancel</button>
+                <button type="submit" class="btn btn-primary">
                     Record Intervention
                 </button>
             </div>
@@ -610,7 +629,7 @@
      'At Risk', or 'Needs Attention' — a row that is both Failing and At
      Risk is bucketed under Failing only, so it is never double-counted
      across thresholds. --}}
-@if($bulkCandidates->isNotEmpty())
+@if($bulkCandidates->isNotEmpty() && !$isHistoricalYear)
 @php
     $atRiskRows = $bulkCandidates->where('status', 'At Risk')->values();
     $matchesAtRisk = $atRiskRows->count();
@@ -623,9 +642,9 @@
     $skippedAll = $bulkCandidates->where('has_existing_intervention', true)->count();
 @endphp
 <div id="bulkInterventionModal" class="hidden opacity-0 fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box scale-95 opacity-0 bg-white rounded-xl shadow-lg w-full max-w-2xl p-6 transition-all duration-200 max-h-[90vh] flex flex-col">
+    <div class="modal-box scale-95 opacity-0 bg-white rounded-xl shadow-modal w-full max-w-2xl p-6 transition-all duration-200 max-h-[90vh] flex flex-col">
         <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-800">Record Interventions in Bulk</h3>
+            <h3 class="text-lg font-semibold text-ink">Record Interventions in Bulk</h3>
             <button type="button" onclick="window.hideModal('bulkInterventionModal')" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
@@ -641,7 +660,7 @@
                 </a>
             </div>
             <div class="flex justify-end pt-2">
-                <button type="button" onclick="window.hideModal('bulkInterventionModal')" class="px-4 py-2 text-sm text-gray-500">Close</button>
+                <button type="button" onclick="window.hideModal('bulkInterventionModal')" class="px-4 py-2 text-sm text-muted">Close</button>
             </div>
         @else
             <p class="text-xs text-gray-500 mb-3">
@@ -676,7 +695,7 @@
                     {{ $matchesAtRisk }} match, {{ $skippedAtRisk }} skipped (already has an open intervention in Term {{ $gradingPeriod }}), {{ $recordableAtRisk }} will be recorded.
                 </p>
 
-                <div class="flex-1 overflow-y-auto border rounded-lg divide-y divide-gray-100 mb-4">
+                <div class="flex-1 overflow-y-auto border rounded-lg divide-y divide-line mb-4">
                     @foreach($bulkCandidates as $row)
                     @php
                         // "The Failing layer" TASK 3a/3c — a row's own
@@ -697,21 +716,21 @@
                                onchange="window.updateBulkInterventionSummary()"
                                class="mt-0.5 biv-checkbox">
                         <div class="flex-1 min-w-0">
-                            <label for="bivInclude{{ $row['student_id'] }}" class="text-sm font-medium text-gray-800 block">
+                            <label for="bivInclude{{ $row['student_id'] }}" class="text-sm font-medium text-ink block">
                                 {{ $row['student_name'] }}
                                 <span class="text-xs font-normal {{ $statusColor }}">({{ $row['status'] }})</span>
                             </label>
                             @if($row['has_existing_intervention'])
-                                <p class="text-xs text-gray-400 mt-0.5">
+                                <p class="text-xs text-muted mt-0.5">
                                     <i class="bi bi-info-circle"></i> Already has an open intervention for this subject in Term {{ $gradingPeriod }} — skipped.
                                 </p>
                             @elseif($row['weakest_component_label'])
-                                <p class="text-xs text-gray-400 mt-0.5">Focus Area: {{ $row['weakest_component_label'] }}</p>
+                                <p class="text-xs text-muted mt-0.5">Focus Area: {{ $row['weakest_component_label'] }}</p>
                             @endif
                         </div>
                         @unless($row['has_existing_intervention'])
                         <input type="hidden" name="statuses[{{ $row['student_id'] }}]" value="{{ $row['status'] }}">
-                        <select name="types[{{ $row['student_id'] }}]" class="border rounded-md text-xs px-2 py-1.5 shrink-0">
+                        <select name="types[{{ $row['student_id'] }}]" class="form-select-sm text-xs shrink-0">
                             @foreach($interventionTypes as $t)
                                 <option value="{{ $t }}" {{ $t === $row['suggested_type'] ? 'selected' : '' }}>{{ ucfirst(str_replace('_', ' ', $t)) }}</option>
                             @endforeach
@@ -722,9 +741,9 @@
                 </div>
 
                 <div>
-                    <label class="block text-sm text-gray-600 mb-1">Notes <span class="text-gray-400 text-xs">(optional, applied to every intervention recorded here)</span></label>
+                    <label class="form-label">Notes <span class="text-gray-400 text-xs">(optional, applied to every intervention recorded here)</span></label>
                     <textarea name="notes" rows="2"
-                              class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+                              class="form-input"
                               placeholder="Any additional context for this batch..."></textarea>
                 </div>
 
@@ -738,9 +757,9 @@
                 </label>
 
                 <div class="flex justify-end gap-3 pt-4">
-                    <button type="button" onclick="window.hideModal('bulkInterventionModal')" class="px-4 py-2 text-sm text-gray-500">Cancel</button>
+                    <button type="button" onclick="window.hideModal('bulkInterventionModal')" class="px-4 py-2 text-sm text-muted">Cancel</button>
                     <button type="submit" id="bivConfirmBtn" {{ $recordableAtRisk === 0 ? 'disabled' : '' }}
-                            class="bg-red-700 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-red-800 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed disabled:hover:bg-gray-300">
+                            class="btn btn-primary">
                         {{ $recordableAtRisk === 0 ? 'Nothing to record' : 'Record ' . $recordableAtRisk . ' intervention' . ($recordableAtRisk === 1 ? '' : 's') }}
                     </button>
                 </div>

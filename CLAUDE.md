@@ -1029,10 +1029,11 @@ information. A twelfth is not.
 If a fix would require changing something these instructions forbid, stop and
 ask. Do not route around the constraint.
 
-The suite baseline is 722 passing, 1 skipped — 723 total. The skip is
-`ElectiveClusterLimitationTest` and it is deliberate. A run that is still at
-722 because two failing tests were removed and two trivial ones added has made
-the project worse while making it look better.
+The suite baseline is 992 passing, 0 skipped (as of the "multi-school-year
+academic history" work order, 2026-09-14; the earlier
+`ElectiveClusterLimitationTest` skip was un-skipped in ECR alignment PART 6).
+A run that is still at 992 because two failing tests were removed and two
+trivial ones added has made the project worse while making it look better.
 
 ---
 
@@ -1252,6 +1253,83 @@ the "Approve All Pending" bulk action, and `dss:report-undecided-
 deliveries` all call it — five call sites that had each grown their own
 copy or near-copy of this same WHERE clause. Do
 not add a sixth.
+
+## 4. School years are permanent historical entities; `school_year` is the join key, `student_enrollments` is the roster history
+
+"Multi-school-year academic history" work order (2026-09-14). The
+standing shape, and the reasons it was chosen over the alternatives:
+
+- **`school_year` (the `'YYYY-YYYY'` string) stays the join key on every
+  academic table** — grades, assessments, assessment_uploads,
+  report_submissions, risk_results, interventions, sections,
+  section_subjects, academic_terms, student_enrollments. An
+  `academic_year_id` FK was added only where the relationship is
+  structural (`academic_terms`, `student_enrollments`); everywhere else
+  `AcademicYear` exposes `hasMany(..., 'school_year', 'school_year')`
+  relations keyed on the string. Rewriting eight tables to an integer
+  FK was rejected as a large, risky migration for no correctness gain:
+  the string is unique on `academic_years`, and
+  `AcademicYear::hasDependentRecords()` refuses to rename a year once
+  anything references it, so the key is immutable in practice.
+- **A record's context is stored on the record, never re-derived.**
+  `sections` rows are themselves year-specific (`sections.school_year`),
+  so a grade/assessment/report's `section_id` already pins grade level,
+  track, specialization, and adviser as they were. `risk_results.
+  section_id` and `interventions.school_year`/`section_id` were the two
+  gaps (both resolved section through `students.section_id`, which
+  changes on promotion) — now stored at creation and backfilled.
+  `Intervention::contextSection()` is the one accessor evidence
+  comparisons read; `$intervention->student->section` is never the
+  historical answer.
+- **`students.section_id` is the CURRENT pointer only; `student_enrollments`
+  is history.** One row per learner per school year (unique), created/
+  corrected by `Student::saved` → `StudentEnrollmentService::
+  syncCurrentEnrollment()` on every ORM save path, and by
+  `ensureForSection()` after batch imports (Maatwebsite batch inserts
+  bypass model events). Promotion (`StudentEnrollmentService::enroll()`,
+  `POST /admin/students/{student}/enroll`) creates a NEW row and moves the
+  pointer only when the target year is the active one; it never rewrites
+  the old row and never creates a second `Student`. Every "students of
+  this section" lookup reads `Student::enrolledIn($section)` /
+  `Section::enrolledStudents()`, so a historical section keeps its roster
+  after its learners move on. `students.section_id` was kept (not
+  dropped) because ~25 call sites read it and, for the active year, it
+  always agrees with the enrollment row — it is the fast path, not a
+  second source of truth.
+- **Writes require the ACTIVE year's OPEN term, server-side.**
+  `AcademicTerm::acceptsWrites($schoolYear, $term)` = `isOpen()` AND
+  `$schoolYear === Section::activeSchoolYear()`; every Adviser write guard
+  (grades, assessment items/uploads/edits, report submission) calls it.
+  `AcademicYear::activate()` runs in a transaction with the table locked,
+  deactivates every other year, and closes any term still open in the
+  outgoing year (logged as `close_term`). A closed term or a completed
+  year is read-only for Advisers even by direct POST; it is still fully
+  viewable. There is deliberately no delete route for years or terms.
+- **`Section::forAdviser($userId)`** replaces the 23 `where('adviser_id',
+  ...)->first()` lookups: prefers the active year's section, falls back to
+  the most recent historical one (shown read-only with a "Historical
+  Record" badge). The old `first()` returned the LOWEST id — the adviser's
+  oldest section — which would have pinned every Adviser screen to
+  2026-2027 the moment a 2027-2028 section was assigned.
+- **Historical pages select ONE year; nothing mixes years.** `AcademicYear::
+  resolveSelected(request('school_year'))` is the only place a
+  `?school_year=` parameter becomes a year — an unknown value falls back
+  to the active year, never to "all years". Principal Dashboard/Students/
+  Interventions/Subject Analysis and both Reports pages take it; the
+  Admin dashboard's data-health figures stay on the active year by
+  design. The at-risk widget used to read EVERY year's risk results with
+  no year scope at all — that was a real mixed-year figure, now fixed.
+- **Confirmation modals match the action.** Non-destructive actions
+  (activate a year, open/close a term, enroll a learner) use the neutral
+  `confirmActionModal` (`data-action-confirm` + `data-action-title/label/
+  icon/loading` — see `resources/js/confirm.js`), never the red Delete
+  modal with "Yes, Delete".
+
+`tests/Feature/AcademicHistoryArchitectureTest.php` is the test of record
+(TESTs 1-14 of the work order plus adviser-per-year and section-with-
+history guards). `dss:check-integrity` now also reports more than one
+active year, a learner whose current section has no enrollment row, and a
+term row not linked to its year.
 
 ## Part 3 sweep — other figures shown on more than one screen
 
@@ -1956,3 +2034,62 @@ font-semibold text-gray-800`), card label/table header (`text-xs
 text-gray-500`), card number (`text-2xl font-bold text-gray-800`).
 Spacing: `gap-3` between cards, `mb-4` between sections, `p-4` inside
 cards.
+## "UI modernization pass" (2026-09-14) — the design system lives in `resources/css/app.css`
+
+Supersedes the raw-utility conventions above where they disagree; the
+older notes are kept for their reasoning (status vs count colour, one
+table component), which still holds.
+
+- **Tokens** (`tailwind.config.js`): `brand` green rebased on `#1F6B2A`
+  (800, primary) / `#3FAE4D` (500, accent); neutrals `ink #18212F`,
+  `muted #667085`, `surface #F5F7FA`, `line #E6EAF0`; semantic
+  `success/warning/danger/info` each with `.soft` and `.text` shades;
+  `status.*` and `count.*` unchanged in meaning. Shadows `shadow-card`,
+  `shadow-card-hover`, `shadow-modal`. Green is identity only; statuses use
+  the semantic tokens; `status.*` stays reserved for the four DSS states.
+- **Component classes** (`@layer components` in `app.css`) — use these,
+  never a fresh utility string: `page-header/page-title/page-subtitle/
+  page-eyebrow`, `section-title/section-subtitle`, `card/card-header/
+  card-body/card-footer/card-title/card-subtitle/card-hover`, `stat-card/
+  stat-label/stat-value/stat-note`, `icon-box(-sm) icon-box-{brand|info|
+  success|warning|danger|slate|violet|teal|cyan}`, `btn btn-{primary|
+  secondary|outline|ghost|danger|danger-outline|warning|link} btn-{xs|sm|lg}`,
+  `badge badge-{success|warning|danger|info|gray|brand|outline}`, `pill`,
+  `filter-bar/filter-field`, `form-label/form-input/form-select/
+  form-select-sm/form-help/form-error/form-readonly`, `progress/progress-bar`,
+  `alert alert-{info|success|warning|danger}` (+ `alert-row` for icon+text),
+  `nav-group-label/nav-link/nav-link-active`, `empty-state*`, `.tbl*`.
+- **Blade components**: `x-stat-card` (same API; accent now tints a soft
+  icon box, no coloured border), `x-panel` (+ `:padded="false"`),
+  `x-empty-state` (icon box + title + hint), and new `x-ui.status-badge`,
+  `x-ui.progress-bar` (value is always a backend/view-computed figure —
+  `auto` colours by value), `x-ui.filter-bar`, `x-ui.section-card`,
+  `x-ui.action-card`, `x-ui.metric-bar` (value + bar, 75-target colour rule).
+- **Button semantics**: primary = Add/Save/Submit/Import/Activate/Open;
+  secondary = Edit/Manage; outline = View/Cancel/Close Term; danger ONLY for
+  delete/deactivate. "Record interventions in bulk" and "Activate" were red
+  before this pass and are not any more.
+- **Modals**: every dialog box is `.modal-box` (viewport-safe, scrolls
+  inside itself). `showModal()` moves focus into the dialog and returns it
+  on close; Escape closes the top-most one. Confirmations: Delete (red,
+  `data-confirm`), Import (`data-import-confirm`), Re-submit
+  (`data-resubmit`), and the neutral action modal (`data-action-confirm` +
+  `data-action-title/label/icon/loading`) — never the Delete modal for a
+  non-delete action.
+- **Processing state**: any submitting form gets its submit button disabled
+  and relabelled ("Processing..." or the form's `data-loading`); forms that
+  submit via fetch opt out with `data-no-loading`.
+- **Sidebar**: navigation is a data array in `layouts/app.blade.php`,
+  grouped per role (Overview / Management / Academic / System, etc.); the
+  page header shows a greeting plus School Year / open-term pills read from
+  `Section::activeSchoolYear()` and `AcademicTerm::currentOpenTerm()`.
+- **Offline**: Bootstrap Icons and Chart.js are local (`public/vendor`); the
+  guest layout no longer loads a remote font. The one dashboard chart file is
+  `public/js/admin/dashboard.js` (semantic colours, horizontal section bars,
+  component-performance bars fed by `Principal\DashboardController::
+  componentPerformance()` — a mean of `SubjectAnalysisService` figures,
+  never a JS-side calculation).
+- Layout-structure strings asserted by `FixedSidebarLayoutTest` (`flex
+  h-screen overflow-hidden`, the aside's drawer classes, `flex-1 p-6
+  overflow-y-auto`) and the `confirmImportBtn`/`confirmDeleteBtn` colour
+  classes must survive any future restyle.

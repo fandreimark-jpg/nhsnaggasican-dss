@@ -69,12 +69,12 @@
 </div>
 @endif
 
-<div class="bg-white rounded-xl shadow-sm p-6">
-    <p class="text-sm text-gray-500 mb-1">
+<div class="card p-6">
+    <p class="text-sm text-muted mb-1">
         Found <strong>{{ count($columns) }}</strong> assessment column{{ count($columns) === 1 ? '' : 's' }}
         and <strong>{{ $rowCount }}</strong> student row{{ $rowCount === 1 ? '' : 's' }} in the uploaded file.
     </p>
-    <p class="text-sm text-gray-500 mb-1">
+    <p class="text-sm text-muted mb-1">
         @if($maxRowPresent)
             <i class="bi bi-check-circle text-green-600"></i>
             Maximum scores were read from a <strong>MAX</strong> row in the file and prefilled below — review them and edit any that need correcting.
@@ -83,7 +83,7 @@
             This file has no MAX row — enter each column's maximum score by hand below.
         @endif
     </p>
-    <p class="text-sm text-gray-500 mb-6">
+    <p class="text-sm text-muted mb-6">
         Review the detected classification for each column below and set its maximum score.
         <span class="text-orange-600 font-medium">Columns marked "Unclassified" could not be guessed automatically — you must choose one before importing.</span>
         Check <strong>Additional Support</strong> for a column that is within-term additional support (a re-teach
@@ -112,7 +112,7 @@
             <tbody>
                 @foreach($columns as $i => $col)
                 <tr>
-                    <td class="font-medium text-gray-800">
+                    <td class="font-medium text-ink">
                         {{ $col['name'] }}
                         <input type="hidden" name="columns[{{ $i }}][name]" value="{{ $col['name'] }}">
                     </td>
@@ -152,7 +152,7 @@
                                value="{{ $col['file_max_score'] ?? '' }}"
                                class="w-24 border rounded-lg px-3 py-1.5 text-sm">
                         @if($col['file_max_score'] !== null)
-                            <span class="block text-xs text-gray-400 mt-0.5">from file</span>
+                            <span class="block text-xs text-muted mt-0.5">from file</span>
                         @endif
                     </td>
                     <td>
@@ -173,9 +173,9 @@
 
         <div class="flex justify-end gap-3">
             <a href="{{ route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id]) }}"
-               class="px-4 py-2 text-sm text-gray-500">Cancel</a>
+               class="px-4 py-2 text-sm text-muted">Cancel</a>
             <button type="submit"
-                    class="bg-brand-700 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-brand-800">
+                    class="btn btn-primary">
                 <i class="bi bi-eye"></i> Preview
             </button>
         </div>

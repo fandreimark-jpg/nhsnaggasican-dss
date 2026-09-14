@@ -10,10 +10,47 @@
 @section('content')
 
 @if(!$section)
-    <div class="bg-yellow-50 border border-yellow-200 rounded-xl">
-        <x-empty-state message="No section assigned yet." hint="An Admin assigns sections to advisers — contact the admin to get one assigned to your account." />
+    <div class="card">
+        <x-empty-state message="No section assigned yet." icon="bi bi-person-badge" hint="An Admin assigns sections to advisers — contact the admin to get one assigned to your account." />
     </div>
 @else
+
+{{-- "UI modernization pass" — section context strip: everything an
+     adviser needs to orient (section, grade, track, specialization,
+     school year, open term), read from the same models the page already
+     had. Replaces the plain-text context line. --}}
+@php
+    $openTermForSection = $section->isInActiveSchoolYear() ? \App\Models\AcademicTerm::currentOpenTerm($section->school_year) : null;
+@endphp
+<div class="card mb-4 px-5 py-4">
+    <div class="flex flex-col lg:flex-row lg:items-center gap-4">
+        <div class="flex items-center gap-3 min-w-0">
+            <div class="icon-box icon-box-brand" aria-hidden="true"><i class="bi bi-grid-3x3-gap"></i></div>
+            <div class="min-w-0">
+                <p class="stat-label">Your section</p>
+                <p class="text-xl font-bold text-ink leading-tight">{{ $section->name }} <span class="text-base font-medium text-muted">— Grade {{ $section->grade_level }}</span></p>
+            </div>
+        </div>
+        <div class="flex flex-wrap gap-2 lg:ml-auto">
+            <span class="pill"><span class="pill-label">Track</span> {{ $section->track->name ?? 'Not set' }}</span>
+            <span class="pill"><span class="pill-label">Specialization</span> {{ $section->specialization->name ?? 'Not set' }}</span>
+            <span class="pill"><i class="bi bi-calendar3 text-brand-700" aria-hidden="true"></i><span class="pill-label">School Year</span> {{ $section->school_year }}</span>
+            @if($section->isInActiveSchoolYear())
+                <span class="badge badge-success"><i class="bi bi-check-circle-fill" aria-hidden="true"></i> Active school year</span>
+                @if($openTermForSection)
+                    <span class="badge badge-info"><i class="bi bi-unlock" aria-hidden="true"></i> Term {{ $openTermForSection }} open</span>
+                @else
+                    <span class="badge badge-gray"><i class="bi bi-lock" aria-hidden="true"></i> No term open</span>
+                @endif
+            @else
+                <span class="badge badge-gray"><i class="bi bi-archive" aria-hidden="true"></i> Historical Record</span>
+            @endif
+        </div>
+    </div>
+    @unless($section->isInActiveSchoolYear())
+        <p class="help-text mt-3">This section belongs to a completed school year. Its grades, assessments, and reports are read-only. You have no section assigned for the active school year ({{ \App\Models\Section::activeSchoolYear() }}) yet.</p>
+    @endunless
+</div>
 
 @include('partials.transmutation-fallback-banner')
 @include('partials.stale-risk-warning')
@@ -28,52 +65,68 @@
     $ivTypeLabels = ['remediation' => 'Additional Practice and Re-teaching'];
 @endphp
 
-{{-- "Decision flow, report scoping, and dashboard pass" TASK 5b — the
-     top of this page used to be two static paragraphs (what In-Term
-     Status vs. Risk Level mean) that never change and say nothing about
-     THIS section right now. Replaced with a checklist of only the
-     things that actually require action; the static definitions moved
-     into the collapsible below rather than being deleted. --}}
+{{-- "Decision flow, report scoping, and dashboard pass" TASK 5b — a
+     checklist of only the things that actually require action, now as
+     actionable cards (count + what + where to go). Same four signals,
+     same links. --}}
 @php
     $attentionItems = collect([
         [
             'count' => $unacknowledgedInterventions->count(),
             'label' => 'intervention' . ($unacknowledgedInterventions->count() === 1 ? '' : 's') . ' awaiting your acknowledgement',
+            'description' => 'The Principal has recorded a decision for one of your students.',
             'link'  => route('adviser.interventions'),
+            'icon'  => 'bi-clipboard2-check', 'tone' => 'warning', 'cta' => 'Review interventions',
         ],
         [
             'count' => $acknowledgedNotDelivered,
             'label' => 'intervention' . ($acknowledgedNotDelivered === 1 ? '' : 's') . ' acknowledged but not yet delivered',
+            'description' => 'Record what was actually done once the support has been given.',
             'link'  => route('adviser.interventions'),
+            'icon'  => 'bi-clipboard2-pulse', 'tone' => 'info', 'cta' => 'Record delivery',
         ],
         [
             'count' => $subjectsWithIncompleteEvidence->count(),
             'label' => 'subject' . ($subjectsWithIncompleteEvidence->count() === 1 ? '' : 's') . ' with incomplete assessment evidence in Term ' . $openTerm,
+            'description' => 'A component still has no scored items, so grades cannot be computed yet.',
             'link'  => route('adviser.assessments'),
+            'icon'  => 'bi-clipboard-data', 'tone' => 'warning', 'cta' => 'Upload assessments',
         ],
         [
             'count' => $gradesComputedNotVerified,
             'label' => 'grade' . ($gradesComputedNotVerified === 1 ? '' : 's') . ' computed but not yet verified',
+            'description' => 'Computed from evidence — review and verify before submission.',
             'link'  => route('adviser.assessments'),
+            'icon'  => 'bi-patch-check', 'tone' => 'info', 'cta' => 'Verify grades',
         ],
     ])->filter(fn($item) => $item['count'] > 0)->values();
+    // A term whose grades are complete but unsubmitted is surfaced on its
+    // own term card below ("Ready to submit" + Submit Now), not here —
+    // "Nothing needs your attention" keeps its established meaning
+    // (AdviserAttentionNeededTest): no evidence gap, no pending
+    // intervention step.
 @endphp
-<x-panel title="What Needs Your Attention Now" class="mb-4">
+<div class="mb-4">
+    <div class="flex items-end justify-between gap-3 mb-3">
+        <div>
+            <h3 class="section-title">What Needs Your Attention Now</h3>
+            <p class="section-subtitle">Only the items that need an action from you this term.</p>
+        </div>
+    </div>
     @if($attentionItems->isEmpty())
-        <div class="text-sm text-gray-500">
-            <i class="bi bi-check-circle text-status-ontrack"></i> Nothing needs your attention right now.
+        <div class="card p-4 flex items-center gap-3 text-sm text-gray-600">
+            <div class="icon-box icon-box-success" aria-hidden="true"><i class="bi bi-check-circle"></i></div>
+            Nothing needs your attention right now.
         </div>
     @else
-        <ul class="divide-y divide-gray-100 -mx-4 -mb-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             @foreach($attentionItems as $item)
-            <li class="px-4 py-3 flex items-center justify-between gap-3 text-sm">
-                <span class="text-gray-700"><span class="font-semibold">{{ $item['count'] }}</span> {{ $item['label'] }}</span>
-                <a href="{{ $item['link'] }}" class="text-xs text-brand-700 hover:underline shrink-0">Review &rarr;</a>
-            </li>
+                <x-ui.action-card :title="$item['label']" :count="$item['count']" :description="$item['description']"
+                    :icon="$item['icon']" :tone="$item['tone']" :href="$item['link']" :cta="$item['cta']" />
             @endforeach
-        </ul>
+        </div>
     @endif
-</x-panel>
+</div>
 
 <details class="mb-6 text-xs text-gray-500">
     <summary class="cursor-pointer select-none font-medium text-gray-600 px-1">What's the difference between In-Term Status and Risk Level?</summary>
@@ -86,32 +139,32 @@
      zero rows — an adviser must be able to tell "nothing assigned" apart
      from "this feature doesn't exist." --}}
 <x-panel title="Interventions Needing Your Attention"
-    subtitle="Decisions the Principal has recorded for your students that you haven't acknowledged yet" class="mb-6">
+    subtitle="Decisions the Principal has recorded for your students that you haven't acknowledged yet" class="mb-6" :padded="false">
     <x-slot:action>
-        <a href="{{ route('adviser.interventions') }}" class="text-sm text-brand-600 hover:underline whitespace-nowrap">
+        <a href="{{ route('adviser.interventions') }}" class="btn-link text-xs whitespace-nowrap">
             View all →
         </a>
     </x-slot:action>
     @if($unacknowledgedInterventions->isEmpty())
-        <div class="text-sm text-gray-400">
-            <i class="bi bi-check-circle"></i> No unacknowledged interventions right now.
+        <div class="px-5 py-4 text-sm text-muted flex items-center gap-2">
+            <i class="bi bi-check-circle text-success" aria-hidden="true"></i> No unacknowledged interventions right now.
         </div>
     @else
-        <div class="text-xs text-orange-600 bg-orange-50 -mx-4 -mt-4 mb-4 px-4 py-3 border-b">
-            <i class="bi bi-exclamation-circle-fill"></i>
-            {{ $unacknowledgedInterventions->count() }} intervention{{ $unacknowledgedInterventions->count() === 1 ? '' : 's' }} awaiting your acknowledgement.
+        <div class="alert alert-warning alert-row rounded-none border-x-0 border-t-0 text-xs">
+            <i class="bi bi-exclamation-circle-fill" aria-hidden="true"></i>
+            <span>{{ $unacknowledgedInterventions->count() }} intervention{{ $unacknowledgedInterventions->count() === 1 ? '' : 's' }} awaiting your acknowledgement.</span>
         </div>
-        <ul class="divide-y divide-gray-100 -mx-4 -mb-4">
+        <ul class="divide-y divide-line">
             @foreach($unacknowledgedInterventions->take(5) as $iv)
-            <li class="px-4 py-3 text-sm flex justify-between items-center gap-3">
+            <li class="px-5 py-3 text-sm flex justify-between items-center gap-3">
                 <div>
-                    <span class="font-medium text-gray-800">{{ $iv->student->last_name }}, {{ $iv->student->first_name }}</span>
+                    <span class="font-medium text-ink">{{ $iv->student->last_name }}, {{ $iv->student->first_name }}</span>
                     <span class="text-gray-500"> — {{ $ivTypeLabels[$iv->recommended_type] ?? ucfirst(str_replace('_', ' ', $iv->recommended_type)) }}</span>
                     @if($iv->subject)<span class="text-gray-400"> ({{ $iv->subject->name }})</span>@endif
                 </div>
                 <form method="POST" action="{{ route('adviser.interventions.acknowledge', $iv->id) }}">
                     @csrf
-                    <button type="submit" class="text-xs text-brand-700 border border-brand-200 rounded px-2 py-1 hover:bg-brand-50 whitespace-nowrap">
+                    <button type="submit" class="btn btn-secondary btn-xs">
                         Mark as Acknowledged
                     </button>
                 </form>
@@ -119,34 +172,29 @@
             @endforeach
         </ul>
         @if($unacknowledgedInterventions->count() > 5)
-            <p class="px-4 py-2 -mx-4 -mb-4 text-xs text-gray-400 border-t">And {{ $unacknowledgedInterventions->count() - 5 }} more — see the Interventions page.</p>
+            <p class="px-5 py-2 text-xs text-muted border-t border-line">And {{ $unacknowledgedInterventions->count() - 5 }} more — see the Interventions page.</p>
         @endif
     @endif
 </x-panel>
 
-{{-- Summary Cards — TASK 7a of "clarity, progress, and visual design
-     pass": none of these four is a status (At Risk/Needs Attention/On
-     Track/Failing), so none carries a status colour — a quiet, neutral
-     group (one shared count-* hue) instead of a rainbow of unrelated
-     counts. --}}
-<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-    <x-stat-card label="Total Students" :value="$totalStudents" accent="count-8" />
+{{-- Summary Cards — none of these four is a status, so none carries a
+     status colour: one neutral tint for the group. --}}
+<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
+    <x-stat-card label="Total Students" :value="$totalStudents" accent="count-8" icon="people" />
     {{-- "Decision flow, report scoping, and dashboard pass" TASK 6a — this
          is the count across ALL 3 terms, not one term; a reader could
          otherwise mistake it for "this term's" count. --}}
-    <x-stat-card label="Grades Encoded" :value="$totalGradesEncoded" accent="count-8"
+    <x-stat-card label="Grades Encoded" :value="$totalGradesEncoded" accent="count-8" icon="pencil-square"
         :note="'of '.$totalExpectedAcrossTerms.' across 3 terms'" />
-    <x-stat-card label="Pending Submission" :value="$pendingCount" accent="count-8" />
-    <x-stat-card label="Terms Submitted" :value="$submissions->count()" accent="count-8" />
+    <x-stat-card label="Pending Submission" :value="$pendingCount" accent="count-8" icon="hourglass-split" />
+    <x-stat-card label="Terms Submitted" :value="$submissions->count()" accent="count-8" icon="send-check" />
 </div>
 
-{{-- Term Submission Status — "correctness and interface pass" TASK 6f:
-     "the most useful element on this screen" — the same three facts shown
-     consistently across all three cards regardless of state — grades
-     encoded, submission status, and a submission date (or an explicit
-     "Not yet submitted" in its place, so the three cards read as one
-     consistent set rather than each showing a different subset of
-     information). --}}
+{{-- Term cards — "correctness and interface pass" TASK 6f: the same
+     three facts on all three cards (grades encoded, submission status,
+     submission date), now with the term's open/closed state and a
+     completion bar computed from the SAME encoded/expected figures the
+     controller already supplies — never a fabricated percentage. --}}
 <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
     @foreach([1, 2, 3] as $term)
     @php
@@ -159,54 +207,61 @@
         $termExpected = $expectedPerTerm[$term];
         $isComplete  = $termExpected > 0 && $termCount >= $termExpected;
         $isSubmitted = $submission !== null;
+        $isOpen      = $openTermForSection === $term;
+        $pct         = $termExpected > 0 ? min(100, (int) round($termCount / $termExpected * 100)) : null;
+        $termState = $isSubmitted ? ['Submitted', 'success', 'bi-check-circle-fill']
+            : ($isOpen ? ['Open', 'info', 'bi-unlock']
+            : ($section->isInActiveSchoolYear() && $openTermForSection && $term > $openTermForSection ? ['Locked', 'gray', 'bi-lock']
+            : ['Closed', 'gray', 'bi-lock']));
     @endphp
-    <div class="bg-white rounded-lg shadow-sm p-4 border-t-4
-        {{ $isSubmitted ? 'border-green-500' : ($isComplete ? 'border-brand-500' : 'border-gray-200') }}">
+    <div class="card p-5 flex flex-col {{ $isOpen ? 'ring-2 ring-brand-500/30' : '' }}">
         <div class="flex justify-between items-start mb-3">
-            <p class="text-sm font-semibold text-gray-800">Term {{ $term }}</p>
-            @if($isSubmitted)
-                <span class="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700 font-medium">
-                    Submitted
-                </span>
-            @elseif($isComplete)
-                <span class="text-xs px-2 py-1 rounded-full bg-brand-100 text-brand-700 font-medium">
-                    Ready
-                </span>
-            @elseif(!$isConfigured)
-                <span class="text-xs px-2 py-1 rounded-full bg-orange-100 text-orange-700 font-medium">
-                    Not Configured
-                </span>
+            <div>
+                <p class="card-title">Term {{ $term }}</p>
+                <p class="text-xs text-muted mt-0.5">
+                    @if($isSubmitted)
+                        Submitted {{ $submission->submitted_at->format('M d, Y h:i A') }}
+                    @elseif($termState[0] === 'Locked')
+                        Waiting for the previous term
+                    @else
+                        Not yet submitted
+                    @endif
+                </p>
+            </div>
+            <x-ui.status-badge :tone="$termState[1]" :label="$termState[0]" :icon="$termState[2]" />
+        </div>
+
+        @if(!$isConfigured)
+            <x-ui.status-badge tone="warning" label="Not Configured" class="self-start" />
+            <p class="text-xs text-muted mt-2">Electives not yet assigned for this section</p>
+        @else
+            <div class="flex items-end justify-between gap-2">
+                <p class="text-xs text-muted tabular-nums">{{ $termCount }}/{{ $termExpected }} grades encoded</p>
+                @if($pct !== null)<p class="text-sm font-semibold text-ink tabular-nums">{{ $pct }}%</p>@endif
+            </div>
+            <x-ui.progress-bar :value="$pct ?? 0" :tone="$isSubmitted ? 'success' : ($pct === null || $pct === 0 ? 'gray' : null)" class="mt-1.5" :label="'Term ' . $term . ' encoding progress'" />
+            @if($isComplete && !$isSubmitted)
+                <x-ui.status-badge tone="brand" label="Ready to submit" class="self-start mt-2" />
+            @elseif(!$isComplete && $termExpected > 0)
+                <x-ui.status-badge tone="warning" label="Incomplete" class="self-start mt-2" />
+            @endif
+        @endif
+
+        <div class="mt-auto pt-4">
+            @if($isComplete && !$isSubmitted)
+                <a href="{{ route('adviser.submit.report') }}" class="btn btn-primary btn-sm w-full">
+                    Submit Now <i class="bi bi-arrow-right" aria-hidden="true"></i>
+                </a>
+            @elseif(!$isComplete && !$isSubmitted)
+                <a href="{{ route('adviser.grades') }}?period={{ $term }}" class="btn btn-outline btn-sm w-full">
+                    Encode Grades <i class="bi bi-arrow-right" aria-hidden="true"></i>
+                </a>
             @else
-                <span class="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-500 font-medium">
-                    Incomplete
-                </span>
+                <a href="{{ route('adviser.grades') }}?period={{ $term }}" class="btn btn-ghost btn-sm w-full">
+                    View grades
+                </a>
             @endif
         </div>
-        <p class="text-xs text-gray-400 tabular-nums">
-            @if(!$isConfigured)
-                Electives not yet assigned for this section
-            @else
-                {{ $termCount }}/{{ $termExpected }} grades encoded
-            @endif
-        </p>
-        <p class="text-xs text-gray-400 mt-1">
-            @if($isSubmitted)
-                Submitted {{ $submission->submitted_at->format('M d, Y h:i A') }}
-            @else
-                Not yet submitted
-            @endif
-        </p>
-        @if($isComplete && !$isSubmitted)
-            <a href="{{ route('adviser.submit.report') }}"
-               class="block w-full mt-3 text-center bg-brand-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-brand-800">
-                Submit Now →
-            </a>
-        @elseif(!$isComplete)
-            <a href="{{ route('adviser.grades') }}?period={{ $term }}"
-               class="block w-full mt-3 text-center border border-gray-300 text-gray-600 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-gray-50">
-                Encode Grades →
-            </a>
-        @endif
     </div>
     @endforeach
 </div>
@@ -265,7 +320,7 @@
          scroll potential is moot (it's capped at 10) but this keeps the
          header pinned if a section ever has fewer than 10 and the panel
          is short, and keeps the pattern consistent app-wide. --}}
-    <div class="tbl-scroll mt-2 -mx-4">
+    <div class="tbl-scroll mt-2 -mx-5">
     <table class="tbl tbl-sticky">
         <thead>
             <tr>
@@ -290,7 +345,7 @@
                 ];
             @endphp
             <tr>
-                <td class="font-medium text-gray-800">
+                <td class="font-medium text-ink">
                     <button type="button" onclick='openStudentSubjectModal(@json($drillPayload))'
                             class="hover:underline hover:text-brand-700 text-left">
                         {{ $row['student']->last_name }}, {{ $row['student']->first_name }}
@@ -305,17 +360,17 @@
                 </td>
                 <td>
                     @if($row['focus_subject'] && $row['in_term_status']['weakest_component'] ?? null)
-                        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-status-risk/10 text-status-risk">
+                        <span class="badge bg-status-risk/10 text-status-risk">
                             {{ $componentLabels[$row['in_term_status']['weakest_component']] ?? $row['in_term_status']['weakest_component'] }}
                         </span>
-                        <span class="block text-xs text-gray-400 mt-1">{{ $row['focus_subject']->name }}</span>
+                        <span class="block text-xs text-muted mt-1">{{ $row['focus_subject']->name }}</span>
                     @else
                         <span class="text-xs text-gray-300">—</span>
                     @endif
                 </td>
                 <td class="text-center">
                     @if($row['risk_level'])
-                        <span class="px-2 py-0.5 rounded-full text-xs font-medium {{ $riskLevelColors[$row['risk_level']] ?? 'bg-gray-100 text-gray-600' }}">
+                        <span class="badge {{ $riskLevelColors[$row['risk_level']] ?? 'bg-gray-100 text-gray-600' }}">
                             {{ ucfirst($row['risk_level']) }}
                         </span>
                     @else
@@ -346,7 +401,7 @@
     </table>
     </div>
     @if($allInTermRows->count() > $inTermRows->count())
-    <p class="px-4 py-2 -mx-4 -mb-4 text-xs text-gray-400 border-t">
+    <p class="px-4 py-2 -mx-4 -mb-4 text-xs text-muted border-t">
         Showing the {{ $inTermRows->count() }} highest-priority of {{ $allInTermRows->count() }} students —
         <a href="{{ route('adviser.students') }}" class="text-brand-600 hover:underline">view all →</a>
     </p>
@@ -359,13 +414,13 @@
      one shared modal populated per row (same pattern as the Record
      Intervention modal elsewhere in this app). --}}
 <div id="studentSubjectModal" class="hidden opacity-0 fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box scale-95 opacity-0 bg-white rounded-xl shadow-lg w-full max-w-md p-6 transition-all duration-200">
+    <div class="modal-box scale-95 opacity-0 bg-white rounded-xl shadow-modal w-full max-w-md p-6 transition-all duration-200">
         <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-gray-800" id="ssmStudentName"></h3>
+            <h3 class="text-lg font-semibold text-ink" id="ssmStudentName"></h3>
             <button type="button" onclick="window.hideModal('studentSubjectModal')" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
         <p class="text-xs text-gray-500 mb-4">In-Term Status per subject — <span id="ssmTermLabel"></span></p>
-        <ul id="ssmSubjectList" class="divide-y divide-gray-100 text-sm"></ul>
+        <ul id="ssmSubjectList" class="divide-y divide-line text-sm"></ul>
     </div>
 </div>
 
@@ -407,12 +462,12 @@
                 wrap.className = 'text-right';
 
                 const badge = document.createElement('span');
-                badge.className = 'px-2 py-0.5 rounded-full text-xs font-medium ' + (SSM_STATUS_COLORS[bs.status] || 'bg-gray-100 text-gray-600');
+                badge.className = 'badge ' + (SSM_STATUS_COLORS[bs.status] || 'bg-gray-100 text-gray-600');
                 badge.textContent = bs.status;
                 wrap.appendChild(badge);
 
                 const count = document.createElement('span');
-                count.className = 'block text-xs text-gray-400 mt-0.5';
+                count.className = 'block text-xs text-muted mt-0.5';
                 count.textContent = bs.item_count + (bs.item_count === 1 ? ' item' : ' items') + ' scored';
                 wrap.appendChild(count);
 

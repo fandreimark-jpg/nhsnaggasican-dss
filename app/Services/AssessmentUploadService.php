@@ -356,7 +356,7 @@ class AssessmentUploadService
 
         ['header' => $header, 'maxRow' => $maxRow, 'dataRows' => $dataRows] = $this->splitRows($rows);
         $columnIndexMap = $this->buildColumnIndexMap($header, $columnMapping);
-        $studentsByLrn = Student::where('section_id', $section->id)->get()->keyBy('lrn');
+        $studentsByLrn = Student::enrolledIn($section)->get()->keyBy('lrn');
         // A MAX row (if present) occupies row 2, pushing every data row
         // down by one from where it'd sit in a file with no MAX row —
         // excel_row in the preview must still point at the real row.
@@ -469,7 +469,7 @@ class AssessmentUploadService
 
         ['header' => $header, 'maxRow' => $maxRow, 'dataRows' => $dataRows] = $this->splitRows($rows);
         $columnIndexMap = $this->buildColumnIndexMap($header, $columnMapping);
-        $studentsByLrn = Student::where('section_id', $section->id)->get()->keyBy('lrn');
+        $studentsByLrn = Student::enrolledIn($section)->get()->keyBy('lrn');
         $rowOffset = $maxRow !== null ? 1 : 0;
 
         // One Assessment item per confirmed column, created/updated once

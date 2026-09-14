@@ -169,7 +169,7 @@ class UserManagementTest extends TestCase
 
         $response = $this->from('/login')->post('/login', ['email' => 'disabled-adviser2@naggasican.edu.ph', 'password' => 'password']);
 
-        $response->assertSessionHasErrors(['email' => 'Your account has been disabled. Please contact the system administrator.']);
+        $response->assertSessionHasErrors(['email' => 'Your account has been disabled. Contact the administrator.']);
     }
 
     public function test_an_active_users_login_still_works_normally(): void

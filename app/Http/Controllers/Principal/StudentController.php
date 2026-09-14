@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Principal;
 
 use App\Http\Controllers\Controller;
 use App\Models\AcademicTerm;
+use App\Models\AcademicYear;
 use App\Models\Assessment;
 use App\Models\AssessmentScore;
 use App\Models\Grade;
@@ -94,8 +95,19 @@ class StudentController extends Controller
     {
         $gradingPeriod = (int) $request->input('period', 1);
 
-        $gradeLevels = Section::select('grade_level')->distinct()->orderBy('grade_level')->pluck('grade_level');
-        $sections = Section::select('id', 'name', 'grade_level', 'track_id', 'specialization_id')
+        // "Multi-school-year academic history" work order, PART 13 — this
+        // page shows ONE school year at a time: the active one by
+        // default, a historical one when selected. Sections, the roster
+        // (read from student_enrollments for that year, not from the
+        // learner's current section), official grades, and stale-risk
+        // warnings are all scoped to it. A historical year is read-only:
+        // interventions are only ever recorded against the active year.
+        $schoolYear = AcademicYear::resolveSelected($request->input('school_year'));
+        $isHistoricalYear = $schoolYear !== Section::activeSchoolYear();
+
+        $gradeLevels = Section::where('school_year', $schoolYear)->select('grade_level')->distinct()->orderBy('grade_level')->pluck('grade_level');
+        $sections = Section::where('school_year', $schoolYear)
+            ->select('id', 'name', 'grade_level', 'track_id', 'specialization_id')
             ->with(['track:id,name', 'specialization:id,name'])
             ->orderBy('grade_level')->orderBy('name')->get();
 
@@ -158,21 +170,33 @@ class StudentController extends Controller
         $sortDir = 'asc';
 
         if ($subject) {
-            $students_ = Student::with(['section.track', 'section.specialization', 'section.adviser'])
-                ->whereHas('section', function ($q) use ($subject, $request) {
-                    $q->where('grade_level', $subject->grade_level);
-                    if ($subject->type === 'elective') {
-                        $q->where('track_id', $subject->track_id)
-                          ->where(function ($q2) use ($subject) {
-                              $q2->whereNull('specialization_id')
-                                 ->orWhere('specialization_id', $subject->specialization_id);
-                          });
-                    }
-                    if ($request->filled('grade_level')) {
-                        $q->where('grade_level', $request->input('grade_level'));
-                    }
+            $sectionScope = function ($q) use ($subject, $request, $schoolYear) {
+                $q->where('school_year', $schoolYear)
+                  ->where('grade_level', $subject->grade_level);
+                if ($subject->type === 'elective') {
+                    $q->where('track_id', $subject->track_id)
+                      ->where(function ($q2) use ($subject) {
+                          $q2->whereNull('specialization_id')
+                             ->orWhere('specialization_id', $subject->specialization_id);
+                      });
+                }
+                if ($request->filled('grade_level')) {
+                    $q->where('grade_level', $request->input('grade_level'));
+                }
+            };
+
+            // PART 5/6 — the roster for the selected year comes from
+            // student_enrollments (which section each learner was in THAT
+            // year), so a promoted learner still appears under their
+            // Grade 11 section when 2026-2027 is selected and under their
+            // Grade 12 section when 2027-2028 is.
+            $students_ = Student::with(['enrollments' => fn($e) => $e->where('school_year', $schoolYear)
+                    ->with(['section.track', 'section.specialization', 'section.adviser'])])
+                ->whereHas('enrollments', function ($e) use ($schoolYear, $sectionScope, $request) {
+                    $e->where('school_year', $schoolYear)
+                      ->whereHas('section', $sectionScope)
+                      ->when($request->filled('section_id'), fn($q) => $q->where('section_id', $request->input('section_id')));
                 })
-                ->when($request->filled('section_id'), fn($q) => $q->where('section_id', $request->input('section_id')))
                 ->orderBy('last_name')
                 ->get();
 
@@ -182,7 +206,7 @@ class StudentController extends Controller
             // own $officialGrades lookup).
             $officialGrades = Grade::where('subject_id', $subject->id)
                 ->where('grading_period', $gradingPeriod)
-                ->where('school_year', Section::activeSchoolYear())
+                ->where('school_year', $schoolYear)
                 ->whereIn('student_id', $students_->pluck('id'))
                 ->get()
                 ->keyBy('student_id');
@@ -199,8 +223,8 @@ class StudentController extends Controller
                         ->where('is_additional_support', true);
                 })->distinct()->pluck('student_id');
 
-            $rows = $students_->map(function (Student $student) use ($subject, $gradingPeriod, $officialGrades, $additionalSupportStudentIds) {
-                    $section = $student->section;
+            $rows = $students_->map(function (Student $student) use ($subject, $gradingPeriod, $officialGrades, $additionalSupportStudentIds, $schoolYear) {
+                    $section = $student->sectionFor($schoolYear);
                     $result = $this->analysis->analyzeStudent($student, $subject, $section, $gradingPeriod, $section->school_year);
                     // Reuses $result (already computed above) rather than
                     // calling analyzeStudent() a second time — see
@@ -313,7 +337,10 @@ class StudentController extends Controller
             'sortKey'       => $sortKey,
             'sortDir'       => $sortDir,
             'interventionTypes' => Intervention::TYPES,
-            'staleRiskTerms' => AcademicTerm::staleRiskTerms(Section::activeSchoolYear()),
+            'staleRiskTerms' => AcademicTerm::staleRiskTerms($schoolYear),
+            'schoolYear'    => $schoolYear,
+            'schoolYears'   => AcademicYear::selectableSchoolYears(),
+            'isHistoricalYear' => $isHistoricalYear,
             'bulkCandidates' => $bulkCandidates,
             'resolvedSection' => $resolvedSection,
             'sectionMissingTrackOrSpec' => $sectionMissingTrackOrSpec,
@@ -540,10 +567,44 @@ class StudentController extends Controller
         });
     }
 
+    /**
+     * "Multi-school-year academic history" work order, PART 6 — the
+     * learner drill-down is viewed for ONE school year at a time. The
+     * section, grade level, subjects, evidence, official grades, and
+     * risk level shown are the ones from THAT year's enrollment
+     * (Student::sectionFor()), never the learner's current section — so
+     * a Grade 11 / Narra / 2026-2027 record still reads "Grade 11, Narra"
+     * after the learner is promoted to Grade 12 / Agila for 2027-2028.
+     * Defaults to the active year when the learner is enrolled in it,
+     * else to their most recent enrollment.
+     */
     public function show(Request $request, Student $student)
     {
-        $section = $student->section;
-        $latestRisk = RiskResult::where('student_id', $student->id)->orderByDesc('grading_period')->first();
+        $student->load('enrollments.section');
+        $enrollmentYears = $student->enrollments->pluck('school_year')->values();
+
+        $requestedYear = $request->input('school_year');
+        if (is_string($requestedYear) && $enrollmentYears->contains($requestedYear)) {
+            $schoolYear = $requestedYear;
+        } elseif ($enrollmentYears->contains(Section::activeSchoolYear())) {
+            $schoolYear = Section::activeSchoolYear();
+        } else {
+            $schoolYear = $enrollmentYears->first() ?? $student->section?->school_year ?? Section::activeSchoolYear();
+        }
+
+        $section = $student->sectionFor($schoolYear);
+        $isHistoricalYear = $schoolYear !== Section::activeSchoolYear();
+
+        // Every risk result the learner has ever received, newest year
+        // first, so the Principal can see WHEN each classification was
+        // made (PART 11); $riskHistory below is the selected year only.
+        $riskHistoryAllYears = RiskResult::where('student_id', $student->id)
+            ->with('section:id,name,grade_level,school_year')
+            ->orderByDesc('school_year')->orderBy('grading_period')->get();
+
+        $latestRisk = RiskResult::where('student_id', $student->id)
+            ->where('school_year', $schoolYear)
+            ->orderByDesc('grading_period')->first();
         $period = (int) $request->input('period', $latestRisk?->grading_period ?? 1);
 
         $subjects = $section ? Subject::forSection($section)->orderBy('type')->orderBy('name')->get() : collect();
@@ -573,8 +634,14 @@ class StudentController extends Controller
             return array_merge(['subject' => $subject, 'evidence' => $evidence], $result);
         });
 
-        $riskHistory = RiskResult::where('student_id', $student->id)->orderBy('grading_period')->get();
-        $interventions = Intervention::where('student_id', $student->id)->latest()->get();
+        $riskHistory = RiskResult::where('student_id', $student->id)
+            ->where('school_year', $schoolYear)
+            ->orderBy('grading_period')->get();
+        // All years, each labelled with its own stored year/section
+        // (PART 12) — the learner's full intervention record.
+        $interventions = Intervention::where('student_id', $student->id)
+            ->with('section:id,name,grade_level,school_year')
+            ->latest()->get();
 
         $dssStatus = $latestRisk
             ? $this->dashboardAnalytics->dssStatusLabel(
@@ -585,7 +652,8 @@ class StudentController extends Controller
             : null;
 
         return view('principal.student-detail', compact(
-            'student', 'section', 'period', 'subjectAnalysis', 'riskHistory', 'interventions', 'latestRisk', 'dssStatus'
+            'student', 'section', 'period', 'subjectAnalysis', 'riskHistory', 'interventions', 'latestRisk', 'dssStatus',
+            'schoolYear', 'isHistoricalYear', 'enrollmentYears', 'riskHistoryAllYears'
         ));
     }
 }

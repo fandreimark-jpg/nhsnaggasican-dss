@@ -20,6 +20,8 @@ use Illuminate\Notifications\Notifiable;
  */
 class User extends Authenticatable
 {
+    use \App\Models\Concerns\ProtectsAcademicHistory;
+
     use HasFactory, Notifiable;
 
     // Fields that can be mass-assigned via create() or update()

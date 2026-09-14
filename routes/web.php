@@ -182,11 +182,18 @@ Route::middleware(['auth', 'role:admin'])
         Route::get('/academic-terms',               [AcademicTermController::class, 'index'])->name('academic-terms');
         Route::post('/academic-terms/{term}/open',  [AcademicTermController::class, 'open'])->whereNumber('term')->name('academic-terms.open');
         Route::post('/academic-terms/{term}/close',[AcademicTermController::class, 'close'])->whereNumber('term')->name('academic-terms.close');
+        // Academic term editing — {academicTerm} route-model-binds
+        // by the row's own id (not the term NUMBER open()/close() use above),
+        // since a term row's identity for editing purposes is the
+        // specific (school_year, term) record, not "whichever term N is for
+        // the currently active school year."
+        Route::put('/academic-terms/{academicTerm}',    [AcademicTermController::class, 'update'])->name('academic-terms.update');
         // SYSTEM_FIXES_AND_ML_AUDIT.md, "Remove Hardcoded Academic Year" —
         // explicit academic-year configuration, separate from term
         // open/close control above.
         Route::post('/academic-years',              [AcademicYearController::class, 'store'])->name('academic-years.store');
         Route::post('/academic-years/{academicYear}/activate', [AcademicYearController::class, 'activate'])->name('academic-years.activate');
+        Route::put('/academic-years/{academicYear}',    [AcademicYearController::class, 'update'])->name('academic-years.update');
         // Students Management — adding and importing students is exclusively
         // an Admin action (master-data ownership); advisers may only view
         // their own section's students and edit existing records.
@@ -195,6 +202,11 @@ Route::middleware(['auth', 'role:admin'])
         Route::post('/students/import', [StudentController::class, 'import'])->name('students.import');
         Route::put('/students/{id}',    [StudentController::class, 'update'])->name('students.update');
         Route::delete('/students/{id}', [StudentController::class, 'destroy'])->name('students.destroy');
+        // "Multi-school-year academic history" work order, PART 15 — enroll /
+        // promote one learner into a section of another school year. Creates
+        // a NEW student_enrollments row; never rewrites an old one, never
+        // creates a second Student. Admin only, one learner per request.
+        Route::post('/students/{student}/enroll', [StudentController::class, 'enroll'])->name('students.enroll');
         // "Draft roster from an E-Class Record" feature — export only, never
         // creates a student; the admin reviews/corrects the CSV and imports
         // it through students.import above, unchanged.

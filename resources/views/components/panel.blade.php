@@ -1,14 +1,14 @@
-@props(['title' => null, 'subtitle' => null, 'action' => null])
+@props(['title' => null, 'subtitle' => null, 'action' => null, 'padded' => true])
 
-<div {{ $attributes->merge(['class' => 'bg-white rounded-lg shadow-sm']) }}>
+<div {{ $attributes->merge(['class' => 'card']) }}>
     @if($title)
-        <div class="px-4 py-3 border-b border-gray-100 flex items-start justify-between gap-4">
-            <div>
-                <h3 class="font-semibold text-gray-800 text-sm">{{ $title }}</h3>
-                @if($subtitle)<p class="text-xs text-gray-500 mt-0.5">{{ $subtitle }}</p>@endif
+        <div class="card-header">
+            <div class="min-w-0">
+                <h3 class="card-title">{{ $title }}</h3>
+                @if($subtitle)<p class="card-subtitle">{{ $subtitle }}</p>@endif
             </div>
-            @if($action)<div class="text-xs shrink-0">{{ $action }}</div>@endif
+            @if($action)<div class="text-sm shrink-0">{{ $action }}</div>@endif
         </div>
     @endif
-    <div class="p-4">{{ $slot }}</div>
+    <div class="{{ $padded ? 'card-body' : '' }}">{{ $slot }}</div>
 </div>

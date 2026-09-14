@@ -230,7 +230,8 @@ class InTermStatusService
 
         $student = $intervention->student;
         $subject = $intervention->subject;
-        $section = $student?->section;
+        // PART 12 — the intervention's OWN section/year context.
+        $section = $intervention->contextSection();
 
         if (!$student || !$subject || !$section) {
             return false;
@@ -249,11 +250,12 @@ class InTermStatusService
      * SQL first, same bounded-then-filter-in-PHP shape as
      * isReadyForReview()'s own callers.
      */
-    public function readyForReviewCount(): int
+    public function readyForReviewCount(?string $schoolYear = null): int
     {
         return Intervention::whereIn('status', ['approved', 'in_progress'])
             ->whereNotNull('delivered_at')
-            ->with(['student.section', 'subject'])
+            ->when($schoolYear, fn($q) => $q->where('school_year', $schoolYear))
+            ->with(['student.section', 'section', 'subject'])
             ->get()
             ->filter(fn(Intervention $iv) => $this->isReadyForReview($iv))
             ->count();

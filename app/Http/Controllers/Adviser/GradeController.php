@@ -35,9 +35,7 @@ class GradeController extends Controller
 
     public function index()
     {
-        $section = Section::where('adviser_id', auth()->id())
-            ->with(['track', 'specialization'])
-            ->first();
+        $section = Section::forAdviser(auth()->id())?->load(['track', 'specialization']);
 
         if (!$section) {
             return view('adviser.grades', [
@@ -50,7 +48,7 @@ class GradeController extends Controller
             ]);
         }
 
-        $students = Student::where('section_id', $section->id)
+        $students = Student::enrolledIn($section)
             ->orderBy('last_name')
             ->get();
 
@@ -68,7 +66,10 @@ class GradeController extends Controller
             ->keyBy(fn($g) => $g->student_id . '_' . $g->subject_id);
 
         // Which term is open right now, system-wide, for this school year?
-        $openTerm = AcademicTerm::currentOpenTerm($section->school_year);
+        // A historical (non-active-year) section has no writable term at all —
+        // its terms may still be flagged open, but AcademicTerm::acceptsWrites()
+        // refuses every write, so the page must not offer one either.
+        $openTerm = $section->isInActiveSchoolYear() ? AcademicTerm::currentOpenTerm($section->school_year) : null;
 
         return view('adviser.grades', compact(
             'section', 'students', 'subjects', 'grades', 'selectedPeriod', 'openTerm'
@@ -77,7 +78,7 @@ class GradeController extends Controller
 
     public function store(Request $request)
     {
-        $section = Section::where('adviser_id', auth()->id())->firstOrFail();
+        $section = Section::forAdviser(auth()->id()) ?? abort(404);
 
         $request->validate([
             'grading_period'          => 'required|in:1,2,3',
@@ -89,12 +90,12 @@ class GradeController extends Controller
 
         // Server-side enforcement — never trust the disabled inputs on the
         // front end alone. Someone could re-enable them via devtools.
-        if (!AcademicTerm::isOpen($section->school_year, (int) $request->grading_period)) {
+        if (!AcademicTerm::acceptsWrites($section->school_year, (int) $request->grading_period)) {
             return redirect()->route('adviser.grades', ['period' => $request->grading_period])
-                ->with('error', 'Term ' . $request->grading_period . ' is currently closed for encoding. Contact the admin.');
+                ->with('error', AcademicTerm::writeRefusalReason($section->school_year, (int) $request->grading_period));
         }
 
-        $validStudentIds = Student::where('section_id', $section->id)
+        $validStudentIds = Student::enrolledIn($section)
             ->pluck('id')
             ->toArray();
 
@@ -147,12 +148,12 @@ class GradeController extends Controller
      */
     public function importGrades(Request $request)
     {
-        $section = Section::where('adviser_id', auth()->id())->firstOrFail();
+        $section = Section::forAdviser(auth()->id()) ?? abort(404);
         $gradingPeriod = (int) $request->input('grading_period', 1);
 
-        if (!AcademicTerm::isOpen($section->school_year, $gradingPeriod)) {
+        if (!AcademicTerm::acceptsWrites($section->school_year, $gradingPeriod)) {
             return redirect()->route('adviser.grades', ['period' => $gradingPeriod])
-                ->with('error', 'Term ' . $gradingPeriod . ' is currently closed for encoding. Contact the admin.');
+                ->with('error', AcademicTerm::writeRefusalReason($section->school_year, $gradingPeriod));
         }
 
         $request->validateWithBag('gradeImport', [
@@ -160,7 +161,7 @@ class GradeController extends Controller
         ]);
 
         $subjects = Subject::forSection($section)->orderBy('type')->orderBy('name')->get();
-        $students = Student::where('section_id', $section->id)->get();
+        $students = Student::enrolledIn($section)->get();
 
         $import = new GradesImport($section->id, $gradingPeriod, $section->school_year, $subjects, $students);
         Excel::import($import, $request->file('file'));
@@ -188,11 +189,11 @@ class GradeController extends Controller
      */
     public function downloadGradeTemplate(Request $request)
     {
-        $section = Section::where('adviser_id', auth()->id())->firstOrFail();
+        $section = Section::forAdviser(auth()->id()) ?? abort(404);
         $gradingPeriod = (int) $request->input('period', 1);
 
         $subjects = Subject::forSection($section)->orderBy('type')->orderBy('name')->get();
-        $students = Student::where('section_id', $section->id)->orderBy('last_name')->get();
+        $students = Student::enrolledIn($section)->orderBy('last_name')->get();
 
         $headers = array_merge(['lrn', 'last_name', 'first_name'], $subjects->pluck('name')->toArray());
 
@@ -229,7 +230,7 @@ class GradeController extends Controller
      */
     public function verifyComputedGrade(Request $request)
     {
-        $section = Section::where('adviser_id', auth()->id())->firstOrFail();
+        $section = Section::forAdviser(auth()->id()) ?? abort(404);
         $gradingPeriod = (int) $request->input('grading_period', 1);
 
         $request->validate([
@@ -242,13 +243,13 @@ class GradeController extends Controller
             return $this->verifyFailureResponse($request, 'That subject is not offered to your section.');
         }
 
-        $student = Student::where('id', $request->student_id)->where('section_id', $section->id)->first();
+        $student = Student::where('id', $request->student_id)->enrolledIn($section)->first();
         if (!$student) {
             return $this->verifyFailureResponse($request, 'That student is not in your section.');
         }
 
-        if (!AcademicTerm::isOpen($section->school_year, $gradingPeriod)) {
-            return $this->verifyFailureResponse($request, 'Term ' . $gradingPeriod . ' is currently closed for encoding. Contact the admin.');
+        if (!AcademicTerm::acceptsWrites($section->school_year, $gradingPeriod)) {
+            return $this->verifyFailureResponse($request, AcademicTerm::writeRefusalReason($section->school_year, $gradingPeriod));
         }
 
         $outcome = $this->verifyOneGrade($student, $subject, $section, $gradingPeriod);
@@ -389,7 +390,7 @@ class GradeController extends Controller
      */
     private function classifyForVerifyAll(Section $section, Subject $subject, int $gradingPeriod): array
     {
-        $students = Student::where('section_id', $section->id)->orderBy('last_name')->get();
+        $students = Student::enrolledIn($section)->orderBy('last_name')->get();
 
         $existingGrades = Grade::where('subject_id', $subject->id)
             ->where('grading_period', $gradingPeriod)
@@ -445,7 +446,7 @@ class GradeController extends Controller
      */
     public function verifyAllRemainingPreview(Request $request)
     {
-        $section = Section::where('adviser_id', auth()->id())->firstOrFail();
+        $section = Section::forAdviser(auth()->id()) ?? abort(404);
         $gradingPeriod = (int) $request->input('grading_period', 1);
 
         $request->validate(['subject_id' => 'required|exists:subjects,id']);
@@ -466,7 +467,7 @@ class GradeController extends Controller
             'subject_name'     => $subject->name,
             'section_name'     => $section->name,
             'grading_period'   => $gradingPeriod,
-            'term_open'        => AcademicTerm::isOpen($section->school_year, $gradingPeriod),
+            'term_open'        => AcademicTerm::acceptsWrites($section->school_year, $gradingPeriod),
             'excluded'         => [
                 'already_encoded'     => $this->namesOf($classification['excludedAlreadyEncoded']),
                 'incomplete_evidence' => $this->namesOf($classification['excludedIncomplete']),
@@ -489,7 +490,7 @@ class GradeController extends Controller
      */
     public function verifyAllRemaining(Request $request)
     {
-        $section = Section::where('adviser_id', auth()->id())->firstOrFail();
+        $section = Section::forAdviser(auth()->id()) ?? abort(404);
         $gradingPeriod = (int) $request->input('grading_period', 1);
 
         $request->validate(['subject_id' => 'required|exists:subjects,id']);
@@ -497,8 +498,8 @@ class GradeController extends Controller
         $subject = Subject::forSection($section)->where('id', $request->subject_id)->first();
         abort_if(!$subject, 403);
 
-        if (!AcademicTerm::isOpen($section->school_year, $gradingPeriod)) {
-            return response()->json(['message' => 'Term ' . $gradingPeriod . ' is currently closed for encoding. Contact the admin.'], 422);
+        if (!AcademicTerm::acceptsWrites($section->school_year, $gradingPeriod)) {
+            return response()->json(['message' => AcademicTerm::writeRefusalReason($section->school_year, $gradingPeriod)], 422);
         }
 
         $classification = $this->classifyForVerifyAll($section, $subject, $gradingPeriod);

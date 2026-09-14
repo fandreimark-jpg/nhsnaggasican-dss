@@ -13,26 +13,78 @@ use Illuminate\Database\Eloquent\Model;
  */
 class AcademicTerm extends Model
 {
-    protected $fillable = ['school_year', 'term', 'is_open', 'opened_at', 'closed_at'];
+    protected $fillable = ['academic_year_id', 'school_year', 'term', 'is_open', 'opened_at', 'closed_at', 'start_date', 'end_date'];
 
     protected $casts = [
-        'is_open'   => 'boolean',
-        'opened_at' => 'datetime',
-        'closed_at' => 'datetime',
+        'is_open'    => 'boolean',
+        'opened_at'  => 'datetime',
+        'closed_at'  => 'datetime',
+        'start_date' => 'date',
+        'end_date'   => 'date',
     ];
 
     /**
-     * Make sure rows for Term 1, 2, 3 exist for this school year.
-     * A brand-new school year starts with Term 1 already open.
+     * "Multi-school-year academic history" work order, PART 3 — a term
+     * belongs to exactly one AcademicYear. Term 1 of 2026-2027 and Term 1
+     * of 2027-2028 are two different rows with two different parents;
+     * `term` (1/2/3) alone never identifies a term — always pair it with
+     * school_year / academic_year_id.
+     */
+    public function academicYear()
+    {
+        return $this->belongsTo(AcademicYear::class);
+    }
+
+    /**
+     * Make sure rows for Term 1, 2, 3 exist for this school year, each
+     * linked to the year's AcademicYear row (created inactive if the
+     * year was never explicitly configured). A brand-new school year
+     * starts with Term 1 already open.
      */
     public static function ensureExistFor(string $schoolYear): void
     {
+        $year = AcademicYear::ensureFor($schoolYear);
+
         foreach ([1, 2, 3] as $term) {
-            static::firstOrCreate(
+            $row = static::firstOrCreate(
                 ['school_year' => $schoolYear, 'term' => $term],
-                ['is_open' => $term === 1]
+                ['is_open' => $term === 1, 'academic_year_id' => $year->id]
             );
+
+            if ($row->academic_year_id === null) {
+                $row->forceFill(['academic_year_id' => $year->id])->save();
+            }
         }
+    }
+
+    /**
+     * Whether an Adviser may WRITE academic history (grades, assessment
+     * scores, uploads, report submissions) into this term. Two conditions,
+     * both server-side: the term is open, AND its school year is the one
+     * currently active. A closed term is read-only. A historical year's
+     * term is read-only even if its is_open flag was left set (a year that
+     * is no longer active is completed — AcademicYear::activate() closes
+     * its open terms, and this check makes that hold even if it didn't).
+     * Every write guard in the Adviser controllers calls this, not
+     * isOpen(), so a request that names an old year's section cannot
+     * reopen history from the URL.
+     */
+    public static function acceptsWrites(string $schoolYear, int $term): bool
+    {
+        return static::isOpen($schoolYear, $term)
+            && $schoolYear === Section::activeSchoolYear();
+    }
+
+    /**
+     * The one-line reason a write was refused, matching acceptsWrites().
+     */
+    public static function writeRefusalReason(string $schoolYear, int $term): string
+    {
+        if ($schoolYear !== Section::activeSchoolYear()) {
+            return "School Year {$schoolYear} is not the active school year. Its records are historical and read-only.";
+        }
+
+        return "Term {$term} is closed. Grades and assessments can only be recorded while the term is open.";
     }
 
     /** Which term number is open right now? Null if none. */
@@ -82,7 +134,7 @@ class AcademicTerm extends Model
         $electiveStatus = new \App\Services\SectionElectiveStatus();
 
         foreach ($sections as $section) {
-            $studentCount = Student::where('section_id', $section->id)->count();
+            $studentCount = Student::enrolledIn($section)->count();
 
             // Nothing to require yet (no students assigned) — skip.
             if ($studentCount === 0) continue;
@@ -105,13 +157,19 @@ class AcademicTerm extends Model
             $expected = $electiveStatus->expectedGradeCount($section, $term);
 
             // Nothing to require yet (no subjects resolved) — skip.
-            if ($expected === 0) continue;
+            if ($expected === 0) {
+                $incomplete[] = ['section' => $section->name, 'encoded' => 0, 'expected' => 0,
+                    'reason' => 'No subjects configured for this term.'];
+                continue;
+            }
 
             $hasAnythingExpected = true;
 
             $actual = Grade::where('section_id', $section->id)
                 ->where('grading_period', $term)
                 ->where('school_year', $schoolYear)
+                ->whereIn('student_id', Student::enrolledIn($section)->select('id'))
+                ->whereIn('subject_id', $electiveStatus->expectedSubjectsForTerm($section, $term)->pluck('id'))
                 ->count();
 
             if ($actual < $expected) {
@@ -124,7 +182,7 @@ class AcademicTerm extends Model
         }
 
         return [
-            'complete'              => empty($incomplete),
+            'complete'              => $hasAnythingExpected && empty($incomplete),
             'has_anything_expected' => $hasAnythingExpected,
             'incomplete_sections'   => $incomplete,
         ];
@@ -152,7 +210,7 @@ class AcademicTerm extends Model
             ->get();
 
         return $sections->map(function (Section $section) use ($term, $schoolYear) {
-            $studentCount = Student::where('section_id', $section->id)->count();
+            $studentCount = Student::enrolledIn($section)->count();
             $subjectCount = Subject::forSection($section)->count();
 
             $encoded = Grade::where('section_id', $section->id)

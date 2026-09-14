@@ -4,9 +4,9 @@
 
 @section('content')
 
-<div class="bg-white rounded-lg shadow-sm">
+<div class="card">
     <div class="px-5 py-3 border-b">
-        <h3 class="font-semibold text-gray-800 text-sm">Recent Activity</h3>
+        <h3 class="card-title">Recent Activity</h3>
         <p class="text-xs text-gray-500">All system actions recorded</p>
     </div>
 
@@ -40,14 +40,14 @@
                 <td class="text-xs text-gray-500">
                     {{ $log->created_at->format('M d, Y h:i A') }}
                 </td>
-                <td class="font-medium text-gray-800 text-xs">
+                <td class="font-medium text-ink text-xs">
                     {{ $log->user->name ?? 'Unknown' }}
                 </td>
                 <td class="text-xs text-gray-500 capitalize">
                     {{ $log->user->role ?? '—' }}
                 </td>
                 <td>
-                    <span class="px-2 py-0.5 rounded-full text-xs font-medium {{ $actionColor }}">
+                    <span class="badge {{ $actionColor }}">
                         {{ str_replace('_', ' ', ucfirst($log->action)) }}
                     </span>
                 </td>
@@ -69,22 +69,22 @@
 
     {{-- Pagination --}}
     @if($logs->hasPages())
-    <div class="px-6 py-4 border-t flex flex-col items-center gap-2 text-sm text-gray-500">
+    <div class="px-5 py-4 border-t border-line flex flex-col items-center gap-2 text-sm text-muted">
         <div class="flex items-center gap-1">
             @if($logs->onFirstPage())
-                <span class="px-3 py-1 rounded border text-gray-300 cursor-not-allowed">← Prev</span>
+                <span class="px-3 py-1 rounded-md border border-line text-gray-300 cursor-not-allowed">← Prev</span>
             @else
                 <a href="{{ $logs->previousPageUrl() }}"
-                   class="px-3 py-1 rounded border hover:bg-gray-50 text-gray-600">← Prev</a>
+                   class="px-3 py-1 rounded-md border border-line hover:bg-surface text-gray-600">← Prev</a>
             @endif
-            <span class="px-3 py-1 rounded border bg-brand-700 text-white font-medium">
+            <span class="px-3 py-1 rounded-md border border-brand-800 bg-brand-800 text-white font-medium">
                 {{ $logs->currentPage() }}
             </span>
             @if($logs->hasMorePages())
                 <a href="{{ $logs->nextPageUrl() }}"
-                   class="px-3 py-1 rounded border hover:bg-gray-50 text-gray-600">Next →</a>
+                   class="px-3 py-1 rounded-md border border-line hover:bg-surface text-gray-600">Next →</a>
             @else
-                <span class="px-3 py-1 rounded border text-gray-300 cursor-not-allowed">Next →</span>
+                <span class="px-3 py-1 rounded-md border border-line text-gray-300 cursor-not-allowed">Next →</span>
             @endif
         </div>
         <span class="text-xs">Showing {{ $logs->firstItem() }}–{{ $logs->lastItem() }} of <x-count-label :count="$logs->total()" noun="log" /></span>

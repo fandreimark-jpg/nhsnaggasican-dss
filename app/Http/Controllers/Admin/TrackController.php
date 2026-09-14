@@ -141,7 +141,7 @@ class TrackController extends Controller
     {
         $track = Track::findOrFail($id);
 
-        if ($track->sections()->count() > 0) {
+        if ($track->sections()->exists()) {
             return redirect()->route('admin.tracks')
                 ->with('error', 'Cannot delete track with existing sections.');
         }
