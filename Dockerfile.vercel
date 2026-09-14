@@ -9,8 +9,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxml2-dev libicu-dev libcurl4-openssl-dev libgomp1 libexpat1 libffi8 \
     libbz2-1.0 liblzma5 libreadline8 libsqlite3-0 libuuid1 libncursesw6 libtinfo6 \
     ca-certificates unzip \
+    && docker-php-ext-install -j"$(nproc)" dom xml \
+    # PHP 8.2 installs xml_common.h but omits dom_ce.h, required by XMLReader.
+    && docker-php-source extract \
+    && install -m 644 /usr/src/php/ext/dom/dom_ce.h "$(php-config --include-dir)/ext/dom/dom_ce.h" \
+    && docker-php-ext-install -j"$(nproc)" xmlreader xmlwriter simplexml \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install -j"$(nproc)" pdo_mysql mbstring gd zip intl bcmath opcache curl dom simplexml xml xmlreader xmlwriter \
+    && docker-php-ext-install -j"$(nproc)" pdo_mysql mbstring gd zip intl bcmath opcache curl \
+    && docker-php-source delete \
     && a2enmod rewrite \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=python /usr/local/ /usr/local/
