@@ -140,7 +140,7 @@
         </p>
 
         <form method="POST" action="{{ route('admin.sections.import') }}"
-              enctype="multipart/form-data" class="space-y-4">
+              enctype="multipart/form-data" class="space-y-4" data-loading="Importing sections...">
             @csrf
             <input type="file" name="file" accept=".xlsx,.xls,.csv" required
                    class="w-full border rounded-lg px-3 py-2 text-sm">
@@ -179,6 +179,7 @@
 
         <form id="sectionForm" method="POST" class="space-y-4"
               data-store-url="{{ route('admin.sections.store') }}"
+              data-update-url="{{ route('admin.sections.update', ['id' => '__ID__']) }}"
               data-spec-url="{{ url('admin/specializations-by-track') }}"
               data-active-school-year="{{ $activeSchoolYear }}">
             @csrf

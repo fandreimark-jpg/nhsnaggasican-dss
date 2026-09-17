@@ -89,7 +89,7 @@
                     aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
-        <form id="specForm" method="POST" class="space-y-4" data-store-url="{{ route('admin.specializations.store') }}">
+        <form id="specForm" method="POST" class="space-y-4" data-store-url="{{ route('admin.specializations.store') }}" data-update-url="{{ route('admin.specializations.update', ['id' => '__ID__']) }}">
             @csrf
             <input type="hidden" name="_method" id="formMethod" value="POST">
 
@@ -160,7 +160,7 @@
         </p>
 
         <form method="POST" action="{{ route('admin.specializations.import') }}"
-              enctype="multipart/form-data" class="space-y-4">
+              enctype="multipart/form-data" class="space-y-4" data-loading="Importing specializations...">
             @csrf
             <input type="file" name="file" accept=".xlsx,.xls,.csv" required
                    class="w-full border rounded-lg px-3 py-2 text-sm">

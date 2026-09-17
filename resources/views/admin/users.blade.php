@@ -179,6 +179,7 @@
 
         <form id="userForm" method="POST"
               data-store-url="{{ route('admin.users.store') }}"
+              data-update-url="{{ route('admin.users.update', ['id' => '__ID__']) }}"
               class="space-y-4">
             @csrf
             <input type="hidden" name="_method" id="formMethod" value="POST">

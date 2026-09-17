@@ -1029,11 +1029,12 @@ information. A twelfth is not.
 If a fix would require changing something these instructions forbid, stop and
 ask. Do not route around the constraint.
 
-The suite baseline is 992 passing, 0 skipped (as of the "multi-school-year
-academic history" work order, 2026-09-14; the earlier
-`ElectiveClusterLimitationTest` skip was un-skipped in ECR alignment PART 6).
-A run that is still at 992 because two failing tests were removed and two
-trivial ones added has made the project worse while making it look better.
+The suite baseline is 1,021 passing, 0 skipped (as of the pre-demo audit,
+2026-09-17 — 994 before it, plus 27 new tests; see `PRE_DEMO_FINAL_AUDIT.md`
+for the exact list. The earlier `ElectiveClusterLimitationTest` skip was
+un-skipped in ECR alignment PART 6). A run that is still at the baseline
+because two failing tests were removed and two trivial ones added has made
+the project worse while making it look better.
 
 ---
 
@@ -2093,3 +2094,72 @@ table component), which still holds.
   h-screen overflow-hidden`, the aside's drawer classes, `flex-1 p-6
   overflow-y-auto`) and the `confirmImportBtn`/`confirmDeleteBtn` colour
   classes must survive any future restyle.
+
+
+## Pre-demo audit pass (2026-09-17) — standing conventions it added
+
+Full findings and evidence are in `PRE_DEMO_FINAL_AUDIT.md`; these are the
+rules that stay true after it.
+
+- **One favicon source: `<x-app-favicon />`** (`resources/views/components/
+  app-favicon.blade.php`). Every layout — `layouts/app`, `layouts/guest`,
+  `auth/login`, `errors/layout` — includes it; none carries its own
+  `<link rel="icon">`. The icon files (`public/images/favicon-32.png`,
+  `favicon-192.png`, `apple-touch-icon.png`, and a real 32x32 PNG-in-ICO
+  `public/favicon.ico`) are derived from `public/images/nagga-logo.png`;
+  regenerate all four from that file if the logo ever changes. Before this
+  pass only the login page declared an icon and `favicon.ico` was a
+  zero-byte placeholder, so the tab icon vanished on sign-in.
+  `FaviconConsistencyTest` pins one identical declaration on every layout.
+- **Error pages live in `resources/views/errors/`** (`403`, `404`, `419`,
+  `500`, `503`), all extending `errors/layout` — a self-contained shell
+  that deliberately does NOT extend `layouts/app` (which needs
+  `auth()->user()` for the sidebar). Add a new HTTP error page there, never
+  by reaching for the app layout. `ErrorPagesTest` is the test of record.
+- **Edit-modal form actions are route-derived, never hardcoded.** Every
+  Edit form carries `data-update-url="{{ route('x.update', ['id' =>
+  '__ID__']) }}"` and `resources/js/modal.js` resolves it through
+  `window.updateUrlFor(form, id)`. The old ``form.action = `/admin/users/${id}` ``
+  pattern posts to the wrong host root under the XAMPP sub-directory
+  deployment (`http://localhost/naggasican-dss/public/`) and must not come
+  back — `EditFormActionsAreRouteDerivedTest` greps `modal.js` for it.
+- **Abandoned temp uploads are pruned on the next upload.**
+  `App\Services\TempUploadPruner::prune($dir)` runs at the start of
+  `Adviser\AssessmentController::detect()` and `Admin\StudentController::
+  importFromEcrPreview()`, removing files older than 24 h from that flow's
+  own `storage/app/private/temp_*` directory. No scheduler is involved on
+  purpose (none exists in this deployment). A third multi-step upload flow
+  must call it too.
+- **`tests/TestCase.php` fakes the `local` disk for every test.** Upload
+  tests used to write real files into `storage/app/private/temp_*` on each
+  run (830 of them had accumulated). A test that genuinely needs the real
+  disk must opt out explicitly and say why.
+- **Classifier output is validated as a whole before any `RiskResult` is
+  written** — `Adviser\ReportController::classifierOutputIsValid()`
+  (public, like `buildPythonPayload()`/`applyFailingSubjectOverride()`,
+  so it is unit-testable without a fake interpreter). `confidence`, when
+  present, must be numeric in 0–100; any defect fails the whole analysis
+  and the adviser sees the existing "risk analysis failed to generate"
+  warning. Never persist a partial result set.
+- **`exam_role_shares` 30/30/40 is the FALLBACK, not "provisional data
+  nobody checked."** The per-subject shares live on `deped_subject_catalog`
+  (from DepEd's own ECR workbook) and win first; the table is reached only
+  for a `do015_2026` subject with no catalog link. The seeder's docblock
+  now says exactly this — the older "PROVISIONAL" wording in git history
+  is superseded. The remaining, honest limitation is that neither source
+  has been checked against the signed PDF of DO 015, s. 2026.
+- **No `{!! !!}` in `resources/views`** — the last one (Admin Data Health
+  panel, static strings only) was converted to `{{ }}`; keep it at zero.
+- **`public/robots.txt` disallows everything.** Nothing here is public
+  content; error pages also carry `<meta name="robots" content="noindex">`.
+- **Every long-running form names its own loading label** via
+  `data-loading="…"` (Signing in…, Importing sections…, Validating E-Class
+  Record…, Recording intervention…); the generic "Processing..." fallback
+  is for forms nobody has thought about yet, not a target state.
+- Removed as verified-dead (zero `<x-…>` usages anywhere in `resources/`,
+  `app/`, `tests/`): the Breeze leftovers `components/{danger-button,
+  dropdown, dropdown-link, modal, nav-link, responsive-nav-link,
+  secondary-button, application-logo}.blade.php` and
+  `app/View/Components/AppLayout.php` (every page uses
+  `@extends('layouts.app')`, never `<x-app-layout>`). `GuestLayout.php`
+  stays — four auth views use `<x-guest-layout>`.

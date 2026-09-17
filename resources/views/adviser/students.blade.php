@@ -104,7 +104,7 @@
             <button type="button" onclick="closeEditModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
-        <form id="editForm" method="POST" class="space-y-4">
+        <form id="editForm" method="POST" class="space-y-4" data-update-url="{{ route('adviser.students.update', ['id' => '__ID__']) }}">
             @csrf
             @method('PUT')
 

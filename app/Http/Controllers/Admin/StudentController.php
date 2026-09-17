@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Student;
 use App\Services\StudentEnrollmentService;
+use App\Services\TempUploadPruner;
 use App\Models\Section;
 use App\Http\Controllers\Concerns\SummarizesImportFailures;
 use App\Http\Controllers\Concerns\ValidatesSpreadsheetUpload;
@@ -415,6 +416,9 @@ class StudentController extends Controller
 
         $section = Section::findOrFail($request->section_id);
         $originalName = $request->file('file')->getClientOriginalName();
+        // Same abandoned-upload tidy-up as Adviser\AssessmentController::detect().
+        TempUploadPruner::prune(self::ECR_LEARNER_IMPORT_TEMP_DIR);
+
         $storedFilename = Str::uuid() . '.' . $request->file('file')->getClientOriginalExtension();
         $request->file('file')->storeAs(self::ECR_LEARNER_IMPORT_TEMP_DIR, $storedFilename, 'local');
         $path = Storage::disk('local')->path(self::ECR_LEARNER_IMPORT_TEMP_DIR . '/' . $storedFilename);

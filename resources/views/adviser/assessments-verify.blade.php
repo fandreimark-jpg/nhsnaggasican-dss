@@ -91,7 +91,7 @@
         elsewhere, never how it's scored or weighted.
     </p>
 
-    <form method="POST" action="{{ route('adviser.assessments.preview') }}">
+    <form method="POST" action="{{ route('adviser.assessments.preview') }}" data-loading="Validating scores...">
         @csrf
         <input type="hidden" name="subject_id" value="{{ $subject->id }}">
         <input type="hidden" name="grading_period" value="{{ $gradingPeriod }}">

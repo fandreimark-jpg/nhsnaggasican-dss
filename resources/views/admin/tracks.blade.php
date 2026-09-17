@@ -103,7 +103,7 @@
                     aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
-        <form id="trackForm" method="POST" class="space-y-4" data-store-url="{{ route('admin.tracks.store') }}">
+        <form id="trackForm" method="POST" class="space-y-4" data-store-url="{{ route('admin.tracks.store') }}" data-update-url="{{ route('admin.tracks.update', ['id' => '__ID__']) }}">
             @csrf
             <input type="hidden" name="_method" id="formMethod" value="POST">
 
@@ -175,7 +175,7 @@
         </p>
 
         <form method="POST" action="{{ route('admin.tracks.import') }}"
-              enctype="multipart/form-data" class="space-y-4">
+              enctype="multipart/form-data" class="space-y-4" data-loading="Importing tracks...">
             @csrf
             <input type="file" name="file" accept=".xlsx,.xls,.csv" required
                    class="w-full border rounded-lg px-3 py-2 text-sm">

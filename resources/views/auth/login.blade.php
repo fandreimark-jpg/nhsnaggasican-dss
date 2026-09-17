@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>Login — Naggasican NHS DSS</title>
-    <link rel="icon" type="image/png" href="{{ asset('images/nagga-logo.png') }}">
+    <x-app-favicon />
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     <link rel="stylesheet" href="{{ asset('vendor/bootstrap-icons/bootstrap-icons.min.css') }}">
 </head>
@@ -40,14 +40,17 @@
 
                 {{-- Errors --}}
                 @if($errors->any())
-                    <div class="alert alert-danger mb-4">
+                    <div class="alert alert-danger mb-4" role="alert" aria-live="assertive">
                         @foreach($errors->all() as $error)
                             <p>{{ $error }}</p>
                         @endforeach
                     </div>
                 @endif
 
-                <form method="POST" action="{{ route('login') }}" class="space-y-4">
+                {{-- data-loading: resources/js/confirm.js disables the submit button
+                     and relabels it with this text the moment the form is sent, so a
+                     slow network can't produce a double login attempt. --}}
+                <form method="POST" action="{{ route('login') }}" class="space-y-4" data-loading="Signing in…">
                     @csrf
 
                     {{-- Email/Username --}}
@@ -58,13 +61,15 @@
                         <div class="relative">
                             <i class="bi bi-person absolute left-3 top-2.5 text-gray-400 text-sm"></i>
                             <input
-                                type="text"
+                                type="email"
                                 id="email"
                                 name="email"
                                 value="{{ old('email') }}"
                                 required
                                 autofocus
-                                placeholder="email@naggasican.edu.ph"
+                                autocomplete="username"
+                                inputmode="email"
+                                placeholder="Enter your email address"
                                 class="w-full border border-line rounded-lg pl-9 pr-4 py-2.5 text-sm
                                        focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent
                                        placeholder-gray-300">
@@ -83,13 +88,15 @@
                                 id="password"
                                 name="password"
                                 required
+                                autocomplete="current-password"
                                 placeholder="Enter your password"
                                 class="w-full border border-line rounded-lg pl-9 pr-10 py-2.5 text-sm
                                        focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-transparent
                                        placeholder-gray-300">
-                            <button type="button" onclick="togglePassword()"
-                                class="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600">
-                                <i class="bi bi-eye" id="eyeIcon"></i>
+                            <button type="button" onclick="togglePassword()" id="togglePasswordBtn"
+                                aria-label="Show password" aria-pressed="false"
+                                class="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-brand-400 rounded">
+                                <i class="bi bi-eye" id="eyeIcon" aria-hidden="true"></i>
                             </button>
                         </div>
                     </div>

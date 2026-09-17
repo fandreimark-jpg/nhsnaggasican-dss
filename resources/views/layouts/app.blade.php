@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <link rel="stylesheet" href="{{ asset('vendor/bootstrap-icons/bootstrap-icons.min.css') }}">
-    <title>Naggasican NHS DSS</title>
+    <title>@hasSection('title')@yield('title') — @endif Naggasican NHS DSS</title>
+    <x-app-favicon />
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body class="bg-surface font-sans">
@@ -188,7 +189,8 @@
     {{-- ===================== TOAST NOTIFICATION ===================== --}}
     @if(session('success') || session('error') || session('warning'))
     <div id="flashToast"
-         class="fixed top-6 right-6 z-[9999] flex items-start gap-3 px-5 py-4 rounded-xl shadow-modal border w-80
+         role="status" aria-live="polite"
+         class="fixed top-4 right-4 md:top-6 md:right-6 z-[9999] flex items-start gap-3 px-5 py-4 rounded-xl shadow-modal border w-80 max-w-[calc(100vw-2rem)]
                 opacity-0 translate-y-3 transition-all duration-500
                 {{ session('success') ? 'bg-white border-green-300' : '' }}
                 {{ session('error')   ? 'bg-white border-red-300'   : '' }}

@@ -556,7 +556,7 @@
             <i class="bi bi-info-circle"></i> The DSS recommendation becomes available once the adviser submits the term report. You can still record an intervention now, from this assessment evidence.
         </p>
 
-        <form method="POST" action="{{ route('principal.interventions.store') }}" class="space-y-4">
+        <form method="POST" action="{{ route('principal.interventions.store') }}" class="space-y-4" data-loading="Recording intervention...">
             @csrf
             <input type="hidden" name="student_id" id="rivStudentId">
             <input type="hidden" name="subject_id" id="rivSubjectId">
@@ -686,7 +686,7 @@
                 </label>
             </div>
 
-            <form method="POST" action="{{ route('principal.interventions.bulk-store') }}" class="flex flex-col flex-1 min-h-0">
+            <form method="POST" action="{{ route('principal.interventions.bulk-store') }}" class="flex flex-col flex-1 min-h-0" data-loading="Recording interventions...">
                 @csrf
                 <input type="hidden" name="subject_id" value="{{ $subject->id ?? '' }}">
                 <input type="hidden" name="grading_period" value="{{ $gradingPeriod }}">

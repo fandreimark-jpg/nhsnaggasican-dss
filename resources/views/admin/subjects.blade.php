@@ -197,6 +197,7 @@
 
         <form id="subjectForm" method="POST" class="space-y-4"
               data-store-url="{{ route('admin.subjects.store') }}"
+              data-update-url="{{ route('admin.subjects.update', ['id' => '__ID__']) }}"
               data-spec-url="{{ url('admin/specializations-by-track') }}">
             @csrf
             <input type="hidden" name="_method" id="formMethod" value="POST">
@@ -322,7 +323,7 @@
         </p>
 
         <form method="POST" action="{{ route('admin.subjects.import') }}"
-              enctype="multipart/form-data" class="space-y-4">
+              enctype="multipart/form-data" class="space-y-4" data-loading="Importing subjects...">
             @csrf
 
             <div>

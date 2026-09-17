@@ -15,6 +15,7 @@ use App\Models\Student;
 use App\Helpers\LogActivity;
 use App\Http\Controllers\Concerns\ValidatesSpreadsheetUpload;
 use App\Services\AssessmentUploadService;
+use App\Services\TempUploadPruner;
 use App\Services\InTermStatusService;
 use App\Services\PerformanceAnalysisService;
 use Illuminate\Http\Request;
@@ -260,6 +261,11 @@ class AssessmentController extends Controller
             return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
                 ->with('error', AcademicTerm::writeRefusalReason($section->school_year, $gradingPeriod));
         }
+
+        // Tidy uploads abandoned on the Verify/Preview screens before
+        // adding another one — see TempUploadPruner for why this runs
+        // here rather than from a scheduler.
+        TempUploadPruner::prune(self::TEMP_DIR);
 
         $storedFilename = Str::uuid() . '.' . $request->file('file')->getClientOriginalExtension();
         $request->file('file')->storeAs(self::TEMP_DIR, $storedFilename, 'local');

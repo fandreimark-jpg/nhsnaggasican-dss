@@ -9,6 +9,7 @@ use App\Models\Section;
 use App\Models\Student;
 use App\Models\Subject;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
 /**
@@ -461,7 +462,6 @@ class AssessmentUploadService
     ): array {
         $rows = $this->readRows($filePath, $gradingPeriod, $section);
         $errors = [];
-        $importedCount = 0;
 
         if (empty($rows)) {
             return ['imported' => 0, 'errors' => ['The uploaded file is empty.'], 'ecr_profile_version' => $this->lastEcrProfileVersion, 'detected_format' => $this->lastDetectedFormat];
@@ -472,87 +472,100 @@ class AssessmentUploadService
         $studentsByLrn = Student::enrolledIn($section)->get()->keyBy('lrn');
         $rowOffset = $maxRow !== null ? 1 : 0;
 
-        // One Assessment item per confirmed column, created/updated once
-        // up front — not per row — since it's the same item for every student.
-        $assessmentsByColumnIndex = [];
-        foreach ($columnIndexMap as $index => $col) {
-            $assessment = Assessment::updateOrCreate(
-                [
-                    'subject_id'     => $subject->id,
-                    'section_id'     => $section->id,
-                    'grading_period' => $gradingPeriod,
-                    'school_year'    => $schoolYear,
-                    'name'           => $col['name'],
-                ],
-                [
-                    'assessment_type' => $col['name'],
-                    'component'       => $col['component'],
-                    // Only relevant for Examination items — a Written
-                    // Work/Performance Task column mapping never sets
-                    // this key at all, so it stays null (see
-                    // GradingEngine::examinationPercentage()'s "no role
-                    // set" fallback).
-                    'exam_role'       => $col['exam_role'] ?? null,
-                    // "Workflow completion pass" TASK 3b — set explicitly
-                    // by the Adviser on the Verify screen, never inferred
-                    // from the column's name.
-                    'is_additional_support' => $col['is_additional_support'] ?? false,
-                    'max_score'       => $col['max_score'],
-                    'import_batch_id' => (string) $upload->id,
-                    'uploaded_by'     => $uploaderId,
-                ]
-            );
-            $assessmentsByColumnIndex[$index] = $assessment;
-        }
+        // Pre-demo audit (2026-09-17), section 13 — the whole write phase
+        // (every Assessment item and every AssessmentScore row) is one
+        // transaction. Row-level rejections are unchanged: an invalid
+        // cell is still skipped and reported, exactly as the Preview step
+        // already showed the adviser. What this adds is that an
+        // infrastructure failure part-way through (connection drop,
+        // deadlock, disk full) rolls back to "nothing imported" rather
+        // than leaving half a class's scores in the database with the
+        // upload record still reading pending_review.
+        return DB::transaction(function () use ($columnIndexMap, $dataRows, $studentsByLrn, $rowOffset, $subject, $section, $gradingPeriod, $schoolYear, $uploaderId, $upload, &$errors) {
+            $importedCount = 0;
 
-        $seenLrns = [];
-
-        foreach ($dataRows as $rowIndex => $row) {
-            $excelRowNumber = $rowIndex + 2 + $rowOffset;
-            $lrn = trim((string) ($row[0] ?? ''));
-
-            if ($lrn === '') {
-                continue; // fully blank row — skip silently
-            }
-
-            if (isset($seenLrns[$lrn])) {
-                $errors[] = "Row {$excelRowNumber}: LRN {$lrn} appears more than once in this file — only the first occurrence was used.";
-                continue;
-            }
-            $seenLrns[$lrn] = true;
-
-            $student = $studentsByLrn->get($lrn);
-            if (!$student) {
-                $errors[] = "Row {$excelRowNumber}: No student with LRN {$lrn} found in your section.";
-                continue;
-            }
-
-            foreach ($assessmentsByColumnIndex as $index => $assessment) {
-                $value = $row[$index] ?? null;
-                if ($value === null || trim((string) $value) === '') {
-                    continue; // blank score, not an error — not yet scored
-                }
-
-                if (!is_numeric($value) || (float) $value < 0) {
-                    $errors[] = "Row {$excelRowNumber}: Invalid score '{$value}' for {$assessment->name} (must be a non-negative number).";
-                    continue;
-                }
-
-                if ((float) $value > (float) $assessment->max_score) {
-                    $errors[] = "Row {$excelRowNumber}: Score {$value} for {$assessment->name} exceeds its maximum of {$assessment->max_score}.";
-                    continue;
-                }
-
-                AssessmentScore::updateOrCreate(
-                    ['assessment_id' => $assessment->id, 'student_id' => $student->id],
-                    ['score' => $value]
+            // One Assessment item per confirmed column, created/updated once
+            // up front — not per row — since it's the same item for every student.
+            $assessmentsByColumnIndex = [];
+            foreach ($columnIndexMap as $index => $col) {
+                $assessment = Assessment::updateOrCreate(
+                    [
+                        'subject_id'     => $subject->id,
+                        'section_id'     => $section->id,
+                        'grading_period' => $gradingPeriod,
+                        'school_year'    => $schoolYear,
+                        'name'           => $col['name'],
+                    ],
+                    [
+                        'assessment_type' => $col['name'],
+                        'component'       => $col['component'],
+                        // Only relevant for Examination items — a Written
+                        // Work/Performance Task column mapping never sets
+                        // this key at all, so it stays null (see
+                        // GradingEngine::examinationPercentage()'s "no role
+                        // set" fallback).
+                        'exam_role'       => $col['exam_role'] ?? null,
+                        // "Workflow completion pass" TASK 3b — set explicitly
+                        // by the Adviser on the Verify screen, never inferred
+                        // from the column's name.
+                        'is_additional_support' => $col['is_additional_support'] ?? false,
+                        'max_score'       => $col['max_score'],
+                        'import_batch_id' => (string) $upload->id,
+                        'uploaded_by'     => $uploaderId,
+                    ]
                 );
-
-                $importedCount++;
+                $assessmentsByColumnIndex[$index] = $assessment;
             }
-        }
 
-        return ['imported' => $importedCount, 'errors' => $errors, 'ecr_profile_version' => $this->lastEcrProfileVersion, 'detected_format' => $this->lastDetectedFormat];
+            $seenLrns = [];
+
+            foreach ($dataRows as $rowIndex => $row) {
+                $excelRowNumber = $rowIndex + 2 + $rowOffset;
+                $lrn = trim((string) ($row[0] ?? ''));
+
+                if ($lrn === '') {
+                    continue; // fully blank row — skip silently
+                }
+
+                if (isset($seenLrns[$lrn])) {
+                    $errors[] = "Row {$excelRowNumber}: LRN {$lrn} appears more than once in this file — only the first occurrence was used.";
+                    continue;
+                }
+                $seenLrns[$lrn] = true;
+
+                $student = $studentsByLrn->get($lrn);
+                if (!$student) {
+                    $errors[] = "Row {$excelRowNumber}: No student with LRN {$lrn} found in your section.";
+                    continue;
+                }
+
+                foreach ($assessmentsByColumnIndex as $index => $assessment) {
+                    $value = $row[$index] ?? null;
+                    if ($value === null || trim((string) $value) === '') {
+                        continue; // blank score, not an error — not yet scored
+                    }
+
+                    if (!is_numeric($value) || (float) $value < 0) {
+                        $errors[] = "Row {$excelRowNumber}: Invalid score '{$value}' for {$assessment->name} (must be a non-negative number).";
+                        continue;
+                    }
+
+                    if ((float) $value > (float) $assessment->max_score) {
+                        $errors[] = "Row {$excelRowNumber}: Score {$value} for {$assessment->name} exceeds its maximum of {$assessment->max_score}.";
+                        continue;
+                    }
+
+                    AssessmentScore::updateOrCreate(
+                        ['assessment_id' => $assessment->id, 'student_id' => $student->id],
+                        ['score' => $value]
+                    );
+
+                    $importedCount++;
+                }
+            }
+
+            return ['imported' => $importedCount, 'errors' => $errors, 'ecr_profile_version' => $this->lastEcrProfileVersion, 'detected_format' => $this->lastDetectedFormat];
+        });
     }
 
     /**

@@ -62,7 +62,7 @@
                 <x-ui.status-badge :tone="$yearTone" :icon="$yearIcon" :label="$yearLabel" />
             </div>
 
-            <dl class="grid grid-cols-4 gap-2 text-center" title="Records on file for this school year">
+            <dl class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center" title="Records on file for this school year">
                 <div class="rounded-lg bg-surface px-2 py-2"><dt class="text-[11px] uppercase tracking-wide text-muted">Sections</dt><dd class="text-lg font-bold text-ink tabular-nums">{{ $year->record_counts['sections'] }}</dd></div>
                 <div class="rounded-lg bg-surface px-2 py-2"><dt class="text-[11px] uppercase tracking-wide text-muted">Enrolled</dt><dd class="text-lg font-bold text-ink tabular-nums">{{ $year->record_counts['enrollments'] }}</dd></div>
                 <div class="rounded-lg bg-surface px-2 py-2"><dt class="text-[11px] uppercase tracking-wide text-muted">Grades</dt><dd class="text-lg font-bold text-ink tabular-nums">{{ $year->record_counts['grades'] }}</dd></div>

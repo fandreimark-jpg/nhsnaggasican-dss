@@ -190,7 +190,7 @@
         </p>
 
         <form method="POST" action="{{ route('adviser.grades.import') }}"
-              enctype="multipart/form-data" class="space-y-4">
+              enctype="multipart/form-data" class="space-y-4" data-loading="Importing grades...">
             @csrf
             <input type="hidden" name="grading_period" value="{{ $selectedPeriod }}">
             <input type="file" name="file" accept=".xlsx,.xls,.csv" required

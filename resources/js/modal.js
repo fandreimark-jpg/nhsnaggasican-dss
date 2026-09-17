@@ -97,6 +97,20 @@ window.hideModal = function (id) {
 };
 
 // Escape closes the top-most modal opened through showModal().
+// Edit-modal form actions come from the form's own data-update-url
+// (a route() URL rendered server-side with a literal __ID__ placeholder),
+// never from a hardcoded root-relative path like `/admin/users/1`. The
+// app is served from a sub-directory on the XAMPP host
+// (http://localhost/naggasican-dss/public/) as well as from a root on
+// `artisan serve` and Vercel; a root-relative path is wrong for the former.
+window.updateUrlFor = function (form, id) {
+    const template = form && form.dataset ? form.dataset.updateUrl : null;
+    if (!template) {
+        throw new Error("Form " + (form && form.id) + " is missing data-update-url");
+    }
+    return template.replace("__ID__", encodeURIComponent(id));
+};
+
 document.addEventListener("keydown", function (e) {
     if (e.key !== "Escape" || openModalStack.length === 0) return;
     const id = openModalStack[openModalStack.length - 1];
@@ -134,7 +148,7 @@ document.addEventListener("DOMContentLoaded", function () {
             document.getElementById("edit_gender").value = student.gender;
             document.getElementById("edit_birthdate").value =
                 window.toDateInputValue(student.birthdate);
-            editStudentForm.action = `/adviser/students/${student.id}`;
+            editStudentForm.action = window.updateUrlFor(editStudentForm, student.id);
             window.showModal("editModal");
         };
 
@@ -203,7 +217,7 @@ document.addEventListener("DOMContentLoaded", function () {
             userForm.reset();
             userTitle.textContent = "Edit User";
             userSubmit.textContent = "Update User";
-            userForm.action = `/admin/users/${user.id}`;
+            userForm.action = window.updateUrlFor(userForm, user.id);
             userMethod.value = "PUT";
 
             document.getElementById("field_last_name").value = user.last_name ?? "";
@@ -306,7 +320,7 @@ document.addEventListener("DOMContentLoaded", function () {
             sectionForm.reset();
             sectionTitle.textContent = "Edit Section";
             sectionMethod.value = "PUT";
-            sectionForm.action = `/admin/sections/${section.id}`;
+            sectionForm.action = window.updateUrlFor(sectionForm, section.id);
 
             document.getElementById("sectionName").value = section.name;
             document.getElementById("sectionGrade").value = section.grade_level;
@@ -358,7 +372,7 @@ document.addEventListener("DOMContentLoaded", function () {
             adminStudentForm.reset();
             studentModalTitle.textContent = "Edit Student";
             studentSubmitBtn.textContent = "Update Student";
-            adminStudentForm.action = `/admin/students/${student.id}`;
+            adminStudentForm.action = window.updateUrlFor(adminStudentForm, student.id);
             studentMethod.value = "PUT";
 
             document.getElementById("ps_lrn").value = student.lrn;
@@ -455,7 +469,7 @@ document.addEventListener("DOMContentLoaded", function () {
         window.openEditTrackModal = function (track) {
             document.getElementById("modalTitle").textContent = "Edit Track";
             document.getElementById("formMethod").value = "PUT";
-            trackForm.action = `/admin/tracks/${track.id}`;
+            trackForm.action = window.updateUrlFor(trackForm, track.id);
             document.getElementById("trackName").value = track.name;
             document.getElementById("trackCode").value = track.code;
             document.getElementById("trackDescription").value = track.description || "";
@@ -496,7 +510,7 @@ document.addEventListener("DOMContentLoaded", function () {
         window.openEditSpecModal = function (spec) {
             document.getElementById("modalTitle").textContent = "Edit Specialization";
             document.getElementById("formMethod").value = "PUT";
-            specForm.action = `/admin/specializations/${spec.id}`;
+            specForm.action = window.updateUrlFor(specForm, spec.id);
             document.getElementById("specTrack").value = spec.track_id;
             document.getElementById("specName").value = spec.name;
             document.getElementById("specCode").value = spec.code;
@@ -603,7 +617,7 @@ document.addEventListener("DOMContentLoaded", function () {
         window.openEditSubjectModal = function (subject) {
             document.getElementById("modalTitle").textContent = "Edit Subject";
             document.getElementById("formMethod").value = "PUT";
-            subjectForm.action = `/admin/subjects/${subject.id}`;
+            subjectForm.action = window.updateUrlFor(subjectForm, subject.id);
             document.getElementById("subjectName").value = subject.name;
             document.getElementById("subjectType").value = subject.type;
             document.getElementById("subjectGrade").value = subject.grade_level;

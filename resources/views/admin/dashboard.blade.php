@@ -147,7 +147,7 @@
                         <div class="flex items-start gap-3 min-w-0">
                             <div class="icon-box icon-box-sm {{ ($item['neutral'] ?? false) ? 'icon-box-slate' : 'icon-box-' . $tone }}" aria-hidden="true"><i class="bi {{ $item['icon'] }}"></i></div>
                             <p class="text-sm {{ ($item['neutral'] ?? false) ? 'text-muted' : 'text-gray-700' }} leading-snug">
-                                @isset($item['count'])<span class="font-semibold">{{ $item['count'] }}</span> @endisset{!! $item['text'] !!}{{-- static wording only; names live in 'detail' and stay escaped --}}
+                                @isset($item['count'])<span class="font-semibold">{{ $item['count'] }}</span> @endisset{{ $item['text'] }}
                                 @if(!empty($item['detail']))<span class="block text-xs text-muted mt-0.5">{{ $item['detail'] }}</span>@endif
                             </p>
                         </div>

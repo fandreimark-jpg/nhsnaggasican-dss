@@ -304,6 +304,7 @@
         @endif
 
         <form id="adminStudentForm" method="POST"
+              data-update-url="{{ route('admin.students.update', ['id' => '__ID__']) }}"
               class="space-y-4">
             @csrf
             <input type="hidden" name="_method" id="studentMethod" value="PUT">
@@ -470,7 +471,7 @@
         </p>
 
         <form method="POST" action="{{ route('admin.students.import-from-ecr.preview') }}"
-              enctype="multipart/form-data" class="space-y-4">
+              enctype="multipart/form-data" class="space-y-4" data-loading="Validating E-Class Record...">
             @csrf
             <div>
                 <label class="form-label">Section</label>
@@ -690,7 +691,7 @@
         </p>
 
         <form method="POST" action="{{ route('admin.students.extract-roster') }}"
-              enctype="multipart/form-data" class="space-y-4">
+              enctype="multipart/form-data" class="space-y-4" data-loading="Reading E-Class Record...">
             @csrf
 
             <input type="file" name="file" accept=".xlsx,.xls" required

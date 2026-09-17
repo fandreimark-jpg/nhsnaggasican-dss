@@ -272,10 +272,12 @@ class AdminDataHealthChecksTest extends TestCase
         $response = $this->actingAs($admin)->get('/admin/dashboard');
 
         $response->assertOk();
-        // The apostrophe in this static Blade text is never passed through
-        // {{ }} (it's literal markup, not an interpolated value), so it's
-        // unescaped in the actual response -- assertSee's default escaping
-        // would look for &#039; and never find it. Compare raw.
-        $response->assertSee("Every subject's stored grading weight matches its group or catalog link", false);
+        // Pre-demo audit (2026-09-17): this panel text used to be printed
+        // through {!! !!} (the last unescaped output in the views), so the
+        // apostrophe reached the browser raw and this assertion compared
+        // raw. It now goes through {{ }} like everything else, so
+        // assertSee's default escaping (which looks for &#039;) is the
+        // correct comparison -- same wording, safer encoding.
+        $response->assertSee("Every subject's stored grading weight matches its group or catalog link");
     }
 }

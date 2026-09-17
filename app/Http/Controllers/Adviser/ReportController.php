@@ -335,16 +335,9 @@ class ReportController extends Controller
                 return false;
             }
             $results = json_decode(file_get_contents($outputFile), true, 512, JSON_THROW_ON_ERROR);
-            $expectedIds = array_column($gradesData, 'student_id');
-            if (!is_array($results) || count($results) !== count($expectedIds)) return false;
-            $seen = [];
-            foreach ($results as $result) {
-                if (!is_array($result) || !isset($result['student_id'], $result['risk_level'], $result['average_grade'])
-                    || !in_array($result['student_id'], $expectedIds)
-                    || isset($seen[$result['student_id']])
-                    || !in_array($result['risk_level'], ['low', 'moderate', 'high'], true)
-                    || !is_numeric($result['average_grade'])) return false;
-                $seen[$result['student_id']] = true;
+            if (!$this->classifierOutputIsValid($results, array_column($gradesData, 'student_id'))) {
+                \Log::error('Analytics output failed validation.', ['execution_id' => $executionId]);
+                return false;
             }
         } catch (\Throwable $e) {
             \Log::error('Analytics execution failed.', ['exception' => get_class($e)]);
@@ -391,6 +384,48 @@ class ReportController extends Controller
                     'generated_at'          => now(),
                 ]
             );
+        }
+
+        return true;
+    }
+
+    /**
+     * Validates what classify.py wrote back before a single row of it is
+     * persisted: exactly one result per student that was sent, each with a
+     * recognised risk level, a numeric average, and — when present — a
+     * confidence that is actually a percentage (0–100, matching both what
+     * classify.py emits and the decimal(5,2) column it lands in). Anything
+     * else is treated as a failed analysis, never partially saved.
+     *
+     * Public, like buildPythonPayload() and applyFailingSubjectOverride(),
+     * so malformed-output cases can be unit-tested without a fake Python
+     * interpreter.
+     *
+     * @param mixed $results decoded JSON from the classifier
+     * @param array<int, int> $expectedStudentIds
+     */
+    public function classifierOutputIsValid(mixed $results, array $expectedStudentIds): bool
+    {
+        if (!is_array($results) || count($results) !== count($expectedStudentIds)) {
+            return false;
+        }
+
+        $seen = [];
+        foreach ($results as $result) {
+            if (!is_array($result) || !isset($result['student_id'], $result['risk_level'], $result['average_grade'])
+                || !in_array($result['student_id'], $expectedStudentIds)
+                || isset($seen[$result['student_id']])
+                || !in_array($result['risk_level'], ['low', 'moderate', 'high'], true)
+                || !is_numeric($result['average_grade'])) {
+                return false;
+            }
+
+            if (array_key_exists('confidence', $result) && $result['confidence'] !== null
+                && (!is_numeric($result['confidence']) || $result['confidence'] < 0 || $result['confidence'] > 100)) {
+                return false;
+            }
+
+            $seen[$result['student_id']] = true;
         }
 
         return true;
