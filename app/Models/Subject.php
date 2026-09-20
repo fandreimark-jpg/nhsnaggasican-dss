@@ -76,64 +76,92 @@ class Subject extends Model
     }
 
     /**
-     * Get the subjects applicable to a given section — core subjects for
-     * that grade level, plus electives. Shared logic used by grade
-     * encoding, the term-completion check, and everywhere else that needs
-     * "what does this section take," so they all always count the same
-     * set. Returns a query builder, not a collection — every caller
-     * appends ->get()/->pluck()/->count()/etc. itself.
-     *
-     * "ECR alignment" work order, PART 6 — the elective half now branches
-     * on curriculum, and the two branches answer genuinely different
-     * questions (see CLAUDE.md, "Elective selection is per-cluster, not
-     * per-learner"):
-     *
-     *   - curriculum = 'sshs': a section has no specialization to have
-     *     chosen (SSHS has no strands), so "every elective matching the
-     *     track" was never a real answer — it returns every elective in
-     *     the whole track. Electives now come from section_subject
-     *     instead: exactly what this section has actually been assigned,
-     *     nothing more. A section with zero section_subject rows
-     *     correctly gets zero electives here — see
-     *     SectionElectiveStatus::isFullyConfigured() for the SEPARATE
-     *     question of whether that zero is because there was nothing to
-     *     assign, or because nobody has assigned it yet.
-     *   - k12_2013 (or null/unrecognised curriculum, the same fallback
-     *     TransmutationService::schemeFor() already uses): UNCHANGED,
-     *     byte-identical to before this part. A section's
-     *     specialization_id there legitimately means "the strand this
-     *     section chose" — that mechanism is not broken and must not be
-     *     touched here.
+     * TERMS TAUGHT ("Subject applicability" refactor, 2026-09-20) — one
+     * SubjectTerm row per academic term this subject is taught in, set on
+     * Admin > Subjects. The third leg of SubjectApplicabilityService's
+     * rule: a subject reaches a section only in the terms listed here.
      */
-    public static function forSection(Section $section)
+    public function terms()
     {
-        if ($section->curriculum === 'sshs') {
-            $electiveSubjectIds = SectionSubject::where('section_id', $section->id)
-                ->where('school_year', $section->school_year)
-                ->pluck('subject_id');
+        return $this->hasMany(SubjectTerm::class)->orderBy('term');
+    }
 
-            return static::where('grade_level', $section->grade_level)
-                ->where(function ($query) use ($electiveSubjectIds) {
-                    $query->where('type', 'core')
-                        ->orWhere(function ($q) use ($electiveSubjectIds) {
-                            $q->where('type', 'elective')
-                              ->whereIn('id', $electiveSubjectIds);
-                        });
-                });
+    /** @return array<int, int> ascending term numbers this subject is taught in */
+    public function termNumbers(): array
+    {
+        return $this->terms->pluck('term')->map(fn($t) => (int) $t)->sort()->values()->all();
+    }
+
+    public function isTaughtIn(int $term): bool
+    {
+        return in_array($term, $this->termNumbers(), true);
+    }
+
+    /** "T1, T2, T3" — the short label the Admin lists use. */
+    public function termsLabel(): string
+    {
+        $numbers = $this->termNumbers();
+
+        return $numbers === [] ? 'No term set' : implode(', ', array_map(fn($t) => 'T' . $t, $numbers));
+    }
+
+    /**
+     * Replaces this subject's Terms Taught with exactly $terms. Rows are
+     * added and removed individually so an unchanged term keeps its row
+     * (and its created_at). History protection is the CALLER's job —
+     * Admin\SubjectController checks SubjectApplicabilityService::
+     * historyConflicts() before ever reaching this.
+     *
+     * @param array<int, int> $terms
+     */
+    public function syncTerms(array $terms): void
+    {
+        $wanted = collect($terms)->map(fn($t) => (int) $t)->unique()->sort()->values();
+        $current = $this->terms()->pluck('term')->map(fn($t) => (int) $t);
+
+        foreach ($current->diff($wanted) as $term) {
+            $this->terms()->where('term', $term)->delete();
+        }
+        foreach ($wanted->diff($current) as $term) {
+            $this->terms()->create(['term' => $term]);
         }
 
-        return static::where('grade_level', $section->grade_level)
-            ->where(function ($query) use ($section) {
-                $query->where('type', 'core')
-                    ->orWhere(function ($q) use ($section) {
-                        $q->where('type', 'elective')
-                          ->where('track_id', $section->track_id)
-                          ->where(function ($q2) use ($section) {
-                              $q2->whereNull('specialization_id')
-                                 ->orWhere('specialization_id', $section->specialization_id);
-                          });
-                    });
-            });
+        $this->unsetRelation('terms');
+    }
+
+    /**
+     * The subjects a section takes — optionally in ONE academic term.
+     * Shared by grade encoding, assessment upload, the term-completion
+     * check, and everywhere else that needs "what does this section
+     * take," so they all count the same set. Returns a query builder,
+     * not a collection — every caller appends ->get()/->pluck()/->count()
+     * itself.
+     *
+     * "Subject applicability" refactor (2026-09-20) — the rule lives in
+     * ONE place, SubjectApplicabilityService::query(): core subjects of the
+     * grade level, plus electives reached by the section's track /
+     * specialization (k12_2013 strands) or chosen for the section
+     * (section_subjects), each only in the terms the subject is TAUGHT
+     * (Terms Taught on Admin > Subjects). The former "term-managed"
+     * path, where section_subjects rows replaced the curriculum outright
+     * and had to be assigned per section per term, is gone; the table now
+     * records section elective choices only. See that service's docblock.
+     */
+    public static function forSection(Section $section, ?int $term = null)
+    {
+        return (new \App\Services\SubjectApplicabilityService())->query($section, $term);
+    }
+
+    /**
+     * The single yes/no every Adviser write path asks before touching a
+     * subject: is this subject offered to this section in this term?
+     * A crafted request naming a subject the section takes in Term 1
+     * only, posted against Term 2, gets false here and is refused with
+     * SubjectOfferingService::notOfferedMessage().
+     */
+    public static function isOfferedTo(Section $section, int $term, int $subjectId): bool
+    {
+        return static::forSection($section, $term)->where('id', $subjectId)->exists();
     }
 
     /**
@@ -167,9 +195,15 @@ class Subject extends Model
      */
     public static function withSuspectSubjectGroup(): \Illuminate\Support\Collection
     {
+        // "Subject Group for both grade levels" pass — a subject with NO
+        // group is a configuration gap at either grade level (the form now
+        // requires one for Grade 11 and Grade 12 alike; only data created
+        // before that rule can still be null). Listed, never backfilled.
+        $unclassified = static::whereNull('subject_group')->get();
+
         $electivesOnDefault = static::where('type', 'elective')->where('subject_group', 'core_academic')->get();
 
-        $catalogLinked = static::whereNotNull('catalog_id')->with('catalog')->get();
+        $catalogLinked = static::whereNotNull('catalog_id')->whereNotNull('subject_group')->with('catalog')->get();
         $mismatched = $catalogLinked->filter(function (self $subject) {
             $catalog = $subject->catalog;
             if (!$catalog || $catalog->teacher_supplied) {
@@ -185,6 +219,6 @@ class Subject extends Model
                 || $catalogEx !== $storedEx;
         });
 
-        return $electivesOnDefault->merge($mismatched)->unique('id')->values();
+        return $unclassified->merge($electivesOnDefault)->merge($mismatched)->unique('id')->values();
     }
 }

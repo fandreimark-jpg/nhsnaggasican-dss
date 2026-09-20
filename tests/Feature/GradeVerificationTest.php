@@ -20,6 +20,10 @@ use Tests\TestCase;
  * already display it, but nothing ever turned that into an action that
  * actually sets grades.grade. This is that action.
  */
+// NOTE ('SSHS ECR grading correction', 2026-09-20): these Grade 12
+// sections carry an EXPLICIT k12_2013 curriculum because this file's
+// intent is the DO 8, s. 2015 (legacy) path. An unset curriculum in
+// SY 2026-2027 now resolves to DO 015 for both grade levels.
 class GradeVerificationTest extends TestCase
 {
     use RefreshDatabase;
@@ -58,7 +62,7 @@ class GradeVerificationTest extends TestCase
     public function test_adviser_can_verify_a_complete_computed_grade_as_official(): void
     {
         $adviser = User::factory()->create();
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
         $student = Student::factory()->create(['section_id' => $section->id]);
 
@@ -85,7 +89,7 @@ class GradeVerificationTest extends TestCase
     public function test_verify_writes_the_transmuted_grade_not_the_raw_computed_grade(): void
     {
         $adviser = User::factory()->create();
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
         $student = Student::factory()->create(['section_id' => $section->id]);
 
@@ -106,7 +110,7 @@ class GradeVerificationTest extends TestCase
     public function test_verifying_overwrites_an_existing_manually_encoded_grade(): void
     {
         $adviser = User::factory()->create();
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
         $student = Student::factory()->create(['section_id' => $section->id]);
 
@@ -233,7 +237,7 @@ class GradeVerificationTest extends TestCase
     public function test_verification_is_logged(): void
     {
         $adviser = User::factory()->create();
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
         $student = Student::factory()->create(['section_id' => $section->id]);
 

@@ -19,6 +19,10 @@ use Tests\TestCase;
  * matching GRADE-12-AGILA.xlsx's real structure exactly, but with entirely
  * fake names -- never the real school file or real student data).
  */
+// NOTE ('SSHS ECR grading correction', 2026-09-20): these Grade 12
+// sections carry an EXPLICIT k12_2013 curriculum because this file's
+// intent is the DO 8, s. 2015 (legacy) path. An unset curriculum in
+// SY 2026-2027 now resolves to DO 015 for both grade levels.
 class Grade12EcrHttpImportTest extends TestCase
 {
     use RefreshDatabase;
@@ -38,7 +42,7 @@ class Grade12EcrHttpImportTest extends TestCase
     private function makeMatchingSectionAndSubject(): array
     {
         $track = Track::factory()->create(['code' => 'TECHPRO']);
-        $section = Section::factory()->create([
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 
             'name' => 'AGILA', 'grade_level' => 12, 'track_id' => $track->id, 'school_year' => '2026-2027',
         ]);
         $subject = Subject::factory()->create([
@@ -100,12 +104,12 @@ class Grade12EcrHttpImportTest extends TestCase
         $response->assertDontSee('Weight mismatch');
     }
 
-    public function test_a_resolved_dss_weight_that_disagrees_with_the_file_is_flagged_not_silently_changed(): void
+    public function test_a_resolved_dss_weight_that_disagrees_with_the_file_is_refused_not_silently_changed(): void
     {
         // Academic track + non-core elective resolves to do8_academic_other
         // (25/45/30) -- genuinely disagrees with the fixture's 20/60/20.
         $track = Track::factory()->create(['code' => 'ACAD']);
-        $section = Section::factory()->create(['name' => 'AGILA', 'grade_level' => 12, 'track_id' => $track->id, 'school_year' => '2026-2027']);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'name' => 'AGILA', 'grade_level' => 12, 'track_id' => $track->id, 'school_year' => '2026-2027']);
         $subject = Subject::factory()->create([
             'name' => 'Community Engagement Solidarity and Citizenship', 'type' => 'elective',
             'grade_level' => 12, 'track_id' => $track->id,
@@ -121,9 +125,13 @@ class Grade12EcrHttpImportTest extends TestCase
             'file'           => $this->fixtureFile(),
         ]);
 
-        $response->assertOk();
-        $response->assertSee('Weight mismatch');
-        $response->assertSee($subject->name);
+        // "SSHS ECR grading correction" (2026-09-20): a declared split that
+        // contradicts the configured profile REFUSES the upload — it is no
+        // longer a dismissible notice — and rewrites nothing.
+        $response->assertRedirect('/adviser/assessments?period=1&subject_id=' . $subject->id);
+        $response->assertSessionHas('error', fn($m) => str_contains($m, 'Weight mismatch') && str_contains($m, $subject->name));
+        $this->assertCount(0, \Illuminate\Support\Facades\Storage::disk('local')->files('temp_assessment_uploads'));
+        $this->assertSame($subject->subject_group, $subject->fresh()->subject_group, "No master-data change.");
     }
 
     public function test_unresolved_learner_names_are_reported_when_no_matching_student_exists(): void

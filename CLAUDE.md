@@ -22,9 +22,14 @@ stay true after the work is done.
 - `MASTER_PROMPT.md` — earlier, partly superseded; where it conflicts with
   `WORK_ORDER.md`, the later one won and the code follows it
 - `HANDOFF.md` — design decisions that may not change without asking
-- `ML_ARCHITECTURE.md` — academic-rules-vs-ML boundary, training pipeline,
-  model versioning; the current active model is synthetic-trained only —
-  see this file before touching anything under `analytics/`
+- `analytics/README.md` — THE operational reference for the ML module:
+  canonical feature schema, target definition, missing-data policy, how to
+  validate/train/evaluate/promote/roll back, and "Why the previous prototype
+  could be described as hardcoded". Read this first before touching anything
+  under `analytics/`
+- `ML_ARCHITECTURE.md` — academic-rules-vs-ML boundary and the architectural
+  reasoning; the current active model is synthetic-trained only. Where it
+  overlaps `analytics/README.md`, the README is the one kept current
 - `TRAINING_DATA_CONTRACT.md` — the schema a real historical dataset must
   satisfy before `analytics/train_model.py` will train a candidate from it
 
@@ -107,8 +112,10 @@ The Principal makes the final academic decision.
 
 # GRADING CONFIGURATION
 
-Current grading configuration (DO 8, s. 2015 — still Grade 12's scheme,
-and the default for any subject with no more specific rule):
+Current grading configuration (DO 8, s. 2015 — the scheme of a section
+whose curriculum is EXPLICITLY `k12_2013`, and of school years before
+2026-2027; see "SSHS ECR grading correction" below — and the default for
+any subject with no more specific rule):
 
 Written Work = 25%
 
@@ -241,6 +248,158 @@ below the 75 target" cannot be recovered from a single figure of 76.00.
 Importing derived columns would also create assessment items out of totals and
 double-count the evidence.
 
+## No custom Subject Offerings spreadsheet — the prescribed ECR is the only external academic format
+
+> **Read with the "Subject applicability refactor (2026-09-20)" section
+> below.** The rule here — no invented spreadsheet for master data — still
+> holds and was extended to Tracks, Specializations, Subjects and Sections.
+> The per-term "Assign Subject" workflow this section describes as
+> remaining on screen is GONE; `section_subjects` now records section
+> elective CHOICES only.
+
+**"Prescribed ECR alignment" pass, 2026-09-19.** Admin > Sections used to
+carry an "Import Subject Offerings" upload taking a
+`section,academic_year,academic_term,subject` spreadsheet. **That format was
+invented by this project.** No such file exists at the school, DepEd
+publishes nothing like it, and the prescribed E-Class Record already states
+the section, the subject, the grade level, the school year and how many
+terms the subject runs for. It was a second source of truth for data the
+official instrument already carries, and a second thing to keep in sync.
+
+Removed: the route (`admin.sections.subjects.import`),
+`SectionSubjectController::import()`, `App\Imports\SectionSubjectOfferingsImport`,
+the Sections-page button and modal, and the two `modal.js` handlers.
+`TermSpecificSubjectOfferingsTest` now asserts the route, the class and the
+on-screen wording are all gone, and that per-term assignment still works on
+screen — the FORMAT was removed, not the feature.
+
+**Do not add a second external format for anything the prescribed workbook
+already states.** If a future need looks like it wants one, read the
+workbook first.
+
+### What did NOT change: `section_subjects` is still the internal relationship
+
+`section_subjects` is an INTERNAL table — (section, subject, academic term),
+unique on all three, FKs restrict on delete, protected by
+`ProtectsAcademicHistory`. Nothing about it was weakened. It is still what
+makes Term 1, Term 2 and Term 3 able to hold different subjects; what scopes
+the Adviser's subject dropdown; what every Adviser write path enforces
+server-side; and what keeps Principal Subject Analysis historically correct.
+Removing the invented upload format removed a way of WRITING to this table,
+not the table or its meaning. `SubjectOfferingService` remains the one place
+its rules live.
+
+## `EcrSubjectTermResolver` — the one place a prescribed ECR is checked, and the one place term applicability is decided
+
+**Identity metadata is not advisory.** Before this pass, the workbook's
+cover cells were compared against the on-screen selection and a mismatch
+produced a DISMISSIBLE WARNING: an adviser could read "this file says
+section Curie but you selected Shakespeare", click through, and import one
+class's scores onto another class's learners. A file naming a different
+section is the wrong file. `AssessmentUploadService::checkEcrMetadataMismatch()`
+is gone and `EcrSubjectTermResolver` replaces it.
+
+**Blocking vs. advisory, and why the line is drawn there:**
+
+- **BLOCKS the upload** — the workbook STATES a value and it CONTRADICTS the
+  selection: a different section, subject, grade level or school year, or a
+  term the subject does not run in.
+- **Warns only** — the workbook does not state the value at all (the cover
+  cell is blank). The real instrument ships blank; refusing every unfilled
+  cover would block legitimate uploads to guard against a conflict nobody
+  demonstrated. It is said in words, not passed over.
+
+**This does NOT relax the standing rule on conflicting WEIGHTS** (below). A
+teacher-typed weight cell that disagrees with the catalog is still a warning
+and still never overwrites a grading profile. That rule governs how a grade
+is COMPUTED; this one governs which class a file BELONGS to. A wrong weight
+computes a grade differently; a wrong section files it under a different
+learner.
+
+**Enforced in all three requests.** detect(), preview() and import() are
+separate POSTs, so the check is re-run against the stored file in each —
+backend enforcement, not UI hiding. A crafted request that jumps straight to
+import() is refused the same way.
+
+### How "which terms does this subject run in" is answered
+
+From the workbook's own TERMS AND UNITS block, read at its source. The cells
+were confirmed against the real instrument, not assumed:
+
+| Cell | Meaning | Read from |
+|---|---|---|
+| `F33` | NO. TERMS TAUGHT | **not read — an ARRAY FORMULA** |
+| `H33` | Term Blk (dropdown) | the file, teacher-typed |
+| `F51`/`H51`/`F52` | the same three for an OTHER ELECTIVE | the file, teacher-typed |
+
+`F33` is an array formula doing an `XLOOKUP` into HELPER, and this codebase
+never evaluates a workbook formula (`_xlfn.XLOOKUP`/`_xlfn.IFNA` may not be
+supported by the spreadsheet library, and a wrong value is worse than no
+value). It does not need to: **that entire HELPER catalog is already seeded
+into `deped_subject_catalog` with `g11_terms`/`g12_terms` per grade level**,
+so the count comes from there — the same number the formula would produce.
+An OTHER ELECTIVE has no catalog row by definition, which is exactly why the
+workbook has the teacher type the count, so there it is read from the file.
+
+Applicability is the workbook's own rule, quoted from `HELPER!G24:G26` and
+`G34`: 1 term to the block term only; 2 terms to the block and the one after
+it, and **a 2-term subject cannot begin in Term 3**; 3 terms to all three.
+`H33`'s allowed values are literally `FIRST TERM, SECOND TERM, THIRD TERM`.
+
+An unknown term count (no catalog row, nothing typed) is a WARNING, not a
+block — missing evidence is not conflicting evidence.
+
+### Synchronizing `section_subjects` from a validated ECR — SUPERSEDED 2026-09-20
+
+> `EcrSubjectTermResolver::synchronize()` and `AssessmentController::
+> ecrSyncCandidateOrNull()` no longer exist. An upload validates against
+> the subject configuration and never writes it — see the "Subject
+> applicability refactor" section. Kept for the reasoning it records.
+
+The boundary, deliberately:
+
+> **Admin decides WHICH SUBJECTS a section takes.
+> The prescribed ECR settles WHICH TERMS an already-assigned subject runs in.**
+
+`EcrSubjectTermResolver::synchronize()` only ever INSERTS one
+(section, subject, term) row, in a transaction, logged as
+`sync_section_subject_from_ecr`, and only when all of these hold: the file
+validated with zero blocking errors; the workbook says this term applies;
+the section is already term-managed; and the subject is already assigned to
+this section in **some** term of the school year.
+
+It will not introduce a subject nobody assigned, will not update or delete
+any row (so an offering with academic history cannot be mutated by an
+upload), and **will not flip a section off the curriculum default onto
+term-managed resolution** — that transition rewrites what every Adviser and
+Principal screen resolves to, and belongs to the Admin who can see its
+consequences.
+
+`AssessmentController::ecrSyncCandidateOrNull()` is the one narrow opening
+in the "subject must be offered this term" guard that makes this reachable,
+and it grants nothing on its own: it only lets the file be read far enough
+to ask the workbook, and detect() refuses with the ordinary "not assigned"
+message when the workbook does not back it up.
+
+### Grade 11 and Grade 12 formats stay separate
+
+Unchanged by this pass and must stay that way: `EcrProfileDetector`
+(Strengthened SHS) and `Grade12EcrProfileDetector` recognise their workbooks
+structurally, and `AssessmentUploadService` routes to the matching reader.
+`EcrSubjectTermResolver::validate()` returns **null** for anything that is
+not a prescribed Strengthened SHS ECR, so the Grade 12 workbook and the flat
+CSV/XLSX path are untouched by it. Do not force a Grade 12 file through the
+SSHS parser.
+
+### Performance note that is load-bearing, not cosmetic
+
+`EcrReaderService::describe()` loads **only the INPUT DATA sheet**
+(`setLoadSheetsOnly`), and `EcrSubjectTermResolver` caches its result per
+file (path + size + mtime). This is not tidying: describe() is now called on
+every detect/preview/import, and loading all seven sheets of this 434KB
+workbook three times per upload exhausted a 512MB PHP memory limit when
+several uploads ran in one process. Keep both.
+
 ## The rule on conflicting evidence
 
 Three sources of weight will disagree:
@@ -277,6 +436,12 @@ Grade 11 runs the Strengthened SHS curriculum under DO 015: sections
 **Shakespeare** and **Curie**, 42 learners each, no specialization, because
 SSHS has no strands — as communicated, not verified.
 
+**Superseded 2026-09-20 ("SSHS ECR grading correction"):** the claim
+below that Grade 12 stays on DO 8 was never verified and is contradicted by
+the school's own SY 2026-2027 instruments (both DO 015-era). An unset
+curriculum in SY 2026-2027 now resolves to DO 015 for BOTH grade levels; a
+section that genuinely stays on the 2013 curriculum must carry
+`curriculum = k12_2013` explicitly.
 Grade 12 remains on the 2013 curriculum under DO 8: **ABM** 22, **HUMSS** 39,
 **STEM** 20. Academic Track only — no TVL, Sports, or Arts and Design, so
 three of DO 8's five weighting columns apply — as communicated, not verified.
@@ -443,16 +608,22 @@ enforces — called from both `Admin\SubjectController::store()`/`update()` and
 `SubjectsImport::withValidator()`, so the manual form and the bulk importer
 can never disagree about what's a valid combination:
 
-- Grade 11 (do015_2026): `subject_group` is REQUIRED, must be a real seeded
-  group, and must match type — `core_academic` for `type=core` only, never for
-  an elective, and every other group is elective-only, never for a core
-  subject.
-- Grade 12 (do8_2015): `subject_group` must be `null`. DO 8 weighs by a
-  SECTION's track (`GradingEngine::resolveDo8GroupKey()`), never reads a
-  subject's `subject_group` at all — any non-null value there is meaningless,
-  not merely unused, and is rejected rather than silently ignored (the Admin
-  controller validates the RAW submitted value before coercing it to null for
-  storage, specifically so a stray value is rejected, not silently dropped).
+- Grade 11 AND Grade 12 (same rule — "Subject Group for both grade levels"
+  pass, 2026-09-20, which SUPERSEDED the earlier "Grade 12 must be null"
+  rule by decision): `subject_group` is REQUIRED, must be a real seeded
+  group, and must match type — `core_academic` for `type=core` only, never
+  for an elective, and every other group is elective-only, never for a core
+  subject. `classificationError()` does not read grade level at all.
+- What that decision did NOT change — Grade 12 GRADING: DO 8, s. 2015 still
+  weighs by a SECTION's track (`GradingEngine::resolveDo8GroupKey()`) and
+  never reads a subject's `subject_group`. A Grade 12 subject's group is
+  stored, listed and edited exactly like a Grade 11 subject's, and its
+  WW/PT/Exam split is byte-identical with or without one
+  (`SubjectFormConsistencyTest::test_a_grade_12_subject_computes_the_
+  identical_grade_with_and_without_a_subject_group` cycles every group).
+  The one other reader, `DashboardAnalyticsService`'s evidence trend, calls
+  `resolve('do8_2015', $group)`; no `do8_2015` row carries a DO 015 group
+  name, so it falls to the scheme's `all` row — the row a null reached.
 
 **Every "blank/unknown → `core_academic`" default was removed, on purpose,
 across all three layers it existed in**: the `subjects.subject_group` column's
@@ -508,6 +679,44 @@ Academic Elective — all other, Research/Design/Innovation, Arts/Sports/
 Health/Wellness, Field Experience, Tech-Pro — all other, Work Immersion)
 computed end-to-end through `GradingEngine`, plus every invalid type/group/
 grade-level combination `classificationError()` is meant to catch.
+
+**"Subject form consistency" + "Subject Group for both grade levels" passes
+(2026-09-20).** The first pass kept the Grade 12 control present-but-
+disabled ("Not applicable to Grade 12") because the rule above said Grade
+12 must be null, and reported the conflict. The decision came back: Subject
+Group is a legitimate field for BOTH grade levels. Now: Admin > Subjects
+has ONE Subject Group control, `required` in the markup, never hidden,
+disabled or cleared by grade level (`modal.js`'s `refreshSubjectGroupField()`
+only narrows the option list to the selected Type; the Grade Level select
+has no hook into it). The option list is `SubjectGroupWeight::allGroups()`
+— the DO 015, s. 2026 Table 10 groups, the one authoritative source — for
+both grade levels; no Grade 12-specific list was invented and no `do8_*`
+row is selectable. `store()`/`update()` persist the group for Grade 12 (the
+`=== 12 ? null` coercion is gone). The Subjects list shows the group under
+the Type badge for every subject and flags a row with none as "Subject
+Group needed" (only reachable for data created before the rule — the live
+database has zero Grade 12 subjects, so nothing was backfilled and nothing
+is guessed); `Subject::withSuspectSubjectGroup()` lists such rows so the
+Admin dashboard's Data Health item 7 and its "Review subjects" link surface
+them. Labels are the bare "Subject Group" and "Specialization" — the
+"(optional)" word left the label only; `specialization_id` stays nullable
+and "— All specializations in track —" is still a valid choice. The page's
+validation banner renders every error key (it used to list three and
+silently swallowed a `subject_group` rejection). `SubjectFormConsistencyTest`
+is the test of record.
+
+**Open decision, deliberately NOT taken here: whether Grade 12 GRADING
+should read the group.** The DO 015 group names have no DO 8 counterpart —
+DO 8 weighs by track (Academic vs TVL/Sports/Arts, a SECTION property the
+subject does not know) and, within the Academic branch, by a Work
+Immersion/Research/Business Enterprise Simulation bucket vs "all other",
+which `resolveDo8GroupKey()` currently identifies by name keyword (the
+documented stopgap). Replacing that keyword match with a `subject_group`
+→ DO 8 bucket mapping (e.g. `work_immersion`/`research_innovation` →
+`do8_academic_work_immersion`, everything else → `*_other`) is plausible
+but is a grading-policy mapping nobody has published; it needs the
+school's confirmation and its own tests before it is written. Until then
+Grade 12 grading is unchanged.
 
 ## mimes: MIME-sniffing rejects the official DepEd ECR — fixed everywhere it appeared
 
@@ -656,6 +865,155 @@ reached a committed migration, never by editing one that had already run:
 Neither bug reached a committed migration; both were caught locally against
 a fresh SQLite/test environment and fixed before commit `fc473c4`, via
 rollback, exactly as this file's own database-safety rules require.
+
+---
+
+## Implementation — SUBJECT OFFERINGS per academic term ("Student identity and term-specific subject offerings" pass, 2026-09-18) — SUPERSEDED 2026-09-20
+
+> The "term-managed" model this section describes (the first
+> `section_subjects` row replaces the curriculum for its section; every
+> subject assigned per section per term; the curriculum default as a
+> fallback; `SubjectOfferingService::assign()/syncFromAcademicHistory()/
+> isTermManaged()`) was REPLACED by the "Subject applicability refactor"
+> below. The table, its schema, its FKs and its history protection are
+> unchanged; what a row MEANS changed. Kept for the reasoning it records
+> (design decision 4's join key, the migration that expanded old rows,
+> the trend/same-subject work in STEP K, which is untouched).
+
+`section_subjects` is now the **subject offering** table: one row per
+(section, subject, **academic term**). A subject stays master/curriculum
+data in `subjects` (Admin > Subjects is unchanged and is never duplicated
+per term); *when and where* it is taught is a row here:
+
+    SUBJECT MASTER + ACADEMIC YEAR + ACADEMIC TERM + SECTION = OFFERING
+
+The table name was kept for compatibility. The PART 6 shape — keyed on
+(section, subject, school_year) with a nullable `starting_term`/
+`term_count` pair — is gone: `academic_term_id` (FK → `academic_terms`,
+restrict on delete) replaced the pair, the unique index is now
+`(section_id, subject_id, academic_term_id)`, `school_year` is kept as the
+join key every academic table carries (design decision 4), and the two
+original FKs went from cascade to **restrict** on delete. Migration
+`2026_09_18_000002_make_section_subjects_term_specific`; every step is
+guarded so a partial MySQL DDL failure can be re-run. Rehearsed forward,
+rolled back, and forward again on a full copy of the live database before
+being run live (backup `backups/backup_20260918_pre_offerings.sql`).
+
+**Data migration — nothing was invented.** Pre-existing rows were expanded
+into one row per term they covered, using `coversTerm()`'s exact old rule
+(null pair = every term); a section that had any row was also implicitly
+taking every core subject of its grade level under the old model, so those
+were written as explicit rows for all three terms — preserving what the
+section already resolved to, not changing it. The live pilot database had
+zero rows, so both steps were no-ops there. **Nothing was copied into
+terms from grades/assessments by the migration** — see the transition
+rule below for how history is recorded, with an Admin in the loop.
+
+**`Subject::forSection(Section $section, ?int $term = null)` — two paths.**
+A section with ANY offering row for its school year is *term-managed*:
+the answer is exactly its offering rows (core and elective alike; nothing
+implied from grade level or track), for one term when `$term` is given or
+the union of the year when it is null. A term with no rows resolves to an
+EMPTY set — "No subjects are assigned to Narra for Term 2" is a real
+answer, never silently filled from another term. A section with NO
+offering rows keeps the **curriculum default**, byte-for-byte what it
+resolved before this pass (core subjects of its grade level; k12_2013
+specialization electives; nothing for sshs electives) and ignores
+`$term`. This fallback exists so every section created before offerings
+existed keeps working; Admin > Sections marks such a section "default",
+the Admin dashboard's Data Health lists it (yellow), and Admin > Sections >
+Subjects says so in words with the exact list.
+
+**The transition rule (`SubjectOfferingService::assign()`).** The first
+offering assigned to a section switches it to term-managed. At that moment
+`syncFromAcademicHistory()` records, as offerings, every (subject, term)
+the section already has grades, assessment items, or uploads for — read
+from each record's own `grading_period`, never inferred — and the flash
+message names them. On the live pilot this means Narra's first assignment
+will also record General Mathematics (Term 1), because 23 Term 1
+assessments exist for it; Oral Communication (no records) will NOT be
+carried over — that is the Admin's decision to make, and the page shows
+the current default list before they make it.
+
+**Every consumer reads the term.** `SectionElectiveStatus::
+expectedSubjectsForTerm()` is now literally `forSection($section, $term)`;
+`isFullyConfigured()` is true for any term-managed section. Adviser
+Assessments/Grades/Verify-all/Interventions, Principal Students and
+Student detail, `computeInTermStatusCounts()`, `sectionCapacityBreakdown()`,
+and the adviser dashboard's in-term rows all pass the term they are
+showing. **Backend enforcement, not UI hiding:** every Adviser write path
+(`detect`/`preview`/`import`/`storeItem`, `grades.store`, grade import,
+`verify`, `verify-all`) resolves the subject through
+`forSection($section, $gradingPeriod)` and refuses with
+`SubjectOfferingService::notOfferedMessage()` — "Basic Calculus is not
+assigned to Narra for Term 1." — the one wording, owned in one place.
+`TermSpecificSubjectOfferingsTest` posts the crafted requests.
+
+**Removal (STEP L).** `SectionSubject` uses `ProtectsAcademicHistory` with
+`hasAcademicReferences()` overridden to the (section, subject, term, year)
+tuple across grades, assessments, assessment_uploads, interventions, and
+risk_results.weakest_subject_id. An offering with any of those cannot be
+deleted (route AND model level, and the FKs agree); the page shows "Kept —
+has records". "Stop offering it next term" is done by not assigning it
+there — the Term 1 row and its history stay.
+
+**Admin UI.** `Admin\SectionSubjectController` at
+`/admin/sections/{section}/subjects?term=N` (Academic Year is the
+section's own — sections are year-specific here — and is displayed, not
+selected; the term is a tab). The Assign Subject form shows the selected
+subject's **resolved** grading profile from
+`GradingEngine::resolveWeightProfile()` (extracted from `computeGrade()`,
+same resolution order: catalog row first, then `subject_group_weights`) —
+display only; nothing typed here can change a weight. Subject-group
+labels moved to `SubjectGroupWeight::LABELS`/`labelFor()` so Admin >
+Subjects and this page share one map. **The bulk "Import Subject
+Offerings" upload that used to sit here was REMOVED** — see "No custom
+Subject Offerings spreadsheet" below.
+`dss:check-integrity` now also reports an offering whose `school_year`
+disagrees with its section/term, and academic records on a term-managed
+section with no matching offering.
+
+**Grades and assessments were NOT given an offering FK.** They already
+carry `(student, subject, section, grading_period, school_year)` and their
+unique indexes (`unique_grade_per_period`, `unique_assessment_per_period`)
+already prevent a duplicate final grade / item per learner + subject +
+period + year — verified, no schema change needed.
+
+**Trend (STEP K) — two signals, never merged.** `DashboardAnalyticsService::
+computeTrend()` is the OVERALL term trend (term averages, even when the
+subject mix changed); `computeSameSubjectTrend()` compares only a subject
+graded in both terms (`computeSubjectDeclines()` is now a filter over it);
+`subjectCompositionBetween()` says exactly which subjects were shared and
+which were not, and the Principal at-risk table and learner page say so in
+words when the mix differs. `RiskFeatureExtractor` sends
+`same_subject_trend_delta` and `subject_composition_changed` alongside the
+existing `trend_delta` — `classify.py` ignores fields it does not read, so
+the current model is untouched.
+
+**Principal Subject Analysis** scopes by School Year + Academic Term +
+Grade Level (new filter) + Section; the risk-result half now scopes by
+`risk_results.section_id` (the section when classified), not
+`students.section_id` (the current pointer). With one section and one term
+selected it also lists subjects *offered* there with nothing recorded —
+"offered, no evidence" is a different statement from "not offered this
+term".
+
+**ECR upload (STEP H).** `AssessmentUploadService::checkEcrMetadataMismatch()`
+compares the workbook's INPUT DATA section name / course title / grade
+level against the on-screen selection and shows a Verify-screen warning
+naming both sides. A warning, not a re-route: those cells are
+teacher-typed (the rule on conflicting evidence). The offering check
+itself is a hard refusal.
+
+**Birthdate (PART 1)** is gone from the learner record — model, both
+StudentControllers, `StudentsImport`, the draft-roster export, both
+Students views, `modal.js`, and the column
+(`2026_09_18_000001_drop_birthdate_from_students_table`, guarded, no rows
+touched). The learner format is `lrn,last_name,first_name,middle_name,
+gender`; a legacy file still carrying a birthdate column imports fine (the
+column is ignored). `StudentWithoutBirthdateTest` rolls the migration back,
+seeds a learner with a birthdate and a grade, re-runs it, and proves both
+survive.
 
 ---
 
@@ -1029,7 +1387,54 @@ information. A twelfth is not.
 If a fix would require changing something these instructions forbid, stop and
 ask. Do not route around the constraint.
 
-The suite baseline is 1,021 passing, 0 skipped (as of the pre-demo audit,
+The suite baseline is 1,071 passing, 0 skipped where Python is present
+(as of the "Final pre-demo audit" evening pass, 2026-09-20 — 1,063 before
+it: +2 `ProfileTest`, +2 `AssessmentPerformancePageTest`, +2
+`XssEscapingAcrossRolePagesTest` (new file), +1 `PreDemoAuditRegressionsTest`,
++1 `AdminDashboardScopingTest`). Before that: 1,063
+(as of the "SSHS ECR grading correction" pass, 2026-09-20 — 1,064 before
+it; `GradingPolicyResolutionTest` rewritten from 13 to 11 tests with the
+workbook as oracle, `TransmutationServiceTest` +1). Before that: 1,064
+(as of the "Grading policy display" pass, 2026-09-20 — 1,051 before it,
+plus the 13 tests in `GradingPolicyResolutionTest`). Before that: 1,051
+(as of the "Pre-demo full-system audit", 2026-09-20 — 1,046 before it:
++8 in `PreDemoAuditRegressionsTest`, +2 in `RoleAccessMatrixTest`, and 5
+removed with the dead Breeze routes they tested — `Auth/
+PasswordConfirmationTest` (3) and `Auth/PasswordUpdateTest` (2); see
+"Pre-demo full-system audit" below). Before that: 1,046 (as of the
+"Subject Group for both grade levels" pass, 2026-09-20 — 1,042
+before it: 3 rewritten in `SubjectClassificationConsistencyTest`, 1 added
+in `AdminDataHealthChecksTest`, and `SubjectFormConsistencyTest` went from
+15 to 18). Before that: 1,042 (as of the "Subject form consistency" pass,
+2026-09-20 — 1,027 before it, plus the 15 tests in
+`SubjectFormConsistencyTest`). Before that: 1,027
+(as of the "Subject applicability" refactor, 2026-09-20 — 1,097 before
+it; 27 new tests in `SubjectApplicabilityTest`; 5 sync tests replaced by
+4 in `PrescribedEcrMetadataValidationTest`; 3 rewritten in
+`SectionElectiveStatusTest`; 4 route tests in `MimesFixSixMoreRoutesTest`
+and 1 in `SubjectClassificationSafetyNetTest` folded into route-gone
+assertions; and 92 removed with the four master-data importers and the
+term-managed offerings workflow they tested: `SubjectsImportTest` (21),
+`SubjectsImportDefaultGroupNoticeTest` (3), `TracksImportTest` (16),
+`SpecializationsImportTest` (13), `SectionsImportTest` (13),
+`TermSpecificSubjectOfferingsTest` (26). Removing a feature's tests with
+the feature is the one legitimate way the count goes down; the
+replacement coverage is named above). The Python suites are counted separately and run on their own:
+`python analytics/test_classify.py` (6), `test_training_pipeline.py` (62),
+and `test_inference_contract.py` (33) — 101 total, all passing, none wired
+into `php artisan test`.
+
+One conditional skip exists and is deliberate: `MlArchitectureBoundaryTest`'s
+two end-to-end tests shell out to the real Python interpreter and skip if it
+is not runnable, since a machine without Python can still run the PHP suite
+honestly. Both RUN (and must pass) in any environment that has the analytics
+dependencies installed, which is where the 0-skipped figure above is measured.
+
+Before that: 1,051 (as of the "Student identity
+and term-specific subject offerings" pass, 2026-09-18 — 1,021 before it; one
+future-birthdate test replaced by a legacy-column-ignored test, one
+SectionElectiveStatus scenario folded into the per-term ones, plus 31 new
+tests in TermSpecificSubjectOfferingsTest and StudentWithoutBirthdateTest). Before that: 1,021 (pre-demo audit,
 2026-09-17 — 994 before it, plus 27 new tests; see `PRE_DEMO_FINAL_AUDIT.md`
 for the exact list. The earlier `ElectiveClusterLimitationTest` skip was
 un-skipped in ECR alignment PART 6). A run that is still at the baseline
@@ -1702,22 +2107,107 @@ from Written Work, Performance Task, and Examination only.
 Attendance-based promotion and retention rules are outside this
 system's scope.
 
-## "Failing" catches Grade 11 and Grade 12 at different levels of mastery
+## "Failing" catches the two CURRICULA at different levels of mastery
 
 The Failing signal is defined on the reported (transmuted) grade at 74 and
-below, which is DepEd's failing mark. Because the two curricula transmute
-differently, the same threshold corresponds to a different raw score in each
-grade level during SY 2026-2027:
+below, which is DepEd's failing mark. Because the two schemes transmute
+differently, the same threshold corresponds to a different raw score under
+each — by CURRICULUM, not by grade level ("SSHS ECR grading correction",
+2026-09-20: an unset curriculum in SY 2026-2027 is DO 015 for Grade 11 and
+Grade 12 alike; only an explicit `k12_2013` section is on DO 8):
 
-- **Grade 11 (DO 015, s. 2026):** an Initial Grade of 70.00 transmutes to 75,
-  so Failing corresponds to a computed grade below 70.00.
-- **Grade 12 (DO 8, s. 2015):** an Initial Grade of 60.00 transmutes to 75,
-  so Failing corresponds to a computed grade below 60.00.
+- **DO 015, s. 2026 (Strengthened SHS):** an Initial Grade of 70.00
+  transmutes to 75, so Failing corresponds to a computed grade below 70.00.
+- **DO 8, s. 2015 (explicit `k12_2013` sections):** an Initial Grade of
+  60.00 transmutes to 75, so Failing corresponds to a computed grade below
+  60.00.
 
-A Grade 12 learner with 62% raw mastery is therefore reported as passing and
-is never Failing, while a Grade 11 learner with the same raw mastery is.
+A 2013-curriculum learner with 62% raw mastery is therefore reported as
+passing and is never Failing, while an SSHS learner with the same raw
+mastery is.
 This is a property of the DepEd transmutation tables themselves, not of this
 system, and it disappears from SY 2027-2028 when transmutation is removed.
+
+## The ML module: inference and training are separate, and the deployed model is a labelled prototype
+
+**"ML architecture correction" pass, 2026-09-19.** `analytics/README.md` is
+the operational reference; this is the standing shape and the decisions that
+must not be silently reversed.
+
+**`classify.py` is INFERENCE ONLY.** It contains no training data, no
+`.fit()`, no cross-validation and no report writer — `analytics/
+test_inference_contract.py` greps the file for each of those and fails if one
+comes back. It resolves a model in one order: the registry's ACTIVE model,
+then the legacy prototype (`model_cache.pkl`), then a CONTROLLED ERROR. It
+never trains one. A classifier that quietly rebuilds itself from hand-typed
+grade bands whenever its artifact is missing is a silent correctness failure
+wearing the costume of resilience.
+
+**`analytics/train_model.py` is the single authoritative training pipeline.**
+The duplicate `train_from_real_data()` that lived in `classify.py` is gone —
+it spoke a DIFFERENT schema (7 features, `low`/`moderate`/`high`) from the one
+`train_model.py`/`schema.py` use (9 features, `intervention`/
+`no_intervention`), so "the training contract" had two incompatible answers
+depending on which file you opened. Training produces a CANDIDATE and never
+activates anything; promotion and rollback are explicit commands a person
+runs (`python analytics/model_registry.py promote|rollback <version>`), and
+`promote` REFUSES a candidate tagged `dataset_type=synthetic`.
+
+**`analytics/schema.py` is the single source of truth for feature names and
+ORDER.** Order is positional and load-bearing: a fitted forest indexes its
+splits by column, so reordering the tuple without bumping
+`FEATURE_SCHEMA_VERSION` would feed `pt_mean` into the column the model
+learned as `ww_mean`. Nothing may hard-code a feature list beside it, and
+`schema.build_feature_vector()` is the only supported way to turn a payload
+into a row — specifically so nothing ever depends on dict iteration order.
+`classify.py` refuses to serve a model whose declared schema major version
+differs from the running one.
+
+**BLANK IS NOT ZERO, end to end.** A null feature crosses to Python as JSON
+null and becomes NaN, handled natively by scikit-learn's tree splitter
+(>=1.4; this project runs 1.9). It is never imputed to 0, a mean, or
+anything else. Three distinct cases this protects, all of which a 0 would
+corrupt: a grading profile with NO Examination component (DO 015 Work
+Immersion/Research/Design and Innovation, `ex_weight` null) is not an exam
+scored 0; no previous reporting period is not a previous average of 0; and an
+assessment nobody recorded is not a recorded 0. That last one is why
+`missing_assessment_count` counts ABSENT ROWS — `assessment_scores.score` is
+NOT NULL and unique per (assessment, student), so an entered zero is a row
+that exists and an unrecorded assessment is a row that does not.
+
+**The binary target must not be silently mapped onto the three risk levels.**
+The candidate pipeline predicts `intervention`/`no_intervention`; the DSS
+stores and displays `low`/`moderate`/`high`. These are different questions,
+and `classify.py` raises `prediction_domain_mismatch` rather than translating.
+Mapping `intervention -> high` would fabricate a severity the model never
+predicted and erase `moderate` outright. **This is a prerequisite, not a
+detail: a real candidate cannot go to production until it is resolved with
+the school, however well it trains.**
+
+**The rule layer stays separate and stays after the model.**
+`Adviser\ReportController::applyFailingSubjectOverride()` is PHP, is not part
+of training, and only ever escalates severity. `ml_risk_level`, `risk_level`
+and `was_overridden` remain three distinct stored figures; collapsing them
+would make "what did the model actually say" unrecoverable.
+`tests/Feature/MlArchitectureBoundaryTest.php` is the test of record, and also
+asserts no grading weight, passing threshold or transmutation band ever
+reaches the Python payload.
+
+**Why the deployed prototype is retained rather than deleted.** It is what
+every adviser and Principal is using today and there is nothing to replace it
+with — no authorized historical dataset exists. It is labelled for exactly
+what it is in its descriptor (`analytics/legacy/legacy_model.json`), in every
+prediction it returns (`"dataset_type": "synthetic"`), and in
+`analytics/README.md`. Its generator was MOVED, not deleted, to
+`analytics/legacy/prototype_model.py`: keeping the code visible is what lets
+"the labels were predetermined" be checked rather than taken on trust, and
+that script cannot write `model_cache.pkl` — regenerating the deployed
+artifact is a deliberate operator action with an explicit target.
+
+**`analytics/model_accuracy.txt` is a GENERATED report.** No runtime code
+reads it; it is git-ignored; regenerate with `python analytics/legacy/
+prototype_model.py --report-only`. `model_cache.pkl` is deliberately NOT
+ignored — a Git deployment needs it.
 
 ## The risk classifier's levels are calibrated thresholds, not a learned signal
 
@@ -1728,8 +2218,10 @@ require different boundaries. The system does not learn these boundaries
 from outcomes.
 
 As of the "correctness and interface pass," the boundaries are Low
-85-100, Moderate 75-84.9, High 0-74.9 (`analytics/classify.py`'s
-`train_model()`) — recalibrated from the original 90/75/60 split, which put
+85-100, Moderate 75-84.9, High 0-74.9 (`analytics/legacy/
+prototype_model.py`'s `BANDS`, moved there from `classify.py` by the
+2026-09-19 ML architecture pass) — recalibrated from the original 90/75/60
+split, which put
 nearly an entire passing cohort in one 15-point Moderate band (observed
 live: 39 of 40 learners Moderate, 1 Low, 0 High). The new boundaries are
 anchored to figures already used elsewhere in this codebase
@@ -2163,3 +2655,459 @@ rules that stay true after it.
   `app/View/Components/AppLayout.php` (every page uses
   `@extends('layouts.app')`, never `<x-app-layout>`). `GuestLayout.php`
   stays — four auth views use `<x-guest-layout>`.
+
+## Grading policy display (2026-09-20) — one resolver, and what Admin > Subjects shows
+
+**The resolver.** `GradingEngine::resolveWeightProfile(Section, Subject)` is
+THE grading-policy resolver — the exact path `computeGrade()` takes:
+linked `deped_subject_catalog` row first; else the scheme's
+`subject_group_weights` row, where the scheme comes from the section
+(`TransmutationService::schemeFor()`), the DO 015 key is the subject's
+`subject_group`, and the DO 8 key is `resolveDo8GroupKey(section, subject)`
+(section track → Academic/TVL branch; core → `do8_core`; elective → name
+keyword `work immersion`/`research`/`business enterprise simulation` →
+`*_work_immersion`, else `*_other`). Every consumer now reads it:
+`computeGrade()`, `PerformanceAnalysisService` (Adviser Assessments),
+`GradeController` (Encode Grades / verify), `RiskFeatureExtractor`,
+`SectionSubjectController`, `AssessmentUploadService::
+checkGrade12WeightMismatch()` (the Grade 12 ECR check — it used to call
+`resolveDo8GroupKey()` + `SubjectGroupWeight::resolve()` itself),
+`DashboardAnalyticsService::computeAssessmentEvidenceTrend()` (it used to
+call `SubjectGroupWeight::resolve($scheme, $subject_group)` directly,
+which skipped the catalog for Grade 11 and put EVERY Grade 12 bucket on
+the DO 8 `all` row instead of its track bucket), and Admin > Subjects.
+**Do not call `SubjectGroupWeight::resolve()` for a grading figure
+anywhere else** — `Subject::withSuspectSubjectGroup()`'s catalog-vs-group
+comparison is the one legitimate direct use (it is checking the stored
+group, not grading).
+
+**`GradingEngine::resolveSubjectProfile(Subject)`** is the subject-level
+entry point Admin > Subjects uses (no section on that page). It is not a
+second resolver: it calls `resolveWeightProfile()` once per section
+context the subject can be graded in — an elective's own track; every
+track in the system for a core subject; a null-track pseudo-section when
+no track exists — and reports `resolved` only when all contexts agree.
+The page then shows the figures with `data-grading-key` and a source
+note (`From DepEd catalog match` / `Assigned by grading group` /
+`Resolved from track and subject type`); when contexts disagree (a Grade
+12 core subject once a TVL track exists) it shows **"Resolved by section
+context"** with every variant, never one picked figure. The old
+`do8_by_track` placeholder is gone. `SubjectGroupWeight::LABELS` now
+names the five `do8_*` buckets and `all` so a DO 8 profile can be
+labelled in words; `allGroups()` is still scoped to `do015_2026`, so none
+of them reaches a dropdown.
+
+**Root cause of the missing Grade 12 figures was display-only** — the
+resolver was complete; `Admin\SubjectController::index()` carried its own
+Grade 11-only copy and stamped Grade 12 rows with a placeholder. (The
+figures that pass first produced for Grade 12 — 25/45/30 — came from the
+DO 8 inference corrected in the next section.)
+
+## SSHS ECR grading correction (2026-09-20) — Grade 12 in SY 2026-2027 is DO 015 unless a section says otherwise
+
+**What the prescribed workbook actually says** (read from
+`tests/Fixtures/SSHS-E-Class-Record-SY-2026-2027.xlsx`, byte-identical to
+the file the school supplied): `INSTRUCTIONS!E99:I108` is the "Weight of
+the Components for the SSHS" table — Core 20/50/30; Academic Electives /
+All Other 20/50/30; Research and Design and Innovation 40/60/—; Arts,
+Sports, Health and Wellness 20/60/20; Field Experience 15/70/*15; TechPro
+All Other 15/65/20; Work Immersion 20/80/— — "pursuant to DepEd Order 015,
+s. 2026" (`C89`). `INPUT DATA!F24` (GRADE LEVEL) validates `"11,12"`. The
+Term sheets' weight cells (`Term 1!D12/Q12/AD12`) are `XLOOKUP`s into
+`HELPER!W:Y` keyed on CLUSTER + COURSE TITLE (`HELPER!G13:G15`); the grade
+level only filters which subjects are selectable (`HELPER!I`). **Weights
+are per cluster and identical for Grade 11 and Grade 12.** The seeded
+`do015_2026` rows equal the table cell for cell
+(`GradingPolicyResolutionTest` reads the workbook as its oracle).
+
+**Why the app said 25/45/30.** `TransmutationService::schemeFor()` inferred
+`k12_2013`/DO 8 for any Grade 12 section with a NULL curriculum ("Grade 12
+has NOT moved" — the client communication recorded above as not verified),
+and every section-less Grade 12 context (Admin > Subjects, the ECR checks)
+was NULL. `resolveDo8GroupKey()` then produced `do8_academic_other` =
+25/45/30 from the `do8_*` rows, which are themselves from secondary
+reproductions. No SY 2026-2027 artifact in the repository is a DO 8
+(quarterly) record: the school's Grade 12 record
+(`tests/Fixtures/GRADE-12-SANITIZED.xlsx`, 12-AGILA) is term-based with
+SSHS component names and a 20/60/20 split for a HUMSS elective.
+
+**The rule now.** `schemeFor($gradeLevel, $schoolYear, $curriculum)`:
+explicit `sshs` → DO 015; explicit `k12_2013` → DO 8; NULL → by school
+year only: 2026-2027 onward DO 015 for both grade levels, earlier DO 8.
+Grade level no longer decides a scheme anywhere. DO 8 (`resolveDo8GroupKey()`,
+the five `do8_*` rows, the DO 8 transmutation table) is fully preserved
+for explicit `k12_2013` sections and pre-2026 years; the 31 Grade 12
+sections in the DO 8-intent test files carry `'curriculum' => 'k12_2013'`
+explicitly for that reason. `fallbackActiveFor()` takes the curriculum too.
+
+**Admin > Subjects** (`GradingEngine::resolveSubjectProfile()`) evaluates
+the DISTINCT curricula of the sections that exist at the subject's grade
+level in the active year (NULL = inferred), times the tracks; one figure
+when they agree, "Resolved by section context" with every variant when a
+`k12_2013` section coexists with an SSHS/unset one. Business Finance
+(`academic_other`) shows 20/50/30 and Philippine Politics and Governance
+(`arts_sports_wellness`) 20/60/20 — both consistent with their catalog
+clusters (BUSINESS AND ENTREPRENEURSHIP 20/50/30; ARTS, SOCIAL SCIENCES,
+AND HUMANITIES 20/60/20), though neither is catalog-linked because their
+names differ from the catalog titles ("Business 2 (Business Finance and
+Income Taxation)", "Philippine Governance (Philippine Politics and
+Governance)") — linking is a human decision.
+
+**ECR weight conflicts now REFUSE the upload.** `EcrReaderService::
+checkWeightMismatch()` resolves the configured subject through
+`resolveWeightProfile()` on an `sshs` context (a prescribed SSHS ECR is
+SSHS by definition) and compares it with the workbook's own catalog row
+(cluster + title, exactly as the term sheets do). A contradiction, and a
+Grade 12 (AGILA) template whose declared split disagrees, block at
+`detect()` with both figures named and the temp file removed; the file
+never reaches Verify. The OTHER ELECTIVE / SPECIAL CURRICULAR PROGRAM note
+(DepEd publishes no weight) stays informational
+(`AssessmentUploadService::ecrWeightMismatchBlocks()`). Master data is
+never rewritten by an upload.
+
+**Historical impact: none.** All 252 verified grades are Grade 11 (already
+DO 015); zero Grade 12 grades/assessments/uploads exist;
+`dss:recompute-grades 2026-2027 1` reports 0 of 252 affected. Backup
+`backups/backup_20260920_pre_scheme_inference.sql` taken before the change.
+
+**REQUIRES BUSINESS-RULE CONFIRMATION:** (1) whether ANY Grade 12 section
+at this school in SY 2026-2027 is genuinely on the 2013 curriculum — if
+so, set `curriculum = k12_2013` on it (Admin > Sections) before its
+grades are entered; (2) the DO 8 `do8_*` figures and the keyword rule for
+its Work-Immersion bucket (unchanged, used only by explicit `k12_2013`
+sections); (3) the Grade 12 AGILA record's transmutation — its sanitized
+IG→TG pairs match neither seeded table, so they are not usable evidence.
+
+## Pre-demo full-system audit (2026-09-20) — standing conventions it added
+
+Findings and evidence are in the audit report delivered with the pass;
+these are the rules that stay true afterwards.
+
+- **`RoleAccessMatrixTest` is the authorization test of record.** It walks
+  the live route table: every GET route under `admin/`, `adviser/` or
+  `principal/` must answer its own role (200/302/404), 403 to the other
+  two, and redirect a guest AND a disabled session to login; a second
+  test probes cross-object mutations (adviser B against adviser A's
+  learner, assessment, intervention; adviser/principal against Admin
+  mutations; unsigned access to Laravel's local-disk serve routes). A new
+  role-prefixed route that forgets its middleware fails here, so do not
+  hand-list routes in it — it reads `Route::getRoutes()`.
+- **Every page that can receive a default-bag validation error renders
+  `partials/validation-errors`** (Adviser Assessments/Grades, Admin
+  Tracks/Specializations, Principal Interventions; Admin Subjects has its
+  own equivalent). Before this, a rejected upload type, duplicate track
+  or out-of-range grade bounced back with no message — the layout renders
+  only the `deletion` key. A new page with a form includes the partial;
+  named bags (`addItem`, `editItem`) stay with their modals.
+- **An unreadable spreadsheet is a controlled refusal.** `spreadsheetFileRule`
+  validates by extension on purpose (see the `mimes:` section), so a
+  corrupt/truncated `.xlsx` reaches the reader; `Adviser\AssessmentController::
+  detect()` catches `PhpOffice\PhpSpreadsheet\Exception` (and `ValueError`)
+  around the identity check and column detection, deletes the temp file
+  and flashes "could not be read as a spreadsheet". It used to be a 500.
+- **Two invariants gained DB constraints** (`2026_09_20_000002`): unique
+  `subjects (name, grade_level)` and unique `sections (name, grade_level,
+  school_year)`; `Admin\SectionController` now validates the latter too
+  (no rule existed — a duplicate "Curie" in one year was accepted). The
+  migration refuses to run if duplicates exist rather than failing
+  half-way. `tracks` keeps its form-only rule: `TrackFactory` uses a
+  constant name/code and tests create several.
+- **Breeze's email-verification, confirm-password and `PUT /password`
+  routes are gone** (controllers, views, the two orphan
+  `profile/partials/*` and their tests). `User` never implemented
+  `MustVerifyEmail`; the profile modal (`profile.update`,
+  `profile.password.update`) is the only account-editing surface. The
+  forgot-password routes remain (guest-only, `MAIL_MAILER=log` locally —
+  nothing links to them; an Admin resets a password from Users).
+- **`PreventBackHistory` also sets `X-Frame-Options: SAMEORIGIN`,
+  `X-Content-Type-Options: nosniff` and `Referrer-Policy: same-origin`.**
+  The app embeds no frames.
+- **Vite: `public/hot` must not exist when the demo runs.** With it
+  present every page loads assets from the dev server (`[::1]:5173`) and
+  renders unstyled if that server is down. Stop `npm run dev` and delete
+  the file; `public/build` is what the demo serves.
+- **The live Term 1 reports of 2026-09-19 had no risk results** — both
+  Submit Report runs that evening logged `Analytics process failed
+  {"exit_code":1}` while the ML refactor was in progress (the failure was
+  logged before stderr capture existed). Re-submitted through the real
+  workflow on 2026-09-20 after a backup: 84 rows. `RiskResult` being
+  empty while `report_submissions` exist is the signature to look for.
+
+## Final pre-demo audit (2026-09-20, evening) — standing conventions it added
+
+Second full-system pass, run over real HTTP against Apache and the live
+database (backup `backups/backup_20260920_final_audit_pre.sql` first).
+These are the rules that stay true afterwards.
+
+- **The test suite refuses to run against anything but sqlite `:memory:`.**
+  `tests/TestCase::setUpTraits()` checks the connection BEFORE
+  `RefreshDatabase` fires and exits 255 otherwise. Reason: a
+  `vendor/bin/phpunit --no-configuration` invocation during this audit
+  skipped `phpunit.xml`'s `<env>` block and `migrate:fresh` emptied the
+  LIVE `naggasican_dss` database (restored losslessly from the backup
+  above — every academic table matched the snapshot). Always run tests
+  as `php artisan test` or `vendor/bin/phpunit -c phpunit.xml`, take a
+  mysqldump first, and never remove that guard.
+- **`profile/_modal.blade.php` reads NAMED error bags only** (`profile`,
+  `profilePassword`; `ProfileController` uses `validateWithBag()`). It is
+  included on every page and used to open on ANY default-bag error and
+  call `$errors->only()` — not a `MessageBag` method — so a rejected
+  Admin > Users or Admin > Students form (keys `last_name`/`first_name`/
+  `email`/`password`) was a 500 (64 log entries since 09-08). `ProfileTest`
+  pins both behaviours. A new shared partial must never key its
+  open-state off the default bag.
+- **A Blade `@json(...)` argument must not contain a comma.** Blade splits
+  the directive on commas, so `@json($section->load(["track",
+  "specialization"]))` compiled to `json_encode(..., 512)` — no
+  `JSON_HEX_APOS`/`HEX_TAG` — and a section name with a quote broke out
+  of the `onclick='...'` attribute (a real stored XSS on Admin > Sections;
+  the other ten `onclick='fn(@json($x))'` sites are comma-free and safe).
+  Eager-load in the controller and pass one variable.
+  `XssEscapingAcrossRolePagesTest` renders a markup + quote-breakout
+  payload on 19 role pages and statically rejects any comma-bearing
+  `@json`.
+- **A no-role Examination item is named, not silently dropped.**
+  `GradingEngine::examinationPercentage()` excludes an item with no
+  `exam_role` once any item carries one (unchanged — DO 015's Examination
+  is ST1/ST2/TE). The live demo held 18 "Additional Practice EX" items
+  whose scores counted for nothing; Adviser > Assessments now lists them
+  in an amber notice (`$unroledExamItemNames`,
+  `AssessmentPerformancePageTest`). Grading did not change.
+- **A repeat upload says which items already exist.** `import()` was
+  already idempotent (item matched by name, scores replaced, blank cells
+  keep the old score); the Preview now names the existing items and says
+  scores will be replaced (`$existingItemNames`,
+  `AssessmentUploadWorkflowTest`).
+- **Adviser > My Students renders `partials/validation-errors`** — the one
+  form page the 2026-09-20 morning pass missed (a rejected Edit Student
+  bounced back silently). `PreDemoAuditRegressionsTest`.
+- **`LoginRequest`'s disabled-account refusal redirects to `route('login')`
+  explicitly** — `session()->invalidate()` wipes the previous URL, so a
+  plain `back()` depended on the browser's Referer header to land on
+  /login with the message intact.
+- The Admin dashboard's "Import Subjects" quick action (an upload removed
+  with the applicability refactor) is now "Manage Subjects".
+
+**Recorded, deliberately NOT changed (business-rule / data questions):**
+
+- `RiskFeatureExtractor::missingAssessmentCount()` counts EVERY item in
+  the section/term, including additional-support items only a subset of
+  learners were meant to take — every non-remediated Curie learner reads
+  27 "missing". The active single-feature prototype ignores it, so no
+  live result is affected; a real candidate model would not. Whether an
+  additional-support item is "expected" for a learner outside the
+  intervention is the school's call. Feature definitions stay frozen
+  (`PerformanceBatchEquivalenceTest`).
+- The operator created "Philippine History and Society" (Grade 11 core,
+  all three terms) at 15:33 on 2026-09-20, AFTER both Term 1 reports were
+  submitted. Every Grade 11 section now expects 168 grades for Term 1,
+  has 126, and Submit Report refuses a re-submit ("42 grade(s)
+  remaining") — correct behaviour, wrong demo state. Upload its ECR for
+  both sections, or narrow/remove the subject (it has zero records),
+  before the demo. Its catalog title is "Pag-aaral ng Kasaysayan at
+  Lipunang Pilipino", so it is not catalog-linked either.
+- The two live Grade 11 sections carry `specialization_id` (HUMSS/STEM)
+  with `curriculum = NULL`. SSHS has no strands; harmless today (no
+  Grade 11 electives exist, and `usesTrackElectives()` only matters for
+  electives) but it should be cleared or the curriculum set explicitly.
+
+## Performance audit (2026-09-19) — standing conventions it added
+
+Measured first (an in-process HTTP harness over a throwaway copy of the
+live database, counting SQL, duplicate SQL, memory and Python launches per
+request), then fixed. Full figures are in the pass's report; these are the
+rules that stay true afterwards.
+
+- **`GradingEngine` reads evidence ONCE per (section, term, school year)
+  per instance, never once per `computeGrade()` call.** `evidenceFor()`
+  loads every assessment item in that scope and every score against them
+  (two queries) and casts `score`/`max_score` to float once at load time;
+  `componentPercentage()`/`examinationPercentage()` filter that in memory
+  with the exact predicates the per-call queries used. Before this,
+  `computeGrade()` ran ~7 queries per call and the Principal dashboard
+  made 1,076 calls — 7,715 queries and 14.9 s per page load; after, 67
+  queries and 0.18 s. **Do not add a query inside `computeGrade()`'s call
+  path.** A new evidence read belongs in `evidenceFor()`'s two loads and a
+  new accessor beside `scoredItemCount()` / `scoredItems()`.
+- **Staleness rule.** The caches (engine evidence, engine reference memo,
+  `TransmutationService`'s per-scheme bands) are instance-scoped and
+  checked against one process-wide generation counter. Every Eloquent
+  save/delete on `Assessment`, `AssessmentScore`, `SubjectGroupWeight`,
+  `ExamRoleShare`, `TransmutationRange` and `DepedSubjectCatalog` bumps it
+  (`AppServiceProvider::boot()`). **A write to those tables that bypasses
+  model events (query-builder `update`/`delete`/`insert`, raw SQL) must call
+  `GradingEngine::invalidateEvidence()` itself** — the one such write in
+  the app (`Adviser\AssessmentController::updateItem()`'s delete) does.
+  `PerformanceBatchEquivalenceTest` proves a same-instance write is seen.
+- **`PerformanceAnalysisService::analyzeStudent()` carries `item_count`**
+  (from the engine's evidence); `InTermStatusService::fromAnalysis()` reads
+  it instead of running its own per-row count, and still runs the query
+  for a hand-built analysis array without it. `ProgressMonitoringService`
+  reads its as-of (`created_at <= delivered_at`) rows through
+  `GradingEngine::scoredItems()` on the SAME engine
+  (`PerformanceAnalysisService::engine()`), so the interventions pages
+  share one evidence load.
+- **`RiskFeatureExtractor` answers every per-learner lookup from a
+  per-batch map** (expected item count, recorded score counts grouped by
+  student, the previous period's `risk_results.average_grade`, both
+  periods' per-subject grades) filled by one query per scope — Submit
+  Report went from 193 to 63 queries for 42 learners. Feature definitions
+  are unchanged; `PerformanceBatchEquivalenceTest::test_risk_features_
+  match_per_learner_queries` holds the original queries as its oracle.
+  `runAnalytics()` now logs the classifier's structured error and stderr
+  when the process fails — the two live failures earlier that day had left
+  only `exit_code: 1` in the log, which was not diagnosable.
+- **Python is launched exactly once per Submit Report** (it already was;
+  now measured: `py=1`). Its ~4 s is `scikit-learn`'s own import chain
+  (scipy.stats, pandas via `sklearn.utils.fixes`) triggered by unpickling
+  the forest — library cost, not application code, and not per learner.
+  Predicting 42 rows takes 45 ms. The only ways below that are a resident
+  worker or a different artifact, both behaviour/architecture changes that
+  were deliberately not made.
+- **The prescribed ECR is never loaded whole.** A full seven-sheet
+  `load()` of the 434 KB instrument costs ~1.7 s and tens of MB; `HELPER`
+  alone is ~0.8 s. `EcrReaderService::toFlatRows()` loads `INPUT DATA` +
+  the one term sheet it reads (~0.3 s), `checkWeightMismatch()` and
+  `extractDraftRoster()` load `INPUT DATA` only (~50 ms), and
+  `EcrProfileDetector` reads its two marker cells through a read filter
+  and memoises the verdict by file content (md5), so the three services
+  that ask per request share one answer. Values read are unchanged — every
+  read is a raw `getValue()`, never a calculated one, so which other sheets
+  are in memory cannot change a value. detect/preview/import went from
+  8.7 s / 5.3 s / 6.5 s (177 MB peak) to ~0.5 s / 0.4 s / 0.5 s (18 MB).
+  **When adding a workbook read, name the sheets it reads via
+  `loadSheets()`; do not reach for `load()`.** The flat CSV/XLSX fallback
+  in `AssessmentUploadService::readRows()` is untouched on purpose: its
+  `toArray(..., formatData: true)` depends on cell styles, so
+  `setReadDataOnly(true)` there would change values.
+- **Imports preload the rows `updateOrCreate()` would look up one at a
+  time** (`AssessmentUploadService::import()` for scores, `ReportController::
+  runAnalytics()` for risk results) and then do exactly what
+  `updateOrCreate()` did per row — `fill()` + `save()` on the existing
+  model or `create()` — so model events, timestamps and the unique keys
+  are unchanged. Writes still happen one row at a time and inside the same
+  transaction; bulk `insert()` was rejected because it skips events and
+  `created_at`.
+- **Indexes are added only against an EXPLAIN'd pattern.**
+  `2026_09_19_000001_add_indexes_to_activity_logs_table` adds
+  `(created_at)` and `(action, user_id)` on the fastest-growing table,
+  whose two live reads (`ORDER BY created_at DESC` on the log page and
+  dashboard; `WHERE action = 'login'` in Data Health) were full scans with
+  filesort. Every other hot query already used an index. Rehearsed
+  forward/rollback/forward on the copy before running live; backup
+  `backups/backup_20260919_pre_perf_indexes.sql`.
+- **The remaining per-page cost is environmental, not application.** With
+  OPcache disabled (XAMPP's `php.ini` ships `;zend_extension=opcache`
+  commented out), every request compiles ~590 PHP files: a page that does
+  26 ms of work in-process (Admin > Users) takes ~300 ms over HTTP, and
+  the same code on PHP's built-in server measured ~360 ms without OPcache
+  vs ~45 ms with it. `php artisan optimize` measured no gain here (cached
+  config/routes are just more PHP to compile) and `config:cache` breaks
+  `phpunit.xml`'s env overrides — leave it cleared in this checkout.
+  Enabling OPcache is a php.ini change for the operator, recorded as a
+  recommendation, not made by this pass.
+
+## Subject applicability refactor (2026-09-20) — Admin > Subjects is the one configuration point
+
+**The problem it removed.** Admin > Sections > Subjects asked the Admin
+to assign every subject to every section, one term at a time, and the
+first such assignment silently switched the section off the curriculum
+("term-managed"). Two sections could drift; the same core subject was
+typed in six times; and a validated ECR upload could add a
+`section_subjects` row on its own.
+
+**The architecture now.**
+
+- **`subject_terms` — TERMS TAUGHT.** One row per (subject, term number),
+  unique, FK cascade on subject delete; `Subject::terms()`,
+  `termNumbers()`, `isTaughtIn()`, `termsLabel()`, `syncTerms()`. The
+  term universe is `AcademicTerm::termNumbers()` (distinct
+  `academic_terms.term`, falling back to `AcademicTerm::TERM_NUMBERS`),
+  never a second constant. Term NUMBER, not a year-specific FK, on
+  purpose: subjects are master data valid across years, and every
+  academic table keys its term as `grading_period` 1..3. **Backfill
+  invented nothing**: every existing subject got every term, which is
+  exactly what each resolved to before (the default path ignored the
+  term) and what DepEd's catalog says for all three live subjects
+  (`g11_terms = 3`). A subject that runs in fewer terms is narrowed by
+  the Admin.
+- **`SubjectApplicabilityService` — THE resolver.** `Subject::
+  forSection($section, $term)` delegates to `query()`; every screen and
+  write guard already went through `forSection()`, so they all changed
+  at once. The rule, from stored configuration only: grade level
+  matches; AND the subject reaches the section as CORE (every core of
+  the grade level), by TRACK (an elective whose track/specialization is
+  the section's — the k12_2013 strand mechanism, never for an `sshs`
+  section), or by SECTION CHOICE (a `section_subjects` row); AND it is
+  taught in the term. `appliesTo()` is the same rule as a PHP predicate;
+  `SubjectApplicabilityTest` holds the two against each other on every
+  combination. `sectionsOffering()` is the inverse (Principal Students'
+  section scope reads it — no second hand-written rule).
+- **`section_subjects` = section ELECTIVE CHOICES.** Schema untouched.
+  `SubjectOfferingService::chooseElective()` writes one row per term the
+  elective is taught; `removeElectiveChoice()` is refused while records
+  exist (`SectionSubject::academicReferenceCounts()`). A row for a core
+  subject changes nothing. The resolver reads "chosen" and lets Terms
+  Taught decide the terms, so widening a subject's terms later needs no
+  row maintenance. `SubjectOfferingService::notOfferedMessage()` is still
+  the one refusal wording: "X is not applicable to Section in Term N."
+- **Admin > Subjects** carries Terms Taught (checkboxes, at least one,
+  each validated against `termNumbers()`), a name+grade-level duplicate
+  rule (the removed importer's rule, kept alive on the form), a
+  specialization-belongs-to-track check, and the catalog auto-link by
+  exact name for a subject that has none (never re-pointed on edit).
+  **History protection** (`historyConflicts()`): an edit that would make
+  any (section, term) holding grades / assessments / uploads /
+  interventions / weakest-subject risk results for this subject stop
+  resolving it — a term unchecked, a grade level changed, an elective
+  moved to another track/specialization — is refused naming every pair.
+  Records are never deleted or hidden.
+- **Admin > Sections > Subjects** is a RESOLVED view per term tab
+  ("Applies because": Core / Track-Specialization / Section choice, the
+  grading profile, "has Term N records"), with one action left —
+  choosing an elective for a section the curriculum cannot match one to.
+  The Sections list's "default" badge and the Data Health "no
+  term-specific assignments" item are gone; Data Health now flags an SSHS
+  section with electives available but none chosen
+  (`SectionElectiveStatus::isFullyConfigured()`, unchanged in meaning).
+- **The prescribed ECR validates, never writes.** `Adviser\
+  AssessmentController` refuses a subject not applicable to the section
+  in the selected term BEFORE the file is opened (detect, preview and
+  import alike); `EcrSubjectTermResolver` then refuses a workbook whose
+  own TERMS AND UNITS block contradicts the selected term, exactly as
+  before. `synchronize()` is gone; `PrescribedEcrMetadataValidationTest`
+  proves a valid upload leaves `subject_terms` and `section_subjects`
+  byte-identical and that a workbook cannot widen a narrowed subject.
+- **Applicability is not term status.** "Taught in Term 2" and "Term 2
+  is open for encoding" are different questions; `AcademicTerm::
+  acceptsWrites()` still guards every write, and a closed term refuses
+  a write for a subject that is applicable to it.
+- **Submit Report / risk features** use the term's universe by
+  construction: `SectionElectiveStatus::expectedGradeCount()`,
+  `TermReadinessService`, `RiskFeatureExtractor` and `submit()`'s failing
+  count all read `forSection($section, $term)` or the term's own
+  records. A Term-2-only subject adds nothing to Term 1's expected,
+  missing, weak or failing counts (`SubjectApplicabilityTest`, including
+  an end-to-end submit through the real classifier). No ML feature
+  definition, model, threshold or safeguard changed.
+- **Removed as unsupported formats** (Part 24 of the work order): the
+  Tracks, Specializations, Subjects and Sections bulk imports — routes,
+  controller methods, `App\Imports\{Tracks,Specializations,Subjects,
+  Sections}Import`, the modals and their `modal.js` handlers. No official
+  or client file format exists for any of them. The learner roster import
+  (`students.import`, `import-from-ecr`) and the prescribed ECR upload
+  stay. `MimesFixSixMoreRoutesTest` asserts the four routes and classes
+  are gone. Run `composer dump-autoload` after deleting classes — the
+  classmap still listed them and `class_exists()` warned.
+- **Adviser advisory details** (Part 12): Track shows always;
+  Specialization only when set; an `sshs` section shows "Strengthened
+  SHS" instead of a blank specialization, on the Adviser dashboard and
+  Encode Grades headers.
+
+**Open, deliberately.** Whether an SSHS section's electives are chosen
+per section or per learner (Q1) is still the school's question; the
+choice mechanism is per section, as before. The three live subjects are
+all core and all three-term, so the live database's resolution is
+unchanged by this refactor — `dss:check-integrity` was clean before and
+after, and the new "records the configuration no longer resolves" check
+it gained reports zero.

@@ -121,6 +121,18 @@ class AssessmentUploadService
      * compared against the same SubjectGroupWeight-resolved figure a real
      * grade would compute with, not hardcoded 20/60/20.
      */
+    /**
+     * Whether a checkEcrWeightMismatch() message must REFUSE the upload. A
+     * catalog contradiction (prescribed SSHS ECR) or a Grade 12 template
+     * whose declared split disagrees with the configured profile blocks;
+     * the OTHER ELECTIVE / SPECIAL CURRICULAR PROGRAM note — DepEd
+     * publishes no weight to compare against — is information only.
+     */
+    public function ecrWeightMismatchBlocks(string $message): bool
+    {
+        return !str_starts_with($message, 'OTHER ELECTIVE');
+    }
+
     public function checkEcrWeightMismatch(string $filePath, ?Subject $subject, ?int $gradingPeriod = null, ?Section $section = null): ?string
     {
         if ($this->ecrProfile->detect($filePath) !== null) {
@@ -153,15 +165,18 @@ class AssessmentUploadService
             return null;
         }
 
+        // THE resolver — the same call computeGrade() makes for this
+        // (section, subject) pair, scheme included ("Grading policy
+        // display" pass, 2026-09-20; this used to call resolveDo8GroupKey()
+        // + SubjectGroupWeight::resolve() itself, a second path).
         try {
-            $groupKey = (new GradingEngine())->resolveDo8GroupKey($section, $subject);
-            $resolved = \App\Models\SubjectGroupWeight::resolve(\App\Services\TransmutationService::DEFAULT_SCHEME, $groupKey);
+            $resolved = (new GradingEngine())->resolveWeightProfile($section, $subject);
         } catch (\Throwable $e) {
             return null;
         }
 
         $fileWw = $fileWeights['written_work']; $filePt = $fileWeights['performance_task']; $fileEx = $fileWeights['examination'];
-        $dssWw = (float) $resolved->ww_weight / 100; $dssPt = (float) $resolved->pt_weight / 100; $dssEx = $resolved->ex_weight !== null ? (float) $resolved->ex_weight / 100 : null;
+        $dssWw = $resolved['ww_weight'] / 100; $dssPt = $resolved['pt_weight'] / 100; $dssEx = $resolved['ex_weight'] !== null ? $resolved['ex_weight'] / 100 : null;
 
         $mismatch = ($fileWw !== null && abs($fileWw - $dssWw) > 0.001)
             || ($filePt !== null && abs($filePt - $dssPt) > 0.001)
@@ -517,6 +532,17 @@ class AssessmentUploadService
                 $assessmentsByColumnIndex[$index] = $assessment;
             }
 
+            // "Performance audit" pass — the rows updateOrCreate() would
+            // look up one at a time (one SELECT per cell, 378 per class
+            // per subject), fetched once. Each cell below then does exactly
+            // what updateOrCreate() did: fill the existing row and save()
+            // (a no-op UPDATE when the score is unchanged — Eloquent only
+            // writes dirty attributes), or create a new one. Same model
+            // events, same timestamps, same unique key.
+            $existingScores = AssessmentScore::whereIn('assessment_id', collect($assessmentsByColumnIndex)->pluck('id'))
+                ->get()
+                ->keyBy(fn(AssessmentScore $s) => $s->assessment_id . '|' . $s->student_id);
+
             $seenLrns = [];
 
             foreach ($dataRows as $rowIndex => $row) {
@@ -555,10 +581,15 @@ class AssessmentUploadService
                         continue;
                     }
 
-                    AssessmentScore::updateOrCreate(
-                        ['assessment_id' => $assessment->id, 'student_id' => $student->id],
-                        ['score' => $value]
-                    );
+                    $existing = $existingScores->get($assessment->id . '|' . $student->id);
+                    if ($existing) {
+                        $existing->fill(['score' => $value])->save();
+                    } else {
+                        $existingScores->put(
+                            $assessment->id . '|' . $student->id,
+                            AssessmentScore::create(['assessment_id' => $assessment->id, 'student_id' => $student->id, 'score' => $value])
+                        );
+                    }
 
                     $importedCount++;
                 }

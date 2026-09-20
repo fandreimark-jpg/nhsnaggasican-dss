@@ -7,6 +7,10 @@
 
 @include('partials.section-school-year-context')
 
+{{-- Final pre-demo audit (2026-09-20): the Edit Student modal's rejected
+     submit (blank name, invalid gender) bounced back with no message. --}}
+@include('partials.validation-errors')
+
 <div class="card overflow-x-auto">
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 px-5 py-4 border-b border-line">
         <div>
@@ -42,7 +46,6 @@
                 <th scope="col">Last Name</th>
                 <th scope="col">First Name</th>
                 <th scope="col">Middle Name</th>
-                <th scope="col">Birthdate</th>
                 <th scope="col">Gender</th>
                 <th scope="col" class="text-right">Actions</th>
             </tr>
@@ -56,7 +59,6 @@
                 <td class="font-medium text-ink">{{ $student->last_name }}</td>
                 <td>{{ $student->first_name }}</td>
                 <td>{{ $student->middle_name ?? '—' }}</td>
-                <td class="capitalize">{{ $student->formatted_birthdate }}</td>
                 <td class="capitalize">{{ $student->gender }}</td>
                 <td class="text-right">
                     <button type="button"
@@ -135,12 +137,6 @@
                         <option value="male">Male</option>
                         <option value="female">Female</option>
                     </select>
-                </div>
-                <div>
-                    <label class="form-label">Birthdate</label>
-                    <input type="date" name="birthdate" id="edit_birthdate"
-                           max="{{ date('Y-m-d') }}"
-                           class="w-full border rounded-lg px-3 py-2 text-sm">
                 </div>
             </div>
 

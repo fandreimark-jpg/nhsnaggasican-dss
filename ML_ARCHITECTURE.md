@@ -2,20 +2,36 @@
 
 **The current risk model is a prototype trained using synthetic data and
 must not be represented as a validated production learner-risk model.**
-See `analytics/model_accuracy.txt`, regenerated every time the model trains,
-which carries this same caveat directly attached to its metrics — not as a
-separate document a reader might not see.
+
+> **`analytics/README.md` is now the operational reference** for this module:
+> the canonical feature schema, the target definition, the missing-data
+> policy, how to validate a dataset, train a candidate, read its metrics,
+> promote it and roll it back, and "Why the previous prototype could be
+> described as hardcoded". This document keeps the ARCHITECTURAL reasoning
+> and the boundaries; where the two overlap, the README is the one kept
+> current.
 
 This document explains the architecture around that model: why it's built
 the way it is, what would be required to replace it with something trained
 on real data, and the boundaries that must not be crossed while doing so.
+
+**ML architecture correction pass (2026-09-19) — what changed.** Inference
+and training are now separate files. `classify.py` is inference-only: the
+synthetic training set, the `train_model()` that built it, the accuracy-report
+writer and the duplicate `train_from_real_data()` path were all removed from
+it. The prototype's generator moved to `analytics/legacy/prototype_model.py`,
+where it is retained for reproducibility and audit and cannot write
+`model_cache.pkl`. `analytics/train_model.py` is the single authoritative
+training pipeline. `analytics/schema.py` is the single source of truth for
+feature names and order, and `analytics/baseline.py` is new. **No model was
+trained, promoted or replaced; the active model is unchanged.**
 
 ## 1. Academic grading rules vs. ML — two different systems, deliberately
 
 | | Academic rules | ML |
 |---|---|---|
 | Owns | Curriculum/grading-policy resolution, WW/PT/Exam weights, transmutation, official remarks | Risk-level prediction only |
-| Lives in | `GradingEngine`, `SubjectGroupWeight`, `TransmutationService` | `analytics/classify.py`, `RiskFeatureExtractor` |
+| Lives in | `GradingEngine`, `SubjectGroupWeight`, `TransmutationService`, `Adviser\ReportController::applyFailingSubjectOverride()` | `analytics/` (schema, classify, train_model, registry), `RiskFeatureExtractor` |
 | Produces | The official grade | A probability/prediction to inform a Principal's judgment |
 | Changes | Only via a DepEd-sourced grading order (DO 8, DO 015, ...) | Only via a validated retrain |
 
@@ -105,7 +121,10 @@ UPLOAD -> DETECT FORMAT -> PARSE -> VALIDATE -> PREVIEW -> NORMALIZE
   workbook — out of scope until a real Q1-Q4 sample exists. Today, a
   dataset must already be normalized into the CSV shape
   `TRAINING_DATA_CONTRACT.md` describes before `train_model.py` can use it.
-- **VALIDATE**: `analytics/dataset_validator.py`'s `validate_dataset()`.
+- **VALIDATE**: `analytics/dataset_validator.py`'s `validate_dataset()`,
+  runnable directly (`python analytics/dataset_validator.py <csv>`). Blocking
+  failures, per-row rejections and non-blocking warnings are distinguished;
+  nothing is coerced into a valid-looking sample.
 - **PREVIEW**: `ValidationSummary.report()` — the human-readable summary,
   meant to be shown before any training starts.
 - **TRAIN CANDIDATE**: `analytics/train_model.py`'s `train_candidate()` —
@@ -122,26 +141,42 @@ separate, inspectable call.
 
 ## 8. Evaluation metrics
 
-Accuracy, per-class precision/recall/F1, and the confusion matrix — computed
-on the held-out test set only (never on training data), stored in the
-candidate model's metadata (`analytics/model_registry.py`'s
-`ModelMetadata`).
+Accuracy, per-class precision/recall/F1, the confusion matrix, class
+distributions, train/test counts and feature importances — computed on the
+held-out test set only (never on training data), stored in the candidate
+model's metadata (`analytics/model_registry.py`'s `ModelMetadata`).
+
+**Plus a baseline comparison.** `analytics/baseline.py` scores the school's
+existing academic rule on the SAME held-out records, with no fitting, and
+both sets of metrics go into the metadata. The question a candidate must
+answer is not "is accuracy high" but "does ML add value over the rules the
+school already applies". If it does not, that is reported as the finding.
+
+No acceptance threshold is encoded anywhere. The school has approved no
+deployment criterion, so model acceptance requires human review.
 
 ## 9. Model activation / versioning
 
 `analytics/model_registry.py` — three states, on disk under
-`analytics/models/` (a directory entirely separate from
-`analytics/model_cache.pkl`, which remains what `classify.py`'s
-`get_model()` reads today):
+`analytics/models/`, a directory separate from `analytics/model_cache.pkl`
+(the legacy prototype artifact). Since the 2026-09-19 pass, `classify.py`
+reads the registry's ACTIVE model FIRST and falls back to `model_cache.pkl`
+only when nothing has been promoted — so promoting a candidate is what
+switches production over, with no code change:
 
 - **Candidate** — a newly trained model + metadata, saved by
   `train_model.py`. Never active on save.
-- **Active** — the one a future production integration would load. Moved
-  there **only** by an explicit, manual call to
-  `model_registry.promote_to_active(version)` — never by `train_model.py`
-  itself, and never as a side effect of training or saving.
+- **Active** — what `classify.py` loads. Moved there **only** by an
+  explicit, manual `model_registry.promote_to_active(version)` (CLI:
+  `python analytics/model_registry.py promote <version>`) — never by
+  `train_model.py` itself, and never as a side effect of training or
+  saving. Promotion REFUSES a candidate tagged `dataset_type=synthetic`.
 - **Archived** — a superseded model, kept (never deleted) when a new one is
-  promoted to active.
+  promoted to active. `promote_to_active()` archives rather than deletes
+  precisely so `rollback_to(version)` always has something to return to.
+
+`promote` REFUSES a candidate tagged `dataset_type=synthetic`. A model whose
+metrics describe fabricated rows must never become the one a Principal reads.
 
 Model metadata recorded: version, algorithm, `trained_at`, training record
 count, school years represented, reporting systems represented, feature
@@ -156,7 +191,9 @@ developer/data-scientist-facing mechanism, not an Admin-facing control.
 Current ECR / assessments
     -> GradingEngine (official grade, per DepEd policy)
     -> RiskFeatureExtractor (normalized academic features)
-    -> classify.py (active model: currently model_cache.pkl)
+    -> classify.py (active model: registry active/, else the
+       legacy prototype at model_cache.pkl; a controlled
+       error if neither — never a silent retrain)
     -> prediction + probability
     -> RiskResult
     -> Principal/Adviser decision support
@@ -169,15 +206,30 @@ It is decision support only.
 
 ## 11. Current synthetic model limitation
 
-`analytics/classify.py`'s active model is trained on 90 hand-constructed,
-perfectly-separable synthetic samples using a single feature
-(`average_grade`). Its "100% cross-validation accuracy" is expected
-arithmetic for a single-feature threshold problem with clean synthetic
-boundaries — not evidence of real-world predictive validity. It has never
-been trained or validated against real student outcomes. See
-`analytics/classify.py`'s own top-of-file comment and
-`analytics/model_accuracy.txt` (regenerated on every train, carries the
-same caveat attached directly to its numbers) for the full detail.
+The active model is trained on 90 hand-constructed, perfectly-separable
+synthetic samples using a single feature (`average_grade`). Its "100%
+cross-validation accuracy" is expected arithmetic for a single-feature
+threshold problem with clean synthetic boundaries — not evidence of
+real-world predictive validity. It has never been trained or validated
+against real student outcomes.
+
+Since the 2026-09-19 correction pass it is no longer built by `classify.py`.
+The artifact (`analytics/model_cache.pkl`) is described by
+`analytics/legacy/legacy_model.json` and reproducible from
+`analytics/legacy/prototype_model.py`; `analytics/README.md` §3, "Why the
+previous prototype could be described as hardcoded", is the full account.
+`analytics/model_accuracy.txt` is a GENERATED report (regenerate with
+`python analytics/legacy/prototype_model.py --report-only`) that no runtime
+code reads.
+
+**A binary-target candidate cannot simply replace it.** The candidate
+pipeline's target is `intervention`/`no_intervention`; the DSS stores and
+displays `low`/`moderate`/`high`. `classify.py` REFUSES to serve a
+binary-target model through the risk-level contract rather than inventing a
+mapping — `intervention -> high` would fabricate a severity the model never
+predicted and erase `moderate` entirely. Resolving that is an explicit design
+decision to take with the school, and it is a prerequisite for putting any
+real candidate into production.
 
 `analytics/train_model.py` and `analytics/model_registry.py` (this pass)
 exist so that once a real, school-approved historical dataset arrives,

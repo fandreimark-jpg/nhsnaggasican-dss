@@ -98,7 +98,7 @@ class PresentationSafetyTest extends TestCase
         $this->delete('/admin/subjects/'.$assessment->subject_id)->assertSessionHasErrors('deletion');
         $this->assertDatabaseHas('assessments', ['id' => $assessment->id]);
         $subject = Subject::factory()->create();
-        $mapping = SectionSubject::create(['section_id' => $section->id, 'subject_id' => $subject->id, 'school_year' => '2026-2027']);
+        $mapping = SectionSubject::offer($section, $subject, 1);
         $this->delete('/admin/subjects/'.$subject->id)->assertSessionHasErrors('deletion');
         $this->assertDatabaseHas('section_subjects', ['id' => $mapping->id]);
     }

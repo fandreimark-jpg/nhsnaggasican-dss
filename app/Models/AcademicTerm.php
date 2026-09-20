@@ -15,6 +15,31 @@ class AcademicTerm extends Model
 {
     protected $fillable = ['academic_year_id', 'school_year', 'term', 'is_open', 'opened_at', 'closed_at', 'start_date', 'end_date'];
 
+    /**
+     * The term numbers a school year is made of — the three DepEd
+     * Strengthened SHS terms every academic table keys as grading_period
+     * 1..3. ensureExistFor() creates exactly these; termNumbers() reads
+     * them back from the table so anything that offers "which terms" as a
+     * choice (Admin > Subjects' Terms Taught, the Sections page tabs) is
+     * driven by the academic_terms rows that exist, not a second constant.
+     */
+    public const TERM_NUMBERS = [1, 2, 3];
+
+    /**
+     * Every distinct term number in academic_terms, ascending — the
+     * universe a subject's Terms Taught may be chosen from. Falls back to
+     * TERM_NUMBERS on an empty table (a fresh install before any year has
+     * been opened), which is also what ensureExistFor() would create.
+     *
+     * @return array<int, int>
+     */
+    public static function termNumbers(): array
+    {
+        $numbers = static::query()->distinct()->orderBy('term')->pluck('term')->map(fn($t) => (int) $t)->all();
+
+        return $numbers === [] ? self::TERM_NUMBERS : $numbers;
+    }
+
     protected $casts = [
         'is_open'    => 'boolean',
         'opened_at'  => 'datetime',
@@ -45,7 +70,7 @@ class AcademicTerm extends Model
     {
         $year = AcademicYear::ensureFor($schoolYear);
 
-        foreach ([1, 2, 3] as $term) {
+        foreach (self::TERM_NUMBERS as $term) {
             $row = static::firstOrCreate(
                 ['school_year' => $schoolYear, 'term' => $term],
                 ['is_open' => $term === 1, 'academic_year_id' => $year->id]
@@ -211,7 +236,7 @@ class AcademicTerm extends Model
 
         return $sections->map(function (Section $section) use ($term, $schoolYear) {
             $studentCount = Student::enrolledIn($section)->count();
-            $subjectCount = Subject::forSection($section)->count();
+            $subjectCount = Subject::forSection($section, $term)->count();
 
             $encoded = Grade::where('section_id', $section->id)
                 ->where('grading_period', $term)

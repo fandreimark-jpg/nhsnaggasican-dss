@@ -17,6 +17,10 @@ use Tests\TestCase;
  * spec. GradingEngine itself never hard-codes these numbers — they only
  * exist here, as test fixtures.
  */
+// NOTE ('SSHS ECR grading correction', 2026-09-20): these Grade 12
+// sections carry an EXPLICIT k12_2013 curriculum because this file's
+// intent is the DO 8, s. 2015 (legacy) path. An unset curriculum in
+// SY 2026-2027 now resolves to DO 015 for both grade levels.
 class GradingEngineTest extends TestCase
 {
     use RefreshDatabase;
@@ -37,7 +41,7 @@ class GradingEngineTest extends TestCase
         // than flipping to `do015_2026` on a random Grade 11 roll. Grade
         // 12 in SY 2026-2027 correctly stays on do8_2015 either way — see
         // TransmutationServiceSchemeTest for Grade 11's do015_2026 wiring.
-        $this->section = Section::factory()->create(['school_year' => '2026-2027', 'grade_level' => 12]);
+        $this->section = Section::factory()->create(['curriculum' => 'k12_2013', 'school_year' => '2026-2027', 'grade_level' => 12]);
         $this->subject = Subject::factory()->create();
         $this->student = Student::factory()->create(['section_id' => $this->section->id]);
     }

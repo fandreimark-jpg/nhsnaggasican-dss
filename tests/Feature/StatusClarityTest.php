@@ -21,6 +21,10 @@ use Tests\TestCase;
  * never changes WHICH number the status is computed from, nor the
  * threshold — only makes the existing choice legible.
  */
+// NOTE ('SSHS ECR grading correction', 2026-09-20): these Grade 12
+// sections carry an EXPLICIT k12_2013 curriculum because this file's
+// intent is the DO 8, s. 2015 (legacy) path. An unset curriculum in
+// SY 2026-2027 now resolves to DO 015 for both grade levels.
 class StatusClarityTest extends TestCase
 {
     use RefreshDatabase;
@@ -63,7 +67,7 @@ class StatusClarityTest extends TestCase
         // would make this "passing on paper" fixture's 67.5 computed
         // grade come back with NO transmuted grade at all. Grade 12
         // deterministically stays on the fully-seeded do8_2015 table.
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'grade_level' => 12, 'school_year' => '2026-2027']);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'adviser_id' => $adviser->id, 'grade_level' => 12, 'school_year' => '2026-2027']);
         $subject = Subject::factory()->create(['grade_level' => 12, 'type' => 'core']);
         $student = $this->makePassingOnPaperStudent($section, $subject);
 
@@ -87,7 +91,7 @@ class StatusClarityTest extends TestCase
     public function test_principal_students_page_shows_computed_number_and_passing_on_paper_marker(): void
     {
         $principal = User::factory()->principal()->create();
-        $section = Section::factory()->create(['grade_level' => 12, 'school_year' => '2026-2027']);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'grade_level' => 12, 'school_year' => '2026-2027']);
         $subject = Subject::factory()->create(['grade_level' => 12, 'type' => 'core']);
         $student = $this->makePassingOnPaperStudent($section, $subject);
 
@@ -112,7 +116,7 @@ class StatusClarityTest extends TestCase
         // would make this "passing on paper" fixture's 67.5 computed
         // grade come back with NO transmuted grade at all. Grade 12
         // deterministically stays on the fully-seeded do8_2015 table.
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'grade_level' => 12, 'school_year' => '2026-2027']);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'adviser_id' => $adviser->id, 'grade_level' => 12, 'school_year' => '2026-2027']);
         $subject = Subject::factory()->create(['grade_level' => 12, 'type' => 'core']);
         $student = Student::factory()->create(['section_id' => $section->id]);
 

@@ -20,29 +20,58 @@ class TransmutationService
 {
     public const DEFAULT_SCHEME = 'do8_2015';
 
+    /**
+     * "Performance audit" pass — every scheme's bands are read ONCE per
+     * instance (generation-checked against GradingEngine's evidence
+     * counter, which TransmutationRange saves also bump) instead of one
+     * range query plus one exists() query per transmuted grade. matchBand()
+     * applies the identical predicate (min_initial <= g AND max_initial
+     * >= g) to the same rows, in id order, so the band chosen is the one
+     * the query returned.
+     *
+     * @var array<string, \Illuminate\Support\Collection<int, TransmutationRange>>
+     */
+    private array $bandsByScheme = [];
+    private int $bandsGeneration = -1;
+
+    /** @return \Illuminate\Support\Collection<int, TransmutationRange> */
+    private function bandsFor(string $scheme): \Illuminate\Support\Collection
+    {
+        if ($this->bandsGeneration !== GradingEngine::evidenceGeneration()) {
+            $this->bandsByScheme = [];
+            $this->bandsGeneration = GradingEngine::evidenceGeneration();
+        }
+
+        return $this->bandsByScheme[$scheme] ??= TransmutationRange::where('scheme', $scheme)->orderBy('id')->get();
+    }
+
     /** DO 015, s. 2026's adjusted table — see schemeFor() and TransmutationRangesSeeder's TODO. */
     public const SCHEME_DO015_2026 = 'do015_2026';
 
     /**
-     * Which published transmutation table applies. TASK 2 of "terminology,
-     * transmutation, and interface cleanup": Grade 11 moved to the
-     * Strengthened SHS curriculum starting SY 2026-2027 and reports under
-     * DO 015, s. 2026's adjusted table; Grade 12 in that same school year
-     * has NOT moved and continues reporting under DO 8, s. 2015 — the two
-     * grade levels can legitimately be on different schemes in the same
-     * school year.
+     * Which published grading scheme (weights AND transmutation table)
+     * applies to a section.
      *
-     * "ECR alignment" work order, PART 3a — $curriculum, when given, is
-     * what actually decides this now, not grade level: a `sshs` section
-     * always resolves to do015_2026 and a `k12_2013` section always
-     * resolves to do8_2015, regardless of grade level or year, because
-     * that is the whole reason `sections.curriculum` exists — the moment a
-     * school runs a transition cohort differently than "Grade 11 = new
-     * curriculum," inferring from grade level alone becomes wrong. $curriculum
-     * is OPTIONAL and defaults to null so every existing caller (and every
-     * test that calls this with the original 2-argument form) is
-     * unaffected — a null or unrecognised curriculum falls back to the
-     * original grade-level/year inference below, unchanged.
+     * $curriculum decides when it is set ("ECR alignment" work order, PART
+     * 3a): `sshs` -> do015_2026, `k12_2013` -> do8_2015, regardless of grade
+     * level or year — that is the whole reason `sections.curriculum` exists.
+     *
+     * For a NULL/unknown curriculum the fallback is by SCHOOL YEAR ONLY
+     * ("SSHS ECR grading correction", 2026-09-20): SY 2026-2027 onward ->
+     * do015_2026 for BOTH grade levels; earlier years -> do8_2015. The
+     * earlier fallback ("Grade 11 = DO 015, Grade 12 = DO 8 in the same
+     * year") rested on a client communication CLAUDE.md records as "not
+     * verified", and the repository's own SY 2026-2027 instruments
+     * contradict it: the prescribed SSHS E-Class Record accepts Grade 11 AND
+     * 12 (INPUT DATA!F24 validates "11,12") and weights every subject by its
+     * catalog cluster with no grade-level rule at all (Term sheets' D12/Q12/
+     * AD12 XLOOKUP HELPER by cluster + course title), and the school's own
+     * Grade 12 class record (tests/Fixtures/GRADE-12-SANITIZED.xlsx,
+     * 12-AGILA, SY 2026-2027) is term-based with SSHS component names and
+     * a 20/60/20 split — a DO 015 cluster weight, not DO 8's 25/45/30. A
+     * transition cohort that genuinely stays on the 2013 curriculum is
+     * recorded by setting the section's curriculum to `k12_2013`
+     * explicitly (Admin > Sections), never inferred from its grade level.
      */
     public function schemeFor(int $gradeLevel, string $schoolYear, ?string $curriculum = null): string
     {
@@ -55,11 +84,7 @@ class TransmutationService
 
         $startYear = (int) substr($schoolYear, 0, 4);
 
-        if ($gradeLevel === 11 && $startYear >= 2026) {
-            return self::SCHEME_DO015_2026;
-        }
-
-        return self::DEFAULT_SCHEME;
+        return $startYear >= 2026 ? self::SCHEME_DO015_2026 : self::DEFAULT_SCHEME;
     }
 
     /**
@@ -135,7 +160,7 @@ class TransmutationService
             }
         }
 
-        if (!TransmutationRange::where('scheme', $scheme)->exists()) {
+        if ($this->bandsFor($scheme)->isEmpty()) {
             Log::warning("TransmutationService: no transmutation_ranges rows exist for scheme '{$scheme}' — returning the initial grade ({$initialGrade}) unchanged.");
         } else {
             Log::warning("TransmutationService: no band in scheme '{$scheme}' matched initial grade {$initialGrade} — returning it unchanged.");
@@ -147,10 +172,9 @@ class TransmutationService
     /** A strict range lookup against transmutation_ranges for ONE scheme — no fallback, no logging. */
     private function matchBand(string $scheme, float $initialGrade): ?float
     {
-        $range = TransmutationRange::where('scheme', $scheme)
-            ->where('min_initial', '<=', $initialGrade)
-            ->where('max_initial', '>=', $initialGrade)
-            ->first();
+        $range = $this->bandsFor($scheme)->first(
+            fn($r) => (float) $r->min_initial <= $initialGrade && (float) $r->max_initial >= $initialGrade
+        );
 
         return $range ? (float) $range->transmuted : null;
     }
@@ -259,7 +283,7 @@ class TransmutationService
      * does not yet cover 0-100 cleanly (so at least some grades in it will
      * actually need the fallback).
      */
-    public function fallbackActiveFor(int $gradeLevel, string $schoolYear): bool
+    public function fallbackActiveFor(int $gradeLevel, string $schoolYear, ?string $curriculum = null): bool
     {
         $fallbackScheme = config('dss.transmutation_fallback_scheme');
 
@@ -267,7 +291,9 @@ class TransmutationService
             return false;
         }
 
-        $scheme = $this->schemeFor($gradeLevel, $schoolYear);
+        // Same resolution as grading: an explicit section curriculum wins
+        // over the school-year inference.
+        $scheme = $this->schemeFor($gradeLevel, $schoolYear, $curriculum);
 
         if ($scheme === $fallbackScheme) {
             return false;

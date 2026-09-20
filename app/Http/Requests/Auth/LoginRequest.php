@@ -64,9 +64,14 @@ class LoginRequest extends FormRequest
             $this->session()->invalidate();
             $this->session()->regenerateToken();
 
+            // Final pre-demo audit, 2026-09-20: invalidate() also wipes the
+            // session's "previous URL", so a plain back() redirect fell to
+            // "/" and then bounced to /login — two hops, and the flashed
+            // error expired on the first. Name the destination explicitly
+            // so the message actually reaches the login page.
             throw ValidationException::withMessages([
                 'email' => 'Your account has been disabled. Contact the administrator.',
-            ]);
+            ])->redirectTo(route('login'));
         }
     }
 

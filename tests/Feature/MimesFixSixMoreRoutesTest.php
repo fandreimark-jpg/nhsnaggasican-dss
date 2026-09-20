@@ -19,7 +19,7 @@ use Tests\TestCase;
  * under test is that the file-type validation layer no longer rejects it
  * by MIME before the importer ever gets to look at what's inside.
  */
-class MimesFixSixMoreRoutesTest extends TestCase
+class MimesFixSixMoreRoutesTest extends TestCase // two live routes remain (students, grades); the other four were removed, see below
 {
     use RefreshDatabase;
 
@@ -47,48 +47,31 @@ class MimesFixSixMoreRoutesTest extends TestCase
         );
     }
 
-    public function test_admin_sections_import_accepts_the_real_fixture_past_file_validation(): void
+    /**
+     * "Subject applicability" refactor (2026-09-20) — the Sections,
+     * Specializations, Subjects and Tracks bulk imports this test used to
+     * cover were REMOVED (no official file format exists for them). What
+     * must not come back is the route: a POST to any of them is a 404,
+     * never a validation or authorization response from a live importer.
+     */
+    public function test_the_removed_master_data_import_routes_are_gone(): void
     {
         $admin = User::factory()->admin()->create();
 
-        $response = $this->actingAs($admin)->post('/admin/sections/import', [
-            'file' => $this->realOctetStreamSniffingFile(),
-        ]);
+        foreach (['admin.sections.import', 'admin.specializations.import', 'admin.subjects.import', 'admin.tracks.import'] as $name) {
+            $this->assertFalse(\Illuminate\Support\Facades\Route::has($name), "{$name} must not exist");
+        }
 
-        $response->assertSessionDoesntHaveErrors('file');
-    }
+        foreach (['/admin/sections/import', '/admin/specializations/import', '/admin/subjects/import', '/admin/tracks/import'] as $uri) {
+            // 404, or 405 where the same URI still matches a sibling
+            // PUT/DELETE {id} route — either way no POST handler exists.
+            $status = $this->actingAs($admin)->post($uri, ['file' => $this->realOctetStreamSniffingFile()])->getStatusCode();
+            $this->assertContains($status, [404, 405], "POST {$uri} must have no handler (got {$status})");
+        }
 
-    public function test_admin_specializations_import_accepts_the_real_fixture_past_file_validation(): void
-    {
-        $admin = User::factory()->admin()->create();
-
-        $response = $this->actingAs($admin)->post('/admin/specializations/import', [
-            'file' => $this->realOctetStreamSniffingFile(),
-        ]);
-
-        $response->assertSessionDoesntHaveErrors('file');
-    }
-
-    public function test_admin_subjects_import_accepts_the_real_fixture_past_file_validation(): void
-    {
-        $admin = User::factory()->admin()->create();
-
-        $response = $this->actingAs($admin)->post('/admin/subjects/import', [
-            'file' => $this->realOctetStreamSniffingFile(),
-        ]);
-
-        $response->assertSessionDoesntHaveErrors('file');
-    }
-
-    public function test_admin_tracks_import_accepts_the_real_fixture_past_file_validation(): void
-    {
-        $admin = User::factory()->admin()->create();
-
-        $response = $this->actingAs($admin)->post('/admin/tracks/import', [
-            'file' => $this->realOctetStreamSniffingFile(),
-        ]);
-
-        $response->assertSessionDoesntHaveErrors('file');
+        foreach (['SectionsImport', 'SpecializationsImport', 'SubjectsImport', 'TracksImport'] as $class) {
+            $this->assertFalse(class_exists('App\\Imports\\' . $class), "App\\Imports\\{$class} must not be left behind");
+        }
     }
 
     public function test_admin_students_import_accepts_the_real_fixture_past_file_validation(): void

@@ -23,10 +23,20 @@ Homestead.json
 Homestead.yaml
 Thumbs.db
 
-# Analytics generated files
-# The approved synthetic runtime model is required in Git deployments.
+# Analytics GENERATED reports and scratch files.
+# model_accuracy.txt is a generated report on the legacy synthetic
+# prototype (regenerate: python analytics/legacy/prototype_model.py
+# --report-only). NO RUNTIME CODE READS IT.
+# analytics/model_cache.pkl is deliberately NOT ignored: it is the model
+# production currently serves, and a Git deployment needs it present.
 /analytics/model_accuracy.txt
 /analytics/temp_*.json
+
+# Trained model artifacts. Candidates and archived models are local
+# working state; an ACTIVE model is deployed deliberately, so add it with
+# `git add -f analytics/models/active/` when one is genuinely promoted.
+/analytics/models/candidate/
+/analytics/models/archived/
 
 # IDE helper files (barryvdh/laravel-ide-helper)
 /_ide_helper.php
@@ -40,6 +50,9 @@ Thumbs.db
 # Python bytecode cache
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
 # Local secrets, uploads, and analytics scratch output
 .env.*
 !.env.example

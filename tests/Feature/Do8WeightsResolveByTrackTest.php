@@ -26,6 +26,10 @@ use Tests\TestCase;
  * (Part 7 is blocked on Q2), so this is tested with factory-built
  * subjects/sections rather than live data.
  */
+// NOTE ('SSHS ECR grading correction', 2026-09-20): these Grade 12
+// sections carry an EXPLICIT k12_2013 curriculum because this file's
+// intent is the DO 8, s. 2015 (legacy) path. An unset curriculum in
+// SY 2026-2027 now resolves to DO 015 for both grade levels.
 class Do8WeightsResolveByTrackTest extends TestCase
 {
     use RefreshDatabase;
@@ -41,7 +45,7 @@ class Do8WeightsResolveByTrackTest extends TestCase
     public function test_academic_core_subject_resolves_to_do8_core_25_50_25(): void
     {
         $track = Track::factory()->create(['code' => 'ACAD']);
-        $section = Section::factory()->create(['grade_level' => 12, 'track_id' => $track->id]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'grade_level' => 12, 'track_id' => $track->id]);
         $subject = Subject::factory()->create(['type' => 'core', 'grade_level' => 12, 'track_id' => null]);
 
         $slug = $this->engine->resolveDo8GroupKey($section, $subject);
@@ -56,7 +60,7 @@ class Do8WeightsResolveByTrackTest extends TestCase
     public function test_academic_work_immersion_elective_resolves_to_35_40_25(): void
     {
         $track = Track::factory()->create(['code' => 'ACAD']);
-        $section = Section::factory()->create(['grade_level' => 12, 'track_id' => $track->id]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'grade_level' => 12, 'track_id' => $track->id]);
         $subject = Subject::factory()->create(['type' => 'elective', 'grade_level' => 12, 'name' => 'Work Immersion', 'track_id' => $track->id]);
 
         $slug = $this->engine->resolveDo8GroupKey($section, $subject);
@@ -71,7 +75,7 @@ class Do8WeightsResolveByTrackTest extends TestCase
     public function test_an_ordinary_academic_elective_resolves_to_25_45_30(): void
     {
         $track = Track::factory()->create(['code' => 'ACAD']);
-        $section = Section::factory()->create(['grade_level' => 12, 'track_id' => $track->id]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'grade_level' => 12, 'track_id' => $track->id]);
         $subject = Subject::factory()->create(['type' => 'elective', 'grade_level' => 12, 'name' => 'Creative Writing', 'track_id' => $track->id]);
 
         $slug = $this->engine->resolveDo8GroupKey($section, $subject);
@@ -86,7 +90,7 @@ class Do8WeightsResolveByTrackTest extends TestCase
     public function test_a_non_academic_track_elective_resolves_to_20_60_20_regardless_of_name(): void
     {
         $track = Track::factory()->create(['code' => 'TVL', 'name' => 'TVL Track']);
-        $section = Section::factory()->create(['grade_level' => 12, 'track_id' => $track->id]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'grade_level' => 12, 'track_id' => $track->id]);
 
         // An ordinary name -> do8_tvl_sports_arts_other.
         $ordinary = Subject::factory()->create(['type' => 'elective', 'grade_level' => 12, 'name' => 'Computer Programming (Java)', 'track_id' => $track->id]);
@@ -113,7 +117,7 @@ class Do8WeightsResolveByTrackTest extends TestCase
     public function test_computeGrade_actually_uses_the_resolved_do8_weights_end_to_end(): void
     {
         $track = Track::factory()->create(['code' => 'ACAD']);
-        $section = Section::factory()->create(['grade_level' => 12, 'school_year' => '2026-2027', 'track_id' => $track->id]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'grade_level' => 12, 'school_year' => '2026-2027', 'track_id' => $track->id]);
         $subject = Subject::factory()->create(['type' => 'core', 'grade_level' => 12, 'track_id' => null]);
         $student = Student::factory()->create(['section_id' => $section->id]);
 

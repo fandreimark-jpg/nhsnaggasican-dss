@@ -33,10 +33,23 @@ class SubjectAnalysisController extends Controller
         $schoolYear = AcademicYear::resolveSelected($request->input('school_year'));
         $sectionId  = $request->integer('section_id') ?: null;
         $term       = $request->integer('term') ?: null;
+        // "Student identity and term-specific subject offerings" pass, STEP
+        // J — Grade Level joins the scope; only 11/12 are meaningful.
+        $gradeLevel = in_array($request->integer('grade_level'), [11, 12], true) ? $request->integer('grade_level') : null;
+
+        $summaries = $this->subjectAnalysis->getSubjectSummaries($schoolYear, $sectionId, $term, $gradeLevel);
 
         return view('principal.subject-analysis', [
-            'summaries'      => $this->subjectAnalysis->getSubjectSummaries($schoolYear, $sectionId, $term),
-            'sections'       => Section::where('school_year', $schoolYear)->orderBy('name')->get(),
+            'summaries'      => $summaries,
+            // Offered to the selected section in the selected term, with
+            // nothing recorded yet — "offered, no evidence" is a different
+            // statement from "not offered this term", and the page says which.
+            'offeredWithoutData' => $this->subjectAnalysis->offeredWithoutData($schoolYear, $sectionId, $term, $summaries),
+            'sections'       => Section::where('school_year', $schoolYear)
+                ->when($gradeLevel, fn($q) => $q->where('grade_level', $gradeLevel))
+                ->orderBy('name')->get(),
+            'gradeLevels'    => Section::where('school_year', $schoolYear)->select('grade_level')->distinct()->orderBy('grade_level')->pluck('grade_level'),
+            'selectedGradeLevel' => $gradeLevel,
             'selectedSection' => $sectionId,
             'selectedTerm'    => $term,
             'currentTerm'     => $schoolYear === Section::activeSchoolYear() ? AcademicTerm::currentOpenTerm($schoolYear) : null,

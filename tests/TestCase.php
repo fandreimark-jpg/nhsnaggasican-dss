@@ -7,6 +7,31 @@ use Illuminate\Support\Facades\Storage;
 
 abstract class TestCase extends BaseTestCase
 {
+    /**
+     * Final pre-demo audit (2026-09-20) — refuse to run against anything
+     * but the in-memory SQLite database phpunit.xml configures. This runs
+     * BEFORE RefreshDatabase's migrate:fresh (setUpTraits() is where the
+     * trait hooks fire), because a PHPUnit invocation that skipped
+     * phpunit.xml's <env> block (e.g. --no-configuration) once ran
+     * migrate:fresh against the LIVE MySQL database. The .env of this
+     * checkout points at real academic records; a test suite must never
+     * be one missing flag away from emptying it.
+     */
+    protected function setUpTraits()
+    {
+        $connection = config('database.default');
+        $database   = config("database.connections.{$connection}.database");
+
+        if ($connection !== 'sqlite' || $database !== ':memory:') {
+            fwrite(STDERR, "
+REFUSING TO RUN TESTS: database connection is '{$connection}' ('{$database}'), not sqlite ':memory:'. Run via `php artisan test` or `vendor/bin/phpunit -c phpunit.xml` so phpunit.xml's env overrides apply.
+");
+            exit(255);
+        }
+
+        return parent::setUpTraits();
+    }
+
     protected function setUp(): void
     {
         parent::setUp();

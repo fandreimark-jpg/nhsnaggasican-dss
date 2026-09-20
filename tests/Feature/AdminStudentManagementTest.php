@@ -36,7 +36,6 @@ class AdminStudentManagementTest extends TestCase
             'first_name'  => 'Ana',
             'middle_name' => '',
             'gender'      => 'female',
-            'birthdate'   => '2008-01-01',
             'section_id'  => $section->id,
         ]);
 
@@ -124,8 +123,8 @@ class AdminStudentManagementTest extends TestCase
         $admin   = User::factory()->admin()->create();
         $section = Section::factory()->create();
 
-        $csv  = "lrn,last_name,first_name,middle_name,gender,birthdate\n";
-        $csv .= "100000000201,Dela Cruz,Juan,Santos,male,2008-05-01\n";
+        $csv  = "lrn,last_name,first_name,middle_name,gender\n";
+        $csv .= "100000000201,Dela Cruz,Juan,Santos,male\n";
 
         $path = tempnam(sys_get_temp_dir(), 'admin_students_import_') . '.csv';
         file_put_contents($path, $csv);
@@ -150,8 +149,8 @@ class AdminStudentManagementTest extends TestCase
     {
         $admin = User::factory()->admin()->create();
 
-        $csv  = "lrn,last_name,first_name,middle_name,gender,birthdate\n";
-        $csv .= "100000000202,One,Row,,male,2008-05-01\n";
+        $csv  = "lrn,last_name,first_name,middle_name,gender\n";
+        $csv .= "100000000202,One,Row,,male\n";
         $path = tempnam(sys_get_temp_dir(), 'admin_students_import_') . '.csv';
         file_put_contents($path, $csv);
         $file = new \Illuminate\Http\UploadedFile($path, 'students.csv', 'text/csv', null, true);

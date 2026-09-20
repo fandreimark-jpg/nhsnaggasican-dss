@@ -51,10 +51,6 @@ class InterventionController extends Controller
     {
         $section = Section::forAdviser(auth()->id());
 
-        $subjects = $section
-            ? Subject::forSection($section)->orderBy('type')->orderBy('name')->get()
-            : collect();
-
         $subjectId = $request->input('subject_id');
         // has() (not filled()) — an explicitly-submitted EMPTY value (the
         // "All terms" option) must mean "show every term," distinct from
@@ -64,6 +60,13 @@ class InterventionController extends Controller
             ? ($request->filled('grading_period') ? (int) $request->input('grading_period') : null)
             : ($section ? AcademicTerm::currentOpenTerm($section->school_year) : null);
 
+        // "Student identity and term-specific subject offerings" pass — the
+        // Subject filter lists the selected term's offerings; "All terms"
+        // lists the union across the year (Subject::forSection() with null).
+        $subjects = $section
+            ? Subject::forSection($section, $gradingPeriod)->orderBy('type')->orderBy('name')->get()
+            : collect();
+
         $interventions = $section
             ? Intervention::where('section_id', $section->id)
                 ->when($subjectId, fn($q) => $q->where('subject_id', $subjectId))
@@ -72,7 +75,10 @@ class InterventionController extends Controller
                 // particular term, so the Term filter never hides it —
                 // only narrows among rows that DO have one.
                 ->when($gradingPeriod, fn($q) => $q->where(fn($q2) => $q2->where('grading_period', $gradingPeriod)->orWhereNull('grading_period')))
-                ->with(['student', 'subject', 'decidedBy', 'acknowledgedBy', 'deliveredBy'])
+                // 'section' — Intervention::contextSection() reads it per
+                // row for the progress comparison below; without it every
+                // row lazy-loaded the same section again.
+                ->with(['student', 'section', 'subject', 'decidedBy', 'acknowledgedBy', 'deliveredBy'])
                 ->latest()
                 ->get()
             : collect();

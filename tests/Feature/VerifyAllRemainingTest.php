@@ -19,6 +19,10 @@ use Tests\TestCase;
  * grade available. Everything else is excluded under one of three named
  * reasons and reported, not silently skipped.
  */
+// NOTE ('SSHS ECR grading correction', 2026-09-20): these Grade 12
+// sections carry an EXPLICIT k12_2013 curriculum because this file's
+// intent is the DO 8, s. 2015 (legacy) path. An unset curriculum in
+// SY 2026-2027 now resolves to DO 015 for both grade levels.
 class VerifyAllRemainingTest extends TestCase
 {
     use RefreshDatabase;
@@ -57,7 +61,7 @@ class VerifyAllRemainingTest extends TestCase
     public function test_verifies_only_eligible_rows_and_leaves_already_encoded_grades_untouched(): void
     {
         $adviser = User::factory()->create();
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create(['grade_level' => 12, 'type' => 'core']);
         AcademicTerm::ensureExistFor('2026-2027');
 
@@ -94,7 +98,7 @@ class VerifyAllRemainingTest extends TestCase
     public function test_preview_reports_excluded_rows_grouped_by_reason_with_names(): void
     {
         $adviser = User::factory()->create();
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create(['grade_level' => 12, 'type' => 'core']);
         AcademicTerm::ensureExistFor('2026-2027');
 
@@ -155,7 +159,7 @@ class VerifyAllRemainingTest extends TestCase
     public function test_button_has_nothing_to_do_when_zero_rows_eligible(): void
     {
         $adviser = User::factory()->create();
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create(['grade_level' => 12, 'type' => 'core']);
         AcademicTerm::ensureExistFor('2026-2027');
 

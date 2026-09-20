@@ -2,9 +2,14 @@
 
 @section('title', 'Adviser Dashboard')
 @section('subtitle', $section
-    ? 'Section ' . $section->name . ' — Grade ' . $section->grade_level
-      . ' | ' . ($section->track->name ?? '')
-      . ' — ' . ($section->specialization->name ?? '')
+    ? implode(' | ', array_filter([
+        'Section ' . $section->name . ' — Grade ' . $section->grade_level,
+        // Track and specialization only when they actually apply — an
+        // SSHS section has no strand, and a blank "—" would misread as
+        // missing data ("Subject applicability" refactor, Part 12).
+        trim(($section->track->name ?? '') . ($section->specialization ? ' — ' . $section->specialization->name : '')) ?: null,
+        'SY ' . $section->school_year,
+    ]))
     : 'No section assigned')
 
 @section('content')
@@ -33,7 +38,11 @@
         </div>
         <div class="flex flex-wrap gap-2 lg:ml-auto">
             <span class="pill"><span class="pill-label">Track</span> {{ $section->track->name ?? 'Not set' }}</span>
-            <span class="pill"><span class="pill-label">Specialization</span> {{ $section->specialization->name ?? 'Not set' }}</span>
+            @if($section->curriculum === 'sshs')
+                <span class="pill" title="Strengthened SHS has no strands; electives are chosen per section by the Admin"><span class="pill-label">Curriculum</span> Strengthened SHS</span>
+            @elseif($section->specialization)
+                <span class="pill"><span class="pill-label">Specialization</span> {{ $section->specialization->name }}</span>
+            @endif
             <span class="pill"><i class="bi bi-calendar3 text-brand-700" aria-hidden="true"></i><span class="pill-label">School Year</span> {{ $section->school_year }}</span>
             @if($section->isInActiveSchoolYear())
                 <span class="badge badge-success"><i class="bi bi-check-circle-fill" aria-hidden="true"></i> Active school year</span>

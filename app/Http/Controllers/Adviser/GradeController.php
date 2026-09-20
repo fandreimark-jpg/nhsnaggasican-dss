@@ -52,12 +52,14 @@ class GradeController extends Controller
             ->orderBy('last_name')
             ->get();
 
-        $subjects = Subject::forSection($section)
+        $selectedPeriod = (int) request('period', 1);
+
+        // "Student identity and term-specific subject offerings" pass — the
+        // columns are the selected TERM's offerings only.
+        $subjects = Subject::forSection($section, $selectedPeriod)
             ->orderBy('type')
             ->orderBy('name')
             ->get();
-
-        $selectedPeriod = (int) request('period', 1);
 
         $grades = Grade::where('section_id', $section->id)
             ->where('grading_period', $selectedPeriod)
@@ -104,16 +106,28 @@ class GradeController extends Controller
         // offered to this section (grade level / track / specialization).
         // Without this, an adviser could POST a subject_id belonging to a
         // different grade level or track and have it silently accepted.
-        $validSubjectIds = Subject::forSection($section)->pluck('id')->toArray();
+        $validSubjectIds = Subject::forSection($section, (int) $request->grading_period)->pluck('id')->toArray();
+
+        // Final pre-demo audit (2026-09-20) — a row for a learner outside
+        // this section or a subject not applicable in this term is still
+        // REFUSED (never written), but it used to be skipped silently while
+        // the response said "saved successfully" and the log said "Encoded
+        // grades" even when nothing was written. Count both outcomes and
+        // say so.
+        $saved = 0;
+        $refused = 0;
 
         foreach ($request->grades as $gradeData) {
             if (!isset($gradeData['grade']) || $gradeData['grade'] === null || $gradeData['grade'] === '') {
                 continue;
             }
 
-            if (!in_array($gradeData['student_id'], $validStudentIds)) continue;
-            if (!in_array($gradeData['subject_id'], $validSubjectIds)) continue;
+            if (!in_array($gradeData['student_id'], $validStudentIds) || !in_array($gradeData['subject_id'], $validSubjectIds)) {
+                $refused++;
+                continue;
+            }
 
+            $saved++;
             Grade::updateOrCreate(
                 [
                     'student_id'     => $gradeData['student_id'],
@@ -131,14 +145,23 @@ class GradeController extends Controller
 
         LogActivity::log(
             'encode_grades',
-            'Encoded grades for Term ' . $request->grading_period . ' — Section ' . $section->name,
+            'Encoded ' . $saved . ' grade(s) for Term ' . $request->grading_period . ' — Section ' . $section->name
+                . ($refused > 0 ? ' (' . $refused . ' row(s) refused: learner or subject outside this section for the term)' : ''),
             'grades',
             null
         );
 
-        return redirect()
-            ->route('adviser.grades', ['period' => $request->grading_period])
-            ->with('success', 'Grades for Term ' . $request->grading_period . ' saved successfully!');
+        $redirect = redirect()->route('adviser.grades', ['period' => $request->grading_period]);
+
+        if ($refused > 0) {
+            return $redirect->with(
+                $saved > 0 ? 'warning' : 'error',
+                'Saved ' . $saved . ' grade(s) for Term ' . $request->grading_period . '. ' . $refused
+                    . ' row(s) were not saved because the learner is not in your section or the subject is not applicable to it in this term.'
+            );
+        }
+
+        return $redirect->with('success', 'Grades for Term ' . $request->grading_period . ' saved successfully!');
     }
 
     /**
@@ -160,7 +183,7 @@ class GradeController extends Controller
             'file' => $this->spreadsheetFileRule(),
         ]);
 
-        $subjects = Subject::forSection($section)->orderBy('type')->orderBy('name')->get();
+        $subjects = Subject::forSection($section, $gradingPeriod)->orderBy('type')->orderBy('name')->get();
         $students = Student::enrolledIn($section)->get();
 
         $import = new GradesImport($section->id, $gradingPeriod, $section->school_year, $subjects, $students);
@@ -192,7 +215,7 @@ class GradeController extends Controller
         $section = Section::forAdviser(auth()->id()) ?? abort(404);
         $gradingPeriod = (int) $request->input('period', 1);
 
-        $subjects = Subject::forSection($section)->orderBy('type')->orderBy('name')->get();
+        $subjects = Subject::forSection($section, $gradingPeriod)->orderBy('type')->orderBy('name')->get();
         $students = Student::enrolledIn($section)->orderBy('last_name')->get();
 
         $headers = array_merge(['lrn', 'last_name', 'first_name'], $subjects->pluck('name')->toArray());
@@ -238,9 +261,10 @@ class GradeController extends Controller
             'subject_id' => 'required|exists:subjects,id',
         ]);
 
-        $subject = Subject::forSection($section)->where('id', $request->subject_id)->first();
+        $subject = Subject::forSection($section, $gradingPeriod)->where('id', $request->subject_id)->first();
         if (!$subject) {
-            return $this->verifyFailureResponse($request, 'That subject is not offered to your section.');
+            return $this->verifyFailureResponse($request, (new \App\Services\SubjectOfferingService())
+                ->notOfferedMessage(Subject::find($request->subject_id)?->name ?? 'That subject', $section, $gradingPeriod));
         }
 
         $student = Student::where('id', $request->student_id)->enrolledIn($section)->first();
@@ -457,7 +481,7 @@ class GradeController extends Controller
         // another section's track/grade level) never resolves, so a
         // crafted request naming a foreign subject_id gets exactly the
         // same 403 a foreign section_id would.
-        $subject = Subject::forSection($section)->where('id', $request->subject_id)->first();
+        $subject = Subject::forSection($section, $gradingPeriod)->where('id', $request->subject_id)->first();
         abort_if(!$subject, 403);
 
         $classification = $this->classifyForVerifyAll($section, $subject, $gradingPeriod);
@@ -495,7 +519,7 @@ class GradeController extends Controller
 
         $request->validate(['subject_id' => 'required|exists:subjects,id']);
 
-        $subject = Subject::forSection($section)->where('id', $request->subject_id)->first();
+        $subject = Subject::forSection($section, $gradingPeriod)->where('id', $request->subject_id)->first();
         abort_if(!$subject, 403);
 
         if (!AcademicTerm::acceptsWrites($section->school_year, $gradingPeriod)) {

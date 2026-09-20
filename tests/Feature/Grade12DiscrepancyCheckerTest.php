@@ -29,9 +29,14 @@ class Grade12DiscrepancyCheckerTest extends TestCase
         $section = Section::factory()->create([
             'name' => 'AGILA', 'grade_level' => 12, 'track_id' => $track->id, 'school_year' => '2026-2027',
         ]);
+        // Configured as the Arts, Social Sciences and Humanities category
+        // (20/60/20) — the split the AGILA record declares. With an unset
+        // curriculum in SY 2026-2027 the section grades under DO 015
+        // ("SSHS ECR grading correction"), so a mis-grouped subject would
+        // now be refused at detect(), not silently matched by track.
         $subject = Subject::factory()->create([
             'name' => 'Community Engagement Solidarity and Citizenship', 'type' => 'elective',
-            'grade_level' => 12, 'track_id' => $track->id,
+            'grade_level' => 12, 'track_id' => $track->id, 'subject_group' => 'arts_sports_wellness',
         ]);
         AcademicTerm::ensureExistFor('2026-2027');
         $adviser = \App\Models\User::factory()->create(['role' => 'adviser']);

@@ -65,7 +65,14 @@ class ProfileController extends Controller
             $rules['current_password'] = ['required', 'current_password'];
         }
 
-        $request->validate($rules);
+        // Final pre-demo audit (2026-09-20) — a NAMED error bag. This
+        // modal is included on every page, and its "stay open on error"
+        // rule used to read the DEFAULT bag: any page's rejected form that
+        // happened to use a key named email / first_name / last_name /
+        // password (Admin > Users, Admin > Students, My Students) popped the
+        // profile modal open on top of the real one, and the modal's
+        // $errors->only() call (no such MessageBag method) made that a 500.
+        $request->validateWithBag('profile', $rules);
 
         // Step 3: save to the database
         $user->update([
@@ -96,7 +103,7 @@ class ProfileController extends Controller
      */
     public function updatePassword(Request $request): RedirectResponse
     {
-        $request->validate([
+        $request->validateWithBag('profilePassword', [
             // 'current_password' is a built-in Laravel rule — it checks
             // that the value entered matches the user's actual current password
             'current_password' => ['required', 'current_password'],

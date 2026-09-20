@@ -146,8 +146,6 @@ document.addEventListener("DOMContentLoaded", function () {
             document.getElementById("edit_middle_name").value =
                 student.middle_name ?? "";
             document.getElementById("edit_gender").value = student.gender;
-            document.getElementById("edit_birthdate").value =
-                window.toDateInputValue(student.birthdate);
             editStudentForm.action = window.updateUrlFor(editStudentForm, student.id);
             window.showModal("editModal");
         };
@@ -380,7 +378,6 @@ document.addEventListener("DOMContentLoaded", function () {
             document.getElementById("ps_first_name").value = student.first_name;
             document.getElementById("ps_middle_name").value = student.middle_name ?? "";
             document.getElementById("ps_gender").value = student.gender;
-            document.getElementById("ps_birthdate").value = window.toDateInputValue(student.birthdate);
             document.getElementById("ps_section_id").value = student.section_id;
 
             // LRN should not be changed while editing
@@ -481,15 +478,6 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     // =============================================
-    // ADMIN — IMPORT TRACKS MODAL
-    // =============================================
-    if (document.getElementById("importTracksModal")) {
-        window.openImportTracksModal = () => window.showModal("importTracksModal");
-        window.closeImportTracksModal = () => window.hideModal("importTracksModal");
-        window.bindModalOverlayClose("importTracksModal");
-    }
-
-    // =============================================
     // ADMIN — SPECIALIZATION MANAGEMENT MODAL
     // =============================================
     const specForm = document.getElementById("specForm");
@@ -522,15 +510,6 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     // =============================================
-    // ADMIN — IMPORT SPECIALIZATIONS MODAL
-    // =============================================
-    if (document.getElementById("importSpecializationsModal")) {
-        window.openImportSpecializationsModal = () => window.showModal("importSpecializationsModal");
-        window.closeImportSpecializationsModal = () => window.hideModal("importSpecializationsModal");
-        window.bindModalOverlayClose("importSpecializationsModal");
-    }
-
-    // =============================================
     // ADMIN — SUBJECT MANAGEMENT MODAL
     // =============================================
     const subjectForm = document.getElementById("subjectForm");
@@ -555,32 +534,20 @@ document.addEventListener("DOMContentLoaded", function () {
             }
         };
 
-        // "Subject classification and grading weights cleanup" pass —
-        // Subject Group only applies to Grade 11 (DO 015, s. 2026); Grade
-        // 12 stays on DO 8, s. 2015, which weighs by section track, not
-        // subject_group at all (see GradingEngine::resolveDo8GroupKey()),
-        // so the field is hidden and cleared rather than left to submit a
-        // value that would be meaningless. Within Grade 11, the option
-        // list is filtered to match the selected Type — 'core_academic' is
-        // reserved for Core (SubjectGroupWeight::classificationError()
-        // rejects any other combination server-side too, so this is a
-        // convenience, not the only enforcement).
+        // Subject Group applies to BOTH grade levels ("Subject Group for
+        // both grade levels" pass, 2026-09-20) — grade level never hides,
+        // disables or clears this control, and the server requires a value
+        // for Grade 11 and Grade 12 alike (SubjectGroupWeight::
+        // classificationError()). The only dynamic behaviour is narrowing
+        // the option list to the selected Type: 'core_academic' is reserved
+        // for Core, every other group is elective-only. The server enforces
+        // the same rule, so this is a convenience, not the only check.
+        // Grade 12's GRADING is unchanged by this: DO 8, s. 2015 weighs by
+        // the section's track (GradingEngine::resolveDo8GroupKey()).
         window.refreshSubjectGroupField = function () {
             const type = document.getElementById("subjectType").value;
-            const grade = document.getElementById("subjectGrade").value;
-            const wrapper = document.getElementById("subjectGroupWrapper");
             const select = document.getElementById("subjectGroupField");
-            if (!wrapper || !select) return;
-
-            if (grade === "12") {
-                wrapper.classList.add("hidden");
-                select.value = "";
-                select.removeAttribute("required");
-                return;
-            }
-
-            wrapper.classList.remove("hidden");
-            select.setAttribute("required", "required");
+            if (!select) return;
 
             const current = select.value;
             let firstVisible = "";
@@ -598,14 +565,34 @@ document.addEventListener("DOMContentLoaded", function () {
             }
         };
 
+        // Clears the Subject Group control so one modal use cannot leak a
+        // value into the next.
+        window.resetSubjectGroupField = function () {
+            const select = document.getElementById("subjectGroupField");
+            if (select) select.value = "";
+        };
+
+        // Terms Taught ("Subject applicability" refactor) — one checkbox
+        // per academic term the server rendered (AcademicTerm::termNumbers()).
+        // A new subject starts with every term ticked, the same default the
+        // migration backfilled; the Admin unticks the terms it is not
+        // taught in. At least one must stay ticked (server-validated too).
+        window.setSubjectTerms = function (terms) {
+            const all = terms === null;
+            subjectForm.querySelectorAll("[data-term-checkbox]").forEach((box) => {
+                box.checked = all || terms.map(Number).includes(Number(box.value));
+            });
+        };
+
         window.openAddSubjectModal = function () {
             document.getElementById("modalTitle").textContent = "Add Subject";
             document.getElementById("formMethod").value = "POST";
             subjectForm.action = subjectStoreUrl;
+            window.setSubjectTerms(null);
             document.getElementById("subjectName").value = "";
             document.getElementById("subjectType").value = "";
             document.getElementById("subjectGrade").value = "";
-            document.getElementById("subjectGroupField").value = "";
+            window.resetSubjectGroupField();
             document.getElementById("subjectTrack").value = "";
             document.getElementById("subjectSpec").innerHTML =
                 '<option value="">— All specializations in track —</option>';
@@ -614,10 +601,11 @@ document.addEventListener("DOMContentLoaded", function () {
             window.showModal("subjectModal");
         };
 
-        window.openEditSubjectModal = function (subject) {
+        window.openEditSubjectModal = function (subject, terms) {
             document.getElementById("modalTitle").textContent = "Edit Subject";
             document.getElementById("formMethod").value = "PUT";
             subjectForm.action = window.updateUrlFor(subjectForm, subject.id);
+            window.setSubjectTerms(Array.isArray(terms) ? terms : []);
             document.getElementById("subjectName").value = subject.name;
             document.getElementById("subjectType").value = subject.type;
             document.getElementById("subjectGrade").value = subject.grade_level;
@@ -637,6 +625,9 @@ document.addEventListener("DOMContentLoaded", function () {
                 document.getElementById("trackFields").classList.add("hidden");
             }
 
+            // Restore the saved group — Grade 11 and Grade 12 alike. A
+            // legacy row with none stays blank so the Admin must choose one.
+            window.resetSubjectGroupField();
             window.refreshSubjectGroupField();
             document.getElementById("subjectGroupField").value = subject.subject_group || "";
 
@@ -645,24 +636,6 @@ document.addEventListener("DOMContentLoaded", function () {
 
         window.closeSubjectModal = () => window.hideModal("subjectModal");
         window.bindModalOverlayClose("subjectModal");
-    }
-
-    // =============================================
-    // ADMIN — IMPORT SUBJECTS MODAL
-    // =============================================
-    if (document.getElementById("importSubjectsModal")) {
-        window.openImportSubjectsModal = () => window.showModal("importSubjectsModal");
-        window.closeImportSubjectsModal = () => window.hideModal("importSubjectsModal");
-        window.bindModalOverlayClose("importSubjectsModal");
-    }
-
-    // =============================================
-    // ADMIN — IMPORT SECTIONS MODAL
-    // =============================================
-    if (document.getElementById("importSectionsModal")) {
-        window.openImportSectionsModal = () => window.showModal("importSectionsModal");
-        window.closeImportSectionsModal = () => window.hideModal("importSectionsModal");
-        window.bindModalOverlayClose("importSectionsModal");
     }
 });
 // Academic editing uses the existing modal helpers.

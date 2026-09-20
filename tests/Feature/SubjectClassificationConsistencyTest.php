@@ -139,13 +139,32 @@ class SubjectClassificationConsistencyTest extends TestCase
         $this->assertStringContainsString('required', $error);
     }
 
-    public function test_a_grade_12_subject_must_have_a_null_group(): void
+    /**
+     * "Subject Group for both grade levels" pass (2026-09-20) — the rule
+     * no longer reads grade level: a Grade 12 subject needs a type-
+     * consistent group exactly as a Grade 11 one does. (This replaced the
+     * earlier "Grade 12 must have a null group" rule by decision; Grade 12
+     * GRADING is untouched — see the do8 tests below.)
+     */
+    public function test_the_classification_rule_is_identical_for_grade_11_and_grade_12(): void
     {
-        $this->assertNull(SubjectGroupWeight::classificationError('core', 12, null));
-        $this->assertNull(SubjectGroupWeight::classificationError('elective', 12, null));
+        foreach ([11, 12] as $grade) {
+            $this->assertNull(SubjectGroupWeight::classificationError('core', $grade, 'core_academic'), "Grade {$grade} core + core_academic");
+            $this->assertNull(SubjectGroupWeight::classificationError('elective', $grade, 'academic_other'), "Grade {$grade} elective + academic_other");
 
-        $error = SubjectGroupWeight::classificationError('elective', 12, 'core_academic');
-        $this->assertNotNull($error, 'A Grade 12 subject with any subject_group value must be rejected — DO 8, s. 2015 never reads it.');
+            $this->assertStringContainsString('required', (string) SubjectGroupWeight::classificationError('core', $grade, null), "Grade {$grade} core + null");
+            $this->assertStringContainsString('required', (string) SubjectGroupWeight::classificationError('elective', $grade, ''), "Grade {$grade} elective + blank");
+            $this->assertNotNull(SubjectGroupWeight::classificationError('elective', $grade, 'core_academic'), "Grade {$grade} elective + core_academic");
+            $this->assertNotNull(SubjectGroupWeight::classificationError('core', $grade, 'work_immersion'), "Grade {$grade} core + work_immersion");
+            $this->assertNotNull(SubjectGroupWeight::classificationError('core', $grade, 'do8_core'), "Grade {$grade} + a do8_* slug is never selectable");
+            $this->assertNotNull(SubjectGroupWeight::classificationError('elective', $grade, 'not_a_group'), "Grade {$grade} + unknown slug");
+        }
+
+        $this->assertSame(
+            SubjectGroupWeight::classificationError('elective', 11, 'core_academic'),
+            SubjectGroupWeight::classificationError('elective', 12, 'core_academic'),
+            'The same invalid combination yields the same message at both grade levels.'
+        );
     }
 
     public function test_subjectgroupweight_resolve_throws_for_an_unclassified_do015_subject_rather_than_defaulting_to_core(): void
@@ -161,6 +180,7 @@ class SubjectClassificationConsistencyTest extends TestCase
 
         $this->actingAs($admin)->post(route('admin.subjects.store'), [
             'name' => 'Contradictory Elective', 'type' => 'elective', 'grade_level' => 11,
+            'terms' => [1, 2, 3],
             'subject_group' => 'core_academic',
         ])->assertSessionHasErrors('subject_group');
 
@@ -173,32 +193,35 @@ class SubjectClassificationConsistencyTest extends TestCase
 
         $this->actingAs($admin)->post(route('admin.subjects.store'), [
             'name' => 'Contradictory Core', 'type' => 'core', 'grade_level' => 11,
+            'terms' => [1, 2, 3],
             'subject_group' => 'work_immersion',
         ])->assertSessionHasErrors('subject_group');
 
         $this->assertDatabaseMissing('subjects', ['name' => 'Contradictory Core']);
     }
 
-    public function test_a_grade_12_subject_submitted_with_a_subject_group_value_is_rejected_not_silently_dropped(): void
+    public function test_a_grade_12_subject_persists_its_subject_group_and_is_not_silently_nulled(): void
     {
         $admin = User::factory()->admin()->create();
 
         $this->actingAs($admin)->post(route('admin.subjects.store'), [
-            'name' => 'Grade 12 With Stray Group', 'type' => 'core', 'grade_level' => 12,
+            'name' => 'Grade 12 Classified', 'type' => 'core', 'grade_level' => 12,
+            'terms' => [1, 2, 3],
             'subject_group' => 'core_academic',
-        ])->assertSessionHasErrors('subject_group');
+        ])->assertRedirect(route('admin.subjects'))->assertSessionHasNoErrors();
 
-        $this->assertDatabaseMissing('subjects', ['name' => 'Grade 12 With Stray Group']);
+        $this->assertDatabaseHas('subjects', ['name' => 'Grade 12 Classified', 'grade_level' => 12, 'subject_group' => 'core_academic']);
     }
 
-    public function test_a_grade_12_subject_with_no_subject_group_saves_cleanly(): void
+    public function test_a_grade_12_subject_with_no_subject_group_is_rejected_like_a_grade_11_one(): void
     {
         $admin = User::factory()->admin()->create();
 
         $this->actingAs($admin)->post(route('admin.subjects.store'), [
-            'name' => 'Genuine Grade 12 Subject', 'type' => 'core', 'grade_level' => 12,
-        ])->assertRedirect(route('admin.subjects'));
+            'name' => 'Unclassified Grade 12 Subject', 'type' => 'core', 'grade_level' => 12,
+            'terms' => [1, 2, 3],
+        ])->assertSessionHasErrors('subject_group');
 
-        $this->assertDatabaseHas('subjects', ['name' => 'Genuine Grade 12 Subject', 'subject_group' => null]);
+        $this->assertDatabaseMissing('subjects', ['name' => 'Unclassified Grade 12 Subject']);
     }
 }

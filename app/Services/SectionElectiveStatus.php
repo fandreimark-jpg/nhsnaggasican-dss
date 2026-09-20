@@ -35,15 +35,31 @@ use Illuminate\Support\Collection;
  *     assignment covers, not automatically in all three the way a flat
  *     `subjects->count() * 3` would assume.
  *
- * Only curriculum = 'sshs' sections read section_subject at all.
- * k12_2013 sections' specialization-based elective match is not broken
- * (see CLAUDE.md, "Elective selection is per-cluster, not per-learner")
- * and this class must never touch that path.
+ * "Subject applicability" refactor (2026-09-20) — Subject::forSection(
+ * $section, $term) (SubjectApplicabilityService) answers "what does this
+ * section take in this term" from the subject configuration: core
+ * subjects of the grade level, track-matched electives (k12_2013), and
+ * the section's own elective choices (section_subjects), each only in
+ * the terms the subject is TAUGHT. This class keeps its two questions
+ * and carries no term arithmetic of its own. isFullyConfigured() still
+ * reports an SSHS section that has electives available in its track but
+ * no elective choice recorded as NOT READY.
  */
 class SectionElectiveStatus
 {
+    /**
+     * "Configured" means "someone has made the assignment decision for
+     * this section" — any offering row at all. A section with none is
+     * still correctly zero when its track has no electives to offer
+     * (nothing to decide), and only sshs sections are ever at issue:
+     * k12_2013's specialization-based elective match was never broken.
+     */
     public function isFullyConfigured(Section $section): bool
     {
+        if (SectionSubject::forSection($section)->exists()) {
+            return true; // At least one elective was chosen for this section — the decision has been made.
+        }
+
         if ($section->curriculum !== 'sshs') {
             return true; // k12_2013's mechanism isn't broken; nothing to configure here.
         }
@@ -53,45 +69,18 @@ class SectionElectiveStatus
             ->where('track_id', $section->track_id)
             ->exists();
 
-        if (!$hasElectivesAvailable) {
-            return true; // Genuinely nothing to assign — zero pivot rows is correct.
-        }
-
-        return SectionSubject::where('section_id', $section->id)
-            ->where('school_year', $section->school_year)
-            ->exists();
+        return !$hasElectivesAvailable; // Genuinely nothing to assign — zero offering rows is correct.
     }
 
     /**
-     * Core subjects always included; an elective is included only when
-     * its section_subject assignment covers $term (or carries no term
-     * data yet, which is treated as "expected every term" — see
-     * SectionSubject::coversTerm()). k12_2013 sections get
-     * Subject::forSection()'s result unfiltered — that curriculum's
-     * electives were never pivot-tracked and this method must not
-     * change what they resolve to.
+     * Exactly Subject::forSection($section, $term) — the subjects offered
+     * to this section in this term, or the curriculum default for a
+     * section with no offerings yet. Kept as the named entry point every
+     * "how many grades should exist" consumer already calls.
      */
     public function expectedSubjectsForTerm(Section $section, int $term): Collection
     {
-        $subjects = Subject::forSection($section)->get();
-
-        if ($section->curriculum !== 'sshs') {
-            return $subjects;
-        }
-
-        $assignments = SectionSubject::where('section_id', $section->id)
-            ->where('school_year', $section->school_year)
-            ->get()
-            ->keyBy('subject_id');
-
-        return $subjects->filter(function (Subject $subject) use ($term, $assignments) {
-            if ($subject->type === 'core') {
-                return true;
-            }
-
-            $assignment = $assignments->get($subject->id);
-            return !$assignment || $assignment->coversTerm($term);
-        })->values();
+        return Subject::forSection($section, $term)->orderBy('type')->orderBy('name')->get();
     }
 
     public function expectedGradeCount(Section $section, int $term): int

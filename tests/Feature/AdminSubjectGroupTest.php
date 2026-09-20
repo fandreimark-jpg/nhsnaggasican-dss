@@ -27,6 +27,7 @@ class AdminSubjectGroupTest extends TestCase
         // Research 1 is a genuine elective in the real DepEd catalog.
         $this->actingAs($admin)->post(route('admin.subjects.store'), [
             'name' => 'Practical Research 1', 'type' => 'elective', 'grade_level' => 11,
+            'terms' => [1, 2, 3],
             'subject_group' => 'research_innovation',
         ])->assertRedirect(route('admin.subjects'));
 
@@ -41,6 +42,7 @@ class AdminSubjectGroupTest extends TestCase
 
         $this->actingAs($admin)->post(route('admin.subjects.store'), [
             'name' => 'Bogus Subject', 'type' => 'core', 'grade_level' => 11,
+            'terms' => [1, 2, 3],
             'subject_group' => 'made_up_group',
         ])->assertSessionHasErrors('subject_group');
 
@@ -57,6 +59,7 @@ class AdminSubjectGroupTest extends TestCase
 
         $this->actingAs($admin)->put(route('admin.subjects.update', $subject->id), [
             'name' => $subject->name, 'type' => 'elective', 'grade_level' => 11,
+            'terms' => [1, 2, 3],
             'subject_group' => 'techpro',
         ])->assertRedirect(route('admin.subjects'));
 
@@ -94,6 +97,7 @@ class AdminSubjectGroupTest extends TestCase
 
         $this->actingAs($admin)->post(route('admin.subjects.store'), [
             'name' => 'Sneaky Do8 Subject', 'type' => 'core', 'grade_level' => 12,
+            'terms' => [1, 2, 3],
             'subject_group' => 'do8_core',
         ])->assertSessionHasErrors('subject_group');
 

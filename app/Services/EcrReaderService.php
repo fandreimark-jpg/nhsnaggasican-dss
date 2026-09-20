@@ -33,6 +33,7 @@ use PhpOffice\PhpSpreadsheet\Spreadsheet;
 class EcrReaderService
 {
     /** INPUT DATA metadata cells — all plain teacher-typed values, never formulas. */
+    private const CELL_SCHOOL_YEAR_START = 'F16'; // the START year only; G16 renders "2026-2027" via a formula
     private const CELL_TEACHER = 'F22';
     private const CELL_GRADE_LEVEL = 'F24';
     private const CELL_SECTION_NAME = 'F25';
@@ -41,6 +42,45 @@ class EcrReaderService
     private const CELL_SUBJECT = 'F30'; // course title, unless OTHER ELECTIVE
     private const CELL_OTHER_ELECTIVE_NAME = 'F39';
     private const OTHER_ELECTIVE_CLUSTER = 'OTHER ELECTIVE / SPECIAL CURRICULAR PROGRAM';
+
+    /**
+     * TERMS AND UNITS — the workbook's own statement of how long a subject
+     * runs and which term it starts in. Confirmed by reading the real
+     * instrument's INPUT DATA sheet directly, not assumed:
+     *
+     *   C33 "NO. TERMS TAUGHT"  F33  <- ARRAY FORMULA (XLOOKUP into HELPER)
+     *   G33 "Term Blk"          H33  <- teacher-typed dropdown
+     *   C34 "UNITS PER TERM"    F34  <- array formula
+     *   C35 "UNITS PER YEAR"    F35  <- array formula
+     *
+     *   C51/F51, H51, F52  <- the same three fields for an
+     *                         OTHER ELECTIVE / SPECIAL CURRICULAR PROGRAM,
+     *                         where the teacher types them all directly
+     *
+     * F33/F34/F35 ARE FORMULAS, so they are deliberately NOT read here —
+     * this class never evaluates a formula (see the class docblock: the
+     * workbook uses _xlfn.XLOOKUP/_xlfn.IFNA, which a spreadsheet library's
+     * recalculation engine may not support, and a wrong value is worse than
+     * no value). For a catalogued subject, F33's formula is only doing a
+     * lookup into HELPER — and that whole HELPER catalog is already seeded
+     * into `deped_subject_catalog` with per-grade-level terms and units, so
+     * EcrSubjectTermResolver reads the terms count from there instead. Only
+     * the genuinely teacher-typed cells are read from the file.
+     */
+    private const CELL_TERM_BLOCK = 'H33';
+    private const CELL_OTHER_TERMS_TAUGHT = 'F51';
+    private const CELL_OTHER_TERM_BLOCK = 'H51';
+    private const CELL_OTHER_UNITS_PER_TERM = 'F52';
+
+    /**
+     * H33/H51 is a dropdown whose allowed values are, verbatim from the
+     * workbook's own data validation: "FIRST TERM, SECOND TERM, THIRD TERM".
+     */
+    private const TERM_BLOCK_LABELS = [
+        'FIRST TERM'  => 1,
+        'SECOND TERM' => 2,
+        'THIRD TERM'  => 3,
+    ];
 
     /** OTHER ELECTIVE'S teacher-typed weights — the one place in the whole workbook a teacher supplies them. */
     private const CELL_OTHER_WW = 'F43';
@@ -85,7 +125,14 @@ class EcrReaderService
      */
     public function toFlatRows(string $filePath, int $gradingPeriod): array
     {
-        $spreadsheet = $this->load($filePath);
+        // "Performance audit" pass — only the two sheets this method reads
+        // (the roster on INPUT DATA, the scores on this term's sheet). The
+        // full seven-sheet load took ~1.7s and tens of MB, most of it the
+        // HELPER catalog and the other two term sheets, none of which is
+        // read here. Cell values are read raw (getValue(), never a
+        // calculated value), so which OTHER sheets are in memory cannot
+        // change a single value read — see loadSheets().
+        $spreadsheet = $this->loadSheets($filePath, ['INPUT DATA', 'Term ' . $gradingPeriod]);
         $termSheet = $spreadsheet->getSheetByName('Term ' . $gradingPeriod);
         if (!$termSheet) {
             return [];
@@ -128,7 +175,8 @@ class EcrReaderService
             return null;
         }
 
-        $spreadsheet = $this->load($filePath);
+        // Every cell read here is on INPUT DATA — see loadSheets().
+        $spreadsheet = $this->loadSheets($filePath, ['INPUT DATA']);
         $inputData = $spreadsheet->getSheetByName('INPUT DATA');
         if (!$inputData) {
             return null;
@@ -159,25 +207,21 @@ class EcrReaderService
             return null;
         }
 
-        $resolvedWw = null;
-        $resolvedPt = null;
-        $resolvedEx = null;
-
-        if ($selectedSubject->catalog_id) {
-            $linked = DepedSubjectCatalog::find($selectedSubject->catalog_id);
-            if ($linked) {
-                $resolvedWw = $linked->ww_weight;
-                $resolvedPt = $linked->pt_weight;
-                $resolvedEx = $linked->ex_weight;
-            }
-        }
-
-        if ($resolvedWw === null) {
-            $weights = \App\Models\SubjectGroupWeight::resolve('do015_2026', $selectedSubject->subject_group);
-            $resolvedWw = $weights->ww_weight;
-            $resolvedPt = $weights->pt_weight;
-            $resolvedEx = $weights->ex_weight;
-        }
+        // THE resolver — GradingEngine::resolveWeightProfile(), the same
+        // call computeGrade() makes ("SSHS ECR grading correction",
+        // 2026-09-20; this used to repeat the catalog-then-group order
+        // here). A prescribed SSHS ECR is by definition a Strengthened SHS
+        // record, so the context is an `sshs` section of the subject's
+        // grade level — no scheme is guessed from the grade level.
+        $context = new \App\Models\Section([
+            'grade_level' => (int) $selectedSubject->grade_level,
+            'school_year' => \App\Models\Section::activeSchoolYear(),
+            'curriculum'  => 'sshs',
+        ]);
+        $profile = (new GradingEngine())->resolveWeightProfile($context, $selectedSubject);
+        $resolvedWw = $profile['ww_weight'];
+        $resolvedPt = $profile['pt_weight'];
+        $resolvedEx = $profile['ex_weight'];
 
         $fileEx = $catalogRow->ex_weight !== null ? (float) $catalogRow->ex_weight : null;
         $resolvedExFloat = $resolvedEx !== null ? (float) $resolvedEx : null;
@@ -194,8 +238,8 @@ class EcrReaderService
         $systemTriple = $this->formatTriple($resolvedWw, $resolvedPt, $resolvedEx);
 
         return "The file's subject (\"{$courseTitle}\", {$cluster}) carries {$fileTriple} (WW/PT/EX) in the official catalog, "
-            . "but the selected subject \"{$selectedSubject->name}\" currently resolves to {$systemTriple}. "
-            . 'Not overwritten — review the selected subject\'s group or catalog link.';
+            . "but the selected subject \"{$selectedSubject->name}\" is configured to grade at {$systemTriple}. "
+            . 'The upload is refused and nothing was changed — correct the subject\'s Subject Group or catalog link under Admin > Subjects, then upload again.';
     }
 
     private function formatTriple($ww, $pt, $ex): string
@@ -296,22 +340,22 @@ class EcrReaderService
      * "Draft roster from an E-Class Record" feature — reads INPUT DATA's
      * roster (male N/O, female R/S, rows 11-60) and produces rows in the
      * exact shape Admin > Students > Import already accepts: lrn,
-     * last_name, first_name, middle_name, gender, birthdate. Exports a
-     * draft only; never touches the database. birthdate is always blank —
-     * it isn't in the ECR at all. A row with a name but no LRN still
+     * last_name, first_name, middle_name, gender. Exports a draft only;
+     * never touches the database. A row with a name but no LRN still
      * exports with lrn blank rather than an invented one; a row that is
      * entirely empty (no LRN, no name) is skipped and counted, never
      * emitted as a blank row.
      *
      * @return array{
-     *     rows: array<int, array{lrn: string, last_name: string, first_name: string, middle_name: string, gender: string, birthdate: string}>,
+     *     rows: array<int, array{lrn: string, last_name: string, first_name: string, middle_name: string, gender: string}>,
      *     skipped_empty: int,
      *     missing_lrn_count: int,
      * }
      */
     public function extractDraftRoster(string $filePath): array
     {
-        $spreadsheet = $this->load($filePath);
+        // Roster names and LRNs live only on INPUT DATA — see loadSheets().
+        $spreadsheet = $this->loadSheets($filePath, ['INPUT DATA']);
         $inputData = $spreadsheet->getSheetByName('INPUT DATA');
 
         if (!$inputData) {
@@ -351,7 +395,6 @@ class EcrReaderService
                     'first_name'  => $first,
                     'middle_name' => $middle,
                     'gender'      => $gender,
-                    'birthdate'   => '',
                 ];
             }
         }
@@ -453,15 +496,31 @@ class EcrReaderService
     }
 
     /**
+     * Everything the prescribed workbook states about ITSELF — the class
+     * this file belongs to, and how long the subject runs. This is the
+     * metadata EcrSubjectTermResolver validates against the DSS selection
+     * before a single score is imported.
+     *
+     * Every value is read from a plain, teacher-typed cell. A field the
+     * teacher left blank comes back as '' / null, which means "the workbook
+     * does not say" — never a guessed default. The difference matters: a
+     * blank section name cannot confirm the file belongs here, but it also
+     * does not prove it does not, and those two are handled differently.
+     *
      * @return array{
-     *     version: ?string, teacher: string, grade_level: ?int, section_name: string,
-     *     subject_category: string, cluster: string, course_title: string, is_other_elective: bool,
-     *     roster_count: int,
+     *     version: ?string, teacher: string, school_year: ?string, grade_level: ?int,
+     *     section_name: string, subject_category: string, cluster: string,
+     *     course_title: string, is_other_elective: bool,
+     *     terms_taught: ?int, term_block: ?int, term_block_label: string,
+     *     units_per_term: ?float, roster_count: int,
      * }
      */
     public function describe(string $filePath): array
     {
-        $spreadsheet = $this->load($filePath);
+        // INPUT DATA carries every cell this method reads, cover metadata
+        // and roster alike — see loadSheets() for why the other six sheets
+        // are deliberately not loaded.
+        $spreadsheet = $this->loadSheets($filePath, ['INPUT DATA']);
         $inputData = $spreadsheet->getSheetByName('INPUT DATA');
 
         $cluster = $inputData ? trim((string) $inputData->getCell(self::CELL_CLUSTER)->getValue()) : '';
@@ -472,23 +531,98 @@ class EcrReaderService
 
         $gradeLevelRaw = $inputData ? trim((string) $inputData->getCell(self::CELL_GRADE_LEVEL)->getValue()) : '';
 
+        // An OTHER ELECTIVE has the teacher type its own term count; every
+        // catalogued subject gets it from HELPER via an array formula this
+        // class does not evaluate — see CELL_TERM_BLOCK's note, and
+        // EcrSubjectTermResolver, which reads that count from the seeded
+        // deped_subject_catalog instead.
+        $termsTaughtRaw = ($inputData && $isOtherElective)
+            ? trim((string) $inputData->getCell(self::CELL_OTHER_TERMS_TAUGHT)->getValue())
+            : '';
+
+        $termBlockLabel = $inputData
+            ? trim((string) $inputData->getCell($isOtherElective ? self::CELL_OTHER_TERM_BLOCK : self::CELL_TERM_BLOCK)->getValue())
+            : '';
+
+        $unitsPerTermRaw = ($inputData && $isOtherElective)
+            ? trim((string) $inputData->getCell(self::CELL_OTHER_UNITS_PER_TERM)->getValue())
+            : '';
+
         return [
             'version'           => (new EcrProfileDetector())->detect($filePath),
             'teacher'           => $inputData ? trim((string) $inputData->getCell(self::CELL_TEACHER)->getValue()) : '',
+            'school_year'       => $this->schoolYearFrom($inputData),
             'grade_level'       => is_numeric($gradeLevelRaw) ? (int) $gradeLevelRaw : null,
             'section_name'      => $inputData ? trim((string) $inputData->getCell(self::CELL_SECTION_NAME)->getValue()) : '',
             'subject_category'  => $inputData ? trim((string) $inputData->getCell(self::CELL_SUBJECT_CATEGORY)->getValue()) : '',
             'cluster'           => $cluster,
             'course_title'      => $courseTitle,
             'is_other_elective' => $isOtherElective,
+            'terms_taught'      => is_numeric($termsTaughtRaw) ? (int) $termsTaughtRaw : null,
+            'term_block'        => self::TERM_BLOCK_LABELS[mb_strtoupper($termBlockLabel)] ?? null,
+            'term_block_label'  => $termBlockLabel,
+            'units_per_term'    => is_numeric($unitsPerTermRaw) ? (float) $unitsPerTermRaw : null,
             'roster_count'      => count($this->readRoster($spreadsheet)),
         ];
     }
 
+    /**
+     * INPUT DATA!F16 holds the START year as a bare number (2026); the
+     * displayed "2026-2027" next to it is a formula (G16), which this class
+     * does not evaluate. Rebuilding the range from the start year gives the
+     * exact `'YYYY-YYYY'` shape every academic table in this codebase keys
+     * on, without reading a formula.
+     */
+    private function schoolYearFrom($inputData): ?string
+    {
+        if (!$inputData) {
+            return null;
+        }
+
+        $raw = trim((string) $inputData->getCell(self::CELL_SCHOOL_YEAR_START)->getValue());
+        if (!is_numeric($raw)) {
+            return null;
+        }
+
+        $start = (int) $raw;
+        if ($start < 2000 || $start > 2100) {
+            return null;
+        }
+
+        return $start . '-' . ($start + 1);
+    }
+
+    /**
+     * Kept for any caller that genuinely needs every sheet. Nothing in
+     * this class does any more ("Performance audit" pass) — each public
+     * method names the sheets it reads via loadSheets() below.
+     */
     private function load(string $filePath): Spreadsheet
     {
         $reader = IOFactory::createReaderForFile($filePath);
         $reader->setReadDataOnly(true);
+        return $reader->load($filePath);
+    }
+
+    /**
+     * Loads ONLY the sheets named, which for describe() means INPUT DATA
+     * alone — every cell it reads (the cover metadata and the whole
+     * roster) lives there, and the three Term sheets plus FINAL GRADES and
+     * HELPER are pure overhead for that question.
+     *
+     * This matters beyond tidiness. describe() is now called on every
+     * detect/preview/import request to check the workbook's identity
+     * against the selection, and this workbook is 434KB with seven sheets;
+     * loading all of them three times per upload was enough to exhaust a
+     * 512MB PHP memory limit when several uploads ran in one process.
+     * EcrProfileDetector already restricts its own load the same way for
+     * the same reason.
+     */
+    private function loadSheets(string $filePath, array $sheetNames): Spreadsheet
+    {
+        $reader = IOFactory::createReaderForFile($filePath);
+        $reader->setReadDataOnly(true);
+        $reader->setLoadSheetsOnly($sheetNames);
         return $reader->load($filePath);
     }
 }

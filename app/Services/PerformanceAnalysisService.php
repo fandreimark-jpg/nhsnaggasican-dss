@@ -29,6 +29,12 @@ class PerformanceAnalysisService
     {
     }
 
+    /** The engine this service computes with — shared so a caller's other reads hit the same evidence cache. */
+    public function engine(): GradingEngine
+    {
+        return $this->gradingEngine;
+    }
+
     /**
      * @return array{
      *     complete: bool,
@@ -82,6 +88,11 @@ class PerformanceAnalysisService
             'target'            => $target,
             'components'        => $components,
             'weakest_component' => $this->weakestComponent($components),
+            // "Performance audit" pass — how many scored items the figures
+            // above rest on, read from the evidence GradingEngine already
+            // loaded. InTermStatusService::fromAnalysis() reads this
+            // instead of running its own per-row count query.
+            'item_count'        => $this->gradingEngine->scoredItemCount($student, $subject, $section, $gradingPeriod, $schoolYear),
         ];
     }
 

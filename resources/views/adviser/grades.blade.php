@@ -2,12 +2,18 @@
 
 @section('title', 'Encode Grades')
 @section('subtitle', $section
-    ? 'Section ' . $section->name . ' — Grade ' . $section->grade_level .
-      ' | ' . ($section->track->name ?? '') .
-      ' — ' . ($section->specialization->name ?? '')
+    ? implode(' | ', array_filter([
+        'Section ' . $section->name . ' — Grade ' . $section->grade_level,
+        // Track and specialization only when they actually apply — an
+        // SSHS section has no strand, and a blank "—" would misread as
+        // missing data ("Subject applicability" refactor, Part 12).
+        trim(($section->track->name ?? '') . ($section->specialization ? ' — ' . $section->specialization->name : '')) ?: null,
+        'SY ' . $section->school_year,
+    ]))
     : 'No section assigned')
 
 @section('content')
+@include('partials.validation-errors')
 
 @include('partials.section-school-year-context')
 
@@ -77,6 +83,15 @@
     </div>
     @endunless
 
+    {{-- "Student identity and term-specific subject offerings" pass —
+         subjects are assigned per academic term; an empty term is a real
+         answer about THIS term, not a broken section. --}}
+    @if($subjects->isEmpty())
+        <div class="p-4">
+            <x-empty-state icon="bi-book" message="No subjects are assigned to {{ $section->name }} for Term {{ $selectedPeriod }}."
+                hint="An Admin assigns subjects to a section one academic term at a time (Admin > Sections > Subjects). Switch the term above to see another term's subjects." />
+        </div>
+    @else
     {{-- Grade Table --}}
     <form method="POST" action="{{ route('adviser.grades.store') }}">
         @csrf
@@ -160,6 +175,7 @@
         </div>
         @endif
     </form>
+    @endif
 </div>
 
 {{-- IMPORT GRADES MODAL --}}

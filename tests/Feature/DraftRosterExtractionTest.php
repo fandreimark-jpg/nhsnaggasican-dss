@@ -76,12 +76,12 @@ class DraftRosterExtractionTest extends TestCase
         $download->assertHeader('Content-Type', 'text/csv; charset=UTF-8');
         $csv = $download->getContent();
 
-        $this->assertStringContainsString('lrn,last_name,first_name,middle_name,gender,birthdate', $csv);
-        $this->assertStringContainsString('110000000001,Dela Cruz,Juan Miguel,Reyes,male,', $csv);
-        $this->assertStringContainsString(',Reyes,Juan,,male,', $csv); // blank LRN
-        $this->assertStringContainsString('110000000003,NOCOMMANAME,,,male,', $csv); // no comma at all
-        $this->assertStringContainsString('110000000004,Santos,Maria,Clara,female,', $csv);
-        $this->assertStringContainsString('110000000005,Bautista,Ana Lopez,Cruz,female,', $csv);
+        $this->assertStringContainsString('lrn,last_name,first_name,middle_name,gender', $csv);
+        $this->assertStringContainsString('110000000001,Dela Cruz,Juan Miguel,Reyes,male', $csv);
+        $this->assertStringContainsString(',Reyes,Juan,,male', $csv); // blank LRN
+        $this->assertStringContainsString('110000000003,NOCOMMANAME,,,male', $csv); // no comma at all
+        $this->assertStringContainsString('110000000004,Santos,Maria,Clara,female', $csv);
+        $this->assertStringContainsString('110000000005,Bautista,Ana Lopez,Cruz,female', $csv);
 
         // Session cleared once downloaded.
         $this->assertNull(session('roster_extraction'));
@@ -101,7 +101,7 @@ class DraftRosterExtractionTest extends TestCase
         $admin = User::factory()->admin()->create();
         $section = Section::factory()->create();
 
-        $csv = "lrn,last_name,first_name,middle_name,gender,birthdate\n"
+        $csv = "lrn,last_name,first_name,middle_name,gender\n"
             . "110000000001,Dela Cruz,Juan Miguel,Reyes,male,\n"
             . ",Reyes,Juan,,male,\n" // blank LRN -- must be rejected by name
             . "110000000004,Santos,Maria,Clara,female,\n"
@@ -138,7 +138,7 @@ class DraftRosterExtractionTest extends TestCase
         $admin = User::factory()->admin()->create();
         $section = Section::factory()->create();
 
-        $csv = "lrn,last_name,first_name,middle_name,gender,birthdate\n"
+        $csv = "lrn,last_name,first_name,middle_name,gender\n"
             . "110000000001,Dela Cruz,Juan Miguel,Reyes,male,\n"
             . "110000000002,Reyes,Juan,,male,\n" // LRN now filled in
             . "110000000004,Santos,Maria,Clara,female,\n"
@@ -187,7 +187,7 @@ class DraftRosterExtractionTest extends TestCase
         $admin = User::factory()->admin()->create();
         $section = Section::factory()->create();
 
-        $csv = "lrn,last_name,first_name,middle_name,gender,birthdate\n"
+        $csv = "lrn,last_name,first_name,middle_name,gender\n"
             . "110000000003,NOCOMMANAME,,,male,\n";
 
         $path = tempnam(sys_get_temp_dir(), 'draft_roster_') . '.csv';

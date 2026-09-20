@@ -43,11 +43,16 @@ class NewRoutesRoleAuthorizationTest extends TestCase
         $this->get('/principal/subject-analysis')->assertRedirect(route('login'));
     }
 
-    public function test_adviser_cannot_import_subjects_with_a_grade_level_selection(): void
+    public function test_adviser_cannot_create_a_subject(): void
     {
+        // The Subjects bulk import this test used to probe was removed
+        // ("Subject applicability" refactor); the manual form is the
+        // Admin-only way in, and an adviser is refused there.
         $adviser = User::factory()->create(['role' => 'adviser']);
 
-        $this->actingAs($adviser)->post('/admin/subjects/import', ['grade_level' => '11'])
-            ->assertForbidden();
+        $this->actingAs($adviser)->post('/admin/subjects', [
+            'name' => 'Sneaky', 'type' => 'core', 'grade_level' => 11, 'subject_group' => 'core_academic', 'terms' => [1],
+        ])->assertForbidden();
+        $this->assertDatabaseMissing('subjects', ['name' => 'Sneaky']);
     }
 }

@@ -82,18 +82,27 @@ class TransmutationServiceTest extends TestCase
 
     /**
      * TASK 2 of "terminology, transmutation, and interface cleanup" —
-     * scheme selection by grade level + school year, per DO 015, s. 2026:
-     * Grade 11 moves to the Strengthened curriculum's adjusted table in
-     * SY 2026-2027; Grade 12 in that same year has not moved.
+     * scheme selection for an UNSET curriculum is by school year only
+     * ("SSHS ECR grading correction", 2026-09-20): SY 2026-2027 onward is
+     * DO 015, s. 2026 for BOTH grade levels — the prescribed SSHS E-Class
+     * Record accepts Grade 11 and 12 and weights by cluster, never by grade
+     * level. A cohort that stays on the 2013 curriculum is recorded by an
+     * explicit `k12_2013` on its section (tested below), never inferred.
      */
     public function test_grade_11_sy_2026_2027_resolves_to_do015_2026(): void
     {
         $this->assertSame('do015_2026', $this->service->schemeFor(11, '2026-2027'));
     }
 
-    public function test_grade_12_sy_2026_2027_stays_on_do8_2015(): void
+    public function test_grade_12_sy_2026_2027_with_no_explicit_curriculum_is_do015_2026_like_grade_11(): void
     {
-        $this->assertSame('do8_2015', $this->service->schemeFor(12, '2026-2027'));
+        $this->assertSame('do015_2026', $this->service->schemeFor(12, '2026-2027'));
+        $this->assertSame('do015_2026', $this->service->schemeFor(12, '2027-2028'));
+    }
+
+    public function test_grade_12_on_an_explicit_2013_curriculum_section_stays_on_do8_2015(): void
+    {
+        $this->assertSame('do8_2015', $this->service->schemeFor(12, '2026-2027', 'k12_2013'));
     }
 
     public function test_grade_11_before_sy_2026_2027_stays_on_do8_2015(): void
@@ -118,10 +127,12 @@ class TransmutationServiceTest extends TestCase
         $this->assertSame('do8_2015', $this->service->schemeFor(11, '2026-2027', 'k12_2013'));
     }
 
-    public function test_null_curriculum_falls_back_to_the_original_grade_level_inference_unchanged(): void
+    public function test_null_curriculum_falls_back_to_the_school_year_inference(): void
     {
         $this->assertSame('do015_2026', $this->service->schemeFor(11, '2026-2027', null));
-        $this->assertSame('do8_2015', $this->service->schemeFor(12, '2026-2027', null));
+        $this->assertSame('do015_2026', $this->service->schemeFor(12, '2026-2027', null));
+        $this->assertSame('do8_2015', $this->service->schemeFor(12, '2025-2026', null));
+        $this->assertSame('do8_2015', $this->service->schemeFor(11, '2025-2026', null));
     }
 
     public function test_transmute_with_availability_reports_unavailable_for_a_grade_outside_do015_2026s_0_to_100_range(): void

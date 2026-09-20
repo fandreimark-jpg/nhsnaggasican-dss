@@ -96,7 +96,7 @@ class AdminStudentsOneEntryPointTest extends TestCase
 
         session([
             'roster_extraction' => [
-                'rows'              => [['lrn' => '110000000001', 'last_name' => 'Cruz', 'first_name' => 'Juan', 'middle_name' => 'Reyes', 'gender' => 'male', 'birthdate' => '']],
+                'rows'              => [['lrn' => '110000000001', 'last_name' => 'Cruz', 'first_name' => 'Juan', 'middle_name' => 'Reyes', 'gender' => 'male']],
                 'source_filename'   => 'shakespeare_ecr.xlsx',
                 'skipped_empty'     => 49,
                 'missing_lrn_count' => 0,

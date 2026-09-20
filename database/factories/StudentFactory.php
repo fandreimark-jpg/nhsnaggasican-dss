@@ -16,7 +16,6 @@ class StudentFactory extends Factory
             'middle_name' => fake()->lastName(),
             'section_id'  => Section::factory(),
             'gender'      => fake()->randomElement(['male', 'female']),
-            'birthdate'   => fake()->date(),
         ];
     }
 }

@@ -55,7 +55,10 @@ class CrossSectionAccessTest extends TestCase
             ],
         ]);
 
-        $response->assertSessionHas('success');
+        // Final pre-demo audit (2026-09-20): the row is still refused (nothing
+        // written) — and the adviser is now TOLD, instead of "saved successfully".
+        $response->assertSessionMissing('success');
+        $response->assertSessionHas('error', fn($m) => str_contains($m, '1 row(s) were not saved'));
         $this->assertDatabaseMissing('grades', ['student_id' => $otherStudent->id]);
     }
 

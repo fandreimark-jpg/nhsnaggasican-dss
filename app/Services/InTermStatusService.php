@@ -84,14 +84,22 @@ class InTermStatusService
         // from — a status from 3 of 10 planned assessments is a very
         // different claim than one from all 10, and the caller must show
         // this count next to the status, not just the status alone.
-        $itemCount = AssessmentScore::where('student_id', $student->id)
-            ->whereHas('assessment', function ($q) use ($subject, $section, $gradingPeriod, $schoolYear) {
-                $q->where('subject_id', $subject->id)
-                  ->where('section_id', $section->id)
-                  ->where('grading_period', $gradingPeriod)
-                  ->where('school_year', $schoolYear);
-            })
-            ->count();
+        //
+        // "Performance audit" pass — PerformanceAnalysisService::analyzeStudent()
+        // now carries this count ('item_count', from the evidence
+        // GradingEngine already loaded for the grade). The query below is
+        // kept only for a caller that hands in a hand-built analysis array
+        // without it; it is the same count either way.
+        $itemCount = array_key_exists('item_count', $analysis)
+            ? (int) $analysis['item_count']
+            : AssessmentScore::where('student_id', $student->id)
+                ->whereHas('assessment', function ($q) use ($subject, $section, $gradingPeriod, $schoolYear) {
+                    $q->where('subject_id', $subject->id)
+                      ->where('section_id', $section->id)
+                      ->where('grading_period', $gradingPeriod)
+                      ->where('school_year', $schoolYear);
+                })
+                ->count();
 
         return [
             'status'                  => self::classify($componentsBelowTarget),

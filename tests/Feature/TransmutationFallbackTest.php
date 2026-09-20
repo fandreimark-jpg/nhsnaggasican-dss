@@ -24,6 +24,10 @@ use Tests\TestCase;
  * have a match, the grade computes, is marked provisional everywhere,
  * and can be verified.
  */
+// NOTE ('SSHS ECR grading correction', 2026-09-20): these Grade 12
+// sections carry an EXPLICIT k12_2013 curriculum because this file's
+// intent is the DO 8, s. 2015 (legacy) path. An unset curriculum in
+// SY 2026-2027 now resolves to DO 015 for both grade levels.
 class TransmutationFallbackTest extends TestCase
 {
     use RefreshDatabase;
@@ -92,7 +96,7 @@ class TransmutationFallbackTest extends TestCase
     {
         config(['dss.transmutation_fallback_scheme' => 'do8_2015']);
 
-        $section = Section::factory()->create(['school_year' => '2026-2027', 'grade_level' => 12]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create(['grade_level' => 12, 'type' => 'core']);
         $student = Student::factory()->create(['section_id' => $section->id]);
         $this->fullyScore($section, $subject, $student);
@@ -135,7 +139,7 @@ class TransmutationFallbackTest extends TestCase
         config(['dss.transmutation_fallback_scheme' => 'do8_2015']);
 
         $adviser = User::factory()->create();
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create(['grade_level' => 12, 'type' => 'core']);
         $student = Student::factory()->create(['section_id' => $section->id]);
 
@@ -183,7 +187,7 @@ class TransmutationFallbackTest extends TestCase
         config(['dss.transmutation_fallback_scheme' => 'do8_2015']);
 
         $adviser = User::factory()->create();
-        Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
+        Section::factory()->create(['curriculum' => 'k12_2013', 'adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
 
         $response = $this->actingAs($adviser)->get('/adviser/dashboard');
 

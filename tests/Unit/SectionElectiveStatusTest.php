@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Models\AcademicTerm;
 use App\Models\Section;
 use App\Models\SectionSubject;
 use App\Models\Specialization;
@@ -18,7 +19,13 @@ use Tests\TestCase;
  * separately, matching the class's own docblock: isFullyConfigured()
  * (is a zero-electives result correct, or just not set up yet?) and
  * expectedSubjectsForTerm()/expectedGradeCount() (how many grades are
- * actually expected THIS term, given per-term elective coverage).
+ * actually expected THIS term).
+ *
+ * "Subject applicability" refactor (2026-09-20) — the per-term half now
+ * reads Terms Taught on the subject (SubjectApplicabilityService); an
+ * SSHS section's electives reach it through an elective choice
+ * (SubjectOfferingService::chooseElective()). The scenarios are the same
+ * ones; the fixtures are written as subject configuration.
  */
 class SectionElectiveStatusTest extends TestCase
 {
@@ -35,10 +42,13 @@ class SectionElectiveStatusTest extends TestCase
     private function sshsSection(array $overrides = []): Section
     {
         $track = Track::factory()->create(['code' => 'ACAD']);
-        return Section::factory()->create(array_merge([
+        $section = Section::factory()->create(array_merge([
             'curriculum' => 'sshs', 'grade_level' => 11, 'track_id' => $track->id,
             'specialization_id' => null, 'school_year' => '2026-2027',
         ], $overrides));
+        AcademicTerm::ensureExistFor($section->school_year);
+
+        return $section;
     }
 
     // ---------------------------------------------------------------
@@ -60,8 +70,7 @@ class SectionElectiveStatusTest extends TestCase
     public function test_sshs_section_with_no_electives_available_at_all_is_correctly_zero(): void
     {
         // No elective Subject rows exist matching this section's track at
-        // all — zero section_subject rows is the CORRECT state, nothing
-        // to assign.
+        // all — zero offering rows is the CORRECT state, nothing to assign.
         $section = $this->sshsSection();
         $this->assertTrue($this->status->isFullyConfigured($section));
     }
@@ -73,8 +82,8 @@ class SectionElectiveStatusTest extends TestCase
             'type' => 'elective', 'grade_level' => $section->grade_level, 'track_id' => $section->track_id,
         ]);
 
-        // Zero section_subject rows for this section, but an elective DOES
-        // exist for its track — this is the gap Part 6 exists to surface.
+        // Zero offering rows for this section, but an elective DOES exist
+        // for its track — this is the gap Part 6 exists to surface.
         $this->assertFalse($this->status->isFullyConfigured($section));
     }
 
@@ -88,9 +97,7 @@ class SectionElectiveStatusTest extends TestCase
             'type' => 'elective', 'grade_level' => $section->grade_level, 'track_id' => $section->track_id,
         ]);
 
-        SectionSubject::create([
-            'section_id' => $section->id, 'subject_id' => $assigned->id, 'school_year' => $section->school_year,
-        ]);
+        SectionSubject::offer($section, $assigned, 1);
 
         // "Configured" means "someone has made the assignment decision for
         // this section," not "every possible elective is assigned" — a
@@ -102,8 +109,10 @@ class SectionElectiveStatusTest extends TestCase
     // expectedSubjectsForTerm() / expectedGradeCount()
     // ---------------------------------------------------------------
 
-    public function test_core_subjects_are_always_expected_every_term(): void
+    public function test_a_section_expects_its_core_subjects_in_every_term_they_are_taught(): void
     {
+        // A factory subject is taught in every term (the same default the
+        // migration backfilled), so it is expected in all three.
         $section = $this->sshsSection();
         Subject::factory()->create(['type' => 'core', 'grade_level' => $section->grade_level]);
 
@@ -112,60 +121,44 @@ class SectionElectiveStatusTest extends TestCase
         }
     }
 
-    public function test_an_assignment_with_no_term_data_is_expected_every_term(): void
+    public function test_a_chosen_elective_is_expected_only_in_the_terms_the_subject_is_taught(): void
     {
+        // "Subject applicability" refactor — Terms Taught is SUBJECT
+        // configuration; a section's elective choice applies in exactly
+        // those terms, and core subjects apply in theirs regardless.
         $section = $this->sshsSection();
-        $elective = Subject::factory()->create(['type' => 'elective', 'grade_level' => $section->grade_level, 'track_id' => $section->track_id]);
-        SectionSubject::create([
-            'section_id' => $section->id, 'subject_id' => $elective->id, 'school_year' => $section->school_year,
-            // starting_term/term_count both left null.
-        ]);
+        $core = Subject::factory()->create(['type' => 'core', 'grade_level' => $section->grade_level]);
+        $elective = Subject::factory()->taughtIn([2])->create(['type' => 'elective', 'grade_level' => $section->grade_level, 'track_id' => $section->track_id]);
 
-        foreach ([1, 2, 3] as $term) {
-            $subjects = $this->status->expectedSubjectsForTerm($section, $term);
-            $this->assertTrue($subjects->contains('id', $elective->id), "Expected in term {$term}");
-        }
-    }
-
-    public function test_a_one_term_elective_is_expected_only_in_its_assigned_term(): void
-    {
-        $section = $this->sshsSection();
-        $elective = Subject::factory()->create(['type' => 'elective', 'grade_level' => $section->grade_level, 'track_id' => $section->track_id]);
-        SectionSubject::create([
-            'section_id' => $section->id, 'subject_id' => $elective->id, 'school_year' => $section->school_year,
-            'starting_term' => 2, 'term_count' => 1,
-        ]);
+        (new \App\Services\SubjectOfferingService())->chooseElective($section, $elective);
 
         $this->assertFalse($this->status->expectedSubjectsForTerm($section, 1)->contains('id', $elective->id), 'Not expected in Term 1');
         $this->assertTrue($this->status->expectedSubjectsForTerm($section, 2)->contains('id', $elective->id), 'Expected in Term 2');
         $this->assertFalse($this->status->expectedSubjectsForTerm($section, 3)->contains('id', $elective->id), 'Not expected in Term 3');
+        foreach ([1, 2, 3] as $term) {
+            $this->assertTrue($this->status->expectedSubjectsForTerm($section, $term)->contains('id', $core->id), "Core expected in term {$term}");
+        }
     }
 
-    public function test_a_two_term_elective_starting_in_term_1_covers_terms_1_and_2_only(): void
+    public function test_a_core_subject_is_expected_only_in_its_terms_taught(): void
     {
+        // Terms Taught narrows a core subject too — a Term-1-only core
+        // subject is not expected in Term 2, and a term nothing is taught
+        // in is an honest empty set, not a copy of another term.
         $section = $this->sshsSection();
-        $elective = Subject::factory()->create(['type' => 'elective', 'grade_level' => $section->grade_level, 'track_id' => $section->track_id]);
-        SectionSubject::create([
-            'section_id' => $section->id, 'subject_id' => $elective->id, 'school_year' => $section->school_year,
-            'starting_term' => 1, 'term_count' => 2,
-        ]);
+        $termOneCore = Subject::factory()->taughtIn([1])->create(['type' => 'core', 'grade_level' => $section->grade_level]);
+        $termTwoCore = Subject::factory()->taughtIn([2])->create(['type' => 'core', 'grade_level' => $section->grade_level]);
 
-        $this->assertTrue($this->status->expectedSubjectsForTerm($section, 1)->contains('id', $elective->id));
-        $this->assertTrue($this->status->expectedSubjectsForTerm($section, 2)->contains('id', $elective->id));
-        $this->assertFalse($this->status->expectedSubjectsForTerm($section, 3)->contains('id', $elective->id));
+        $this->assertSame([$termOneCore->id], $this->status->expectedSubjectsForTerm($section, 1)->pluck('id')->all());
+        $this->assertSame([$termTwoCore->id], $this->status->expectedSubjectsForTerm($section, 2)->pluck('id')->all());
+        $this->assertCount(0, $this->status->expectedSubjectsForTerm($section, 3), 'Nothing is taught in Term 3');
     }
 
-    public function test_a_two_term_elective_starting_in_term_2_covers_terms_2_and_3_not_term_1(): void
+    public function test_a_two_term_elective_covers_only_the_terms_it_is_taught_in(): void
     {
-        // The work order's own text: the ECR "refuses to let a two-term
-        // elective begin in Term 3" -- implying Term 1 or Term 2 are both
-        // legitimate starts. This is the Term-2-start case.
         $section = $this->sshsSection();
-        $elective = Subject::factory()->create(['type' => 'elective', 'grade_level' => $section->grade_level, 'track_id' => $section->track_id]);
-        SectionSubject::create([
-            'section_id' => $section->id, 'subject_id' => $elective->id, 'school_year' => $section->school_year,
-            'starting_term' => 2, 'term_count' => 2,
-        ]);
+        $elective = Subject::factory()->taughtIn([2, 3])->create(['type' => 'elective', 'grade_level' => $section->grade_level, 'track_id' => $section->track_id]);
+        (new \App\Services\SubjectOfferingService())->chooseElective($section, $elective);
 
         $this->assertFalse($this->status->expectedSubjectsForTerm($section, 1)->contains('id', $elective->id));
         $this->assertTrue($this->status->expectedSubjectsForTerm($section, 2)->contains('id', $elective->id));
@@ -181,7 +174,7 @@ class SectionElectiveStatusTest extends TestCase
         $this->assertSame(3, $this->status->expectedGradeCount($section, 1)); // 3 students x 1 core subject
     }
 
-    public function test_k12_2013_sections_are_unaffected_by_per_term_filtering(): void
+    public function test_k12_2013_sections_keep_their_specialization_electives_every_term_they_are_taught(): void
     {
         $track = Track::factory()->create(['code' => 'ACAD']);
         $specialization = Specialization::factory()->create(['track_id' => $track->id]);
@@ -193,7 +186,7 @@ class SectionElectiveStatusTest extends TestCase
             'type' => 'elective', 'grade_level' => 12, 'track_id' => $track->id, 'specialization_id' => $specialization->id,
         ]);
 
-        // No section_subject row exists at all -- k12_2013 never reads it.
+        // Reached by the section's track/specialization — no choice needed.
         foreach ([1, 2, 3] as $term) {
             $this->assertTrue($this->status->expectedSubjectsForTerm($section, $term)->contains('id', $elective->id));
         }

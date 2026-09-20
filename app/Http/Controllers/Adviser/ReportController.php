@@ -52,6 +52,9 @@ class ReportController extends Controller
             ]);
         }
 
+        // Year-wide union of every subject this section takes in any term
+        // (Subject::forSection() with no term) — the per-term expected
+        // figures below come from SectionElectiveStatus, per term.
         $subjects = Subject::forSection($section)->get();
         $students = Student::enrolledIn($section)->orderBy('last_name')->get();
 
@@ -274,10 +277,23 @@ class ReportController extends Controller
     }
 
     /**
-     * Builds the JSON payload sent to classify.py — average_grade plus
-     * the expanded feature set from RiskFeatureExtractor (see its doc
-     * comment for why the trained model doesn't use them yet). Public
-     * so the exact payload shape is directly unit-testable without
+     * Builds the JSON payload sent to classify.py: the nine canonical ML
+     * features defined in `analytics/schema.py`, plus the identifiers and
+     * context that travel with them.
+     *
+     * `student_id` is a CORRELATION IDENTIFIER ONLY — it exists so each
+     * result can be matched back to the learner it belongs to, and it is
+     * never a predictor. classify.py builds its feature matrix strictly
+     * from the loaded model's declared `feature_names`, which `student_id`
+     * is not in and cannot be.
+     *
+     * `average_grade` is kept alongside the canonical `current_average`
+     * because the deployed legacy prototype declares `average_grade` as
+     * its one feature, and because `RiskResult.average_grade` is the
+     * column the result lands in. They are the same number under two
+     * names; classify.py resolves either.
+     *
+     * Public so the exact payload shape is directly unit-testable without
      * going through a real exec() call.
      */
     public function buildPythonPayload(array $gradesData, Section $section, int $gradingPeriod): array
@@ -293,6 +309,9 @@ class ReportController extends Controller
             return array_merge([
                 'student_id'            => $s['student_id'],
                 'average_grade'         => $s['average_grade'],
+                // The ninth canonical feature. Counted here rather than in
+                // RiskFeatureExtractor because submit() already holds each
+                // learner's per-subject failing grades in hand.
                 'failing_subject_count' => $s['failing_count'] ?? null,
             ], $features);
         }, $gradesData);
@@ -331,7 +350,17 @@ class ReportController extends Controller
             $process->setTimeout(120);
             $process->run();
             if (!$process->isSuccessful() || !is_file($outputFile)) {
-                \Log::error('Analytics process failed.', ['exit_code' => $process->getExitCode()]);
+                // "Performance audit" pass — record WHY. classify.py writes a
+                // structured {"error": {code, message}} object and prints the
+                // same line to stderr; before this only the exit code was
+                // logged, which left a live failure undiagnosable. Neither
+                // carries learner names (student ids at most).
+                $structured = is_file($outputFile) ? json_decode((string) file_get_contents($outputFile), true) : null;
+                \Log::error('Analytics process failed.', [
+                    'exit_code' => $process->getExitCode(),
+                    'error'     => is_array($structured) ? ($structured['error'] ?? null) : null,
+                    'stderr'    => \Illuminate\Support\Str::limit(trim($process->getErrorOutput()), 2000),
+                ]);
                 return false;
             }
             $results = json_decode(file_get_contents($outputFile), true, 512, JSON_THROW_ON_ERROR);
@@ -351,6 +380,16 @@ class ReportController extends Controller
         // (which never left PHP) with the ML classification results.
         $extraDataByStudent = collect($gradesData)->keyBy('student_id');
 
+        // "Performance audit" pass — the rows updateOrCreate() looked up
+        // one per learner, fetched once (risk_results is unique per
+        // student/period/year). Each learner below then does exactly what
+        // updateOrCreate() did: fill + save() an existing row, or create.
+        $existingResults = RiskResult::where('grading_period', $gradingPeriod)
+            ->where('school_year', $section->school_year)
+            ->whereIn('student_id', array_column($results, 'student_id'))
+            ->get()
+            ->keyBy('student_id');
+
         foreach ($results as $studentResult) {
             $extra = $extraDataByStudent->get($studentResult['student_id']);
 
@@ -360,13 +399,12 @@ class ReportController extends Controller
                 $extra['failing_count'] ?? 0
             );
 
-            RiskResult::updateOrCreate(
-                [
-                    'student_id'     => $studentResult['student_id'],
-                    'grading_period' => $gradingPeriod,
-                    'school_year'    => $section->school_year,
-                ],
-                [
+            $attributes = [
+                'student_id'     => $studentResult['student_id'],
+                'grading_period' => $gradingPeriod,
+                'school_year'    => $section->school_year,
+            ];
+            $values = [
                     // "Multi-school-year academic history" work order,
                     // PART 11 — the section this report was submitted for,
                     // stored on the result so a promoted learner's old
@@ -382,8 +420,14 @@ class ReportController extends Controller
                     'failing_subjects'      => $extra['failing_subjects'] ?? [],
                     'confidence'            => $studentResult['confidence'] ?? null,
                     'generated_at'          => now(),
-                ]
-            );
+            ];
+
+            $existing = $existingResults->get($studentResult['student_id']);
+            if ($existing) {
+                $existing->fill($values)->save();
+            } else {
+                RiskResult::create($attributes + $values);
+            }
         }
 
         return true;

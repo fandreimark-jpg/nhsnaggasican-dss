@@ -69,6 +69,24 @@
 </div>
 @endif
 
+{{-- The workbook could not CONFIRM part of the selection, because the
+     teacher left that INPUT DATA cover cell blank. A workbook that
+     CONTRADICTS the selection never reaches this screen at all — it is
+     refused outright in AssessmentController::detect() and re-checked in
+     preview()/import(). See EcrSubjectTermResolver for why "does not say"
+     and "says something different" are handled differently. --}}
+@if($metadataMismatch ?? null)
+<div id="metadataMismatchNotice" class="bg-amber-50 border border-amber-200 text-amber-800 text-sm p-4 rounded-lg mb-4 flex items-start justify-between gap-3">
+    <div>
+        <p class="font-medium"><i class="bi bi-exclamation-triangle-fill"></i> Workbook could not be fully verified</p>
+        <p class="mt-1">{{ $metadataMismatch }}</p>
+    </div>
+    <button type="button" onclick="document.getElementById('metadataMismatchNotice').remove()" aria-label="Dismiss" class="shrink-0 text-amber-500 hover:text-amber-700">
+        <i class="bi bi-x-lg"></i>
+    </button>
+</div>
+@endif
+
 <div class="card p-6">
     <p class="text-sm text-muted mb-1">
         Found <strong>{{ count($columns) }}</strong> assessment column{{ count($columns) === 1 ? '' : 's' }}

@@ -81,10 +81,15 @@ class DatabaseSeeder extends Seeder
         // here. Add them once confirmed. See CLAUDE.md's "Known
         // limitations" section.
         foreach (['General Mathematics', 'Oral Communication'] as $name) {
-            Subject::firstOrCreate(
+            $subject = Subject::firstOrCreate(
                 ['name' => $name, 'grade_level' => 11],
                 ['type' => 'core']
             );
+            // Terms Taught: every term, the same default the subject_terms
+            // migration backfilled — narrowed by the Admin, never guessed.
+            if ($subject->terms()->doesntExist()) {
+                $subject->syncTerms(AcademicTerm::TERM_NUMBERS);
+            }
         }
 
         // The demo year's AcademicYear row + Term 1/2/3. Activated ONLY when

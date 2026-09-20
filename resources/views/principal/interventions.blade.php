@@ -4,6 +4,7 @@
 @section('subtitle', 'Decisions already recorded — status, decider, and progress over time')
 
 @section('content')
+@include('partials.validation-errors')
 
 @if(session('success'))
 <div class="alert alert-success mb-4">{{ session('success') }}</div>

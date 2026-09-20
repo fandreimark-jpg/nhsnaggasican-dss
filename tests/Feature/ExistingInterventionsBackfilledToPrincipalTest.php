@@ -43,7 +43,7 @@ class ExistingInterventionsBackfilledToPrincipalTest extends TestCase
                 'name' => 'BackfillSection', 'grade_level' => 11, 'school_year' => '2026-2027',
                 'created_at' => now(), 'updated_at' => now(),
             ]),
-            'gender' => 'male', 'birthdate' => '2008-01-01', 'created_at' => now(), 'updated_at' => now(),
+            'gender' => 'male', 'created_at' => now(), 'updated_at' => now(),
         ]);
 
         $principalId = DB::table('users')->insertGetId([

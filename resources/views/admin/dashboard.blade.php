@@ -65,6 +65,7 @@
     $c5 = $dataHealth['duplicateLrns']->count();
     $c6 = $dataHealth['usersNeverLoggedIn']->count();
     $c7 = $dataHealth['subjectsWithSuspectGroup']->count();
+    $c8 = ($dataHealth['sectionsAwaitingElectiveChoice'] ?? collect())->count();
     $ok1 = $c1 === 0;
     $ok2 = $c2 === 0;
     $ok3 = $c3 === 0;
@@ -72,8 +73,9 @@
     $ok5 = $c5 === 0;
     $ok6 = $c6 === 0;
     $ok7 = $c7 === 0;
-    $passingCount = collect([$ok1, $ok2, $ok3, $ok4, $ok5, $ok6, $ok7])->filter()->count();
-    $totalChecks = 7;
+    $ok8 = $c8 === 0;
+    $passingCount = collect([$ok1, $ok2, $ok3, $ok4, $ok5, $ok6, $ok7, $ok8])->filter()->count();
+    $totalChecks = 8;
     $allPassing = $passingCount === $totalChecks;
     $healthPct = (int) round($passingCount / $totalChecks * 100);
 
@@ -104,8 +106,16 @@
     if (!$ok6) $attention[] = ['count' => $c6, 'text' => 'account' . ($c6 === 1 ? '' : 's') . ' that ' . ($c6 === 1 ? 'has' : 'have') . ' never logged in', 'detail' => $dataHealth['usersNeverLoggedIn']->pluck('name')->implode(', ') . ' — onboarding is incomplete.', 'href' => route('admin.users'), 'link' => 'Review users', 'icon' => 'bi-person'];
     else $healthy[] = ['text' => 'Every account has logged in at least once', 'icon' => 'bi-person-check'];
 
-    if (!$ok7) $attention[] = ['count' => $c7, 'text' => 'subject' . ($c7 === 1 ? '' : 's') . ' may have the wrong grading weight', 'detail' => $dataHealth['subjectsWithSuspectGroup']->pluck('name')->implode(', ') . ' — an elective still on the Core Academic group (no longer possible from the Admin form or an import, but may remain from data created before that rule), or linked to a DepEd catalog row implying different weights than stored.', 'href' => route('admin.subjects', ['subject_group_check' => 1]), 'link' => 'Review subjects', 'icon' => 'bi-percent'];
+    if (!$ok7) $attention[] = ['count' => $c7, 'text' => 'subject' . ($c7 === 1 ? '' : 's') . ' with a Subject Group that needs review', 'detail' => $dataHealth['subjectsWithSuspectGroup']->pluck('name')->implode(', ') . ' — no Subject Group set (open Edit and choose one; required for Grade 11 and Grade 12 alike, but data created before that rule may still be blank), an elective still on the Core Academic group, or a DepEd catalog link implying different weights than stored.', 'href' => route('admin.subjects', ['subject_group_check' => 1]), 'link' => 'Review subjects', 'icon' => 'bi-percent'];
     else $healthy[] = ['text' => "Every subject's stored grading weight matches its group or catalog link", 'icon' => 'bi-percent'];
+
+    // "Subject applicability" refactor — yellow, not red: the section
+    // resolves its core and track subjects from the subject configuration
+    // already; what nobody has said yet is which ELECTIVE it takes
+    // (an SSHS section has no strand to match one by). See
+    // SectionElectiveStatus::isFullyConfigured().
+    if (!$ok8) $attention[] = ['count' => $c8, 'text' => 'section' . ($c8 === 1 ? '' : 's') . ' with electives available but none chosen', 'detail' => $dataHealth['sectionsAwaitingElectiveChoice']->pluck('name')->implode(', ') . ' — core subjects resolve automatically; choose the section\'s elective(s) under Sections > Subjects.', 'href' => route('admin.sections'), 'link' => 'Review sections', 'icon' => 'bi-journal-text'];
+    else $healthy[] = ['text' => 'Every section that has electives to choose from has its electives chosen', 'icon' => 'bi-journal-check'];
 @endphp
 <div class="card mb-4">
     <div class="card-header">
@@ -170,7 +180,10 @@
         <div class="grid grid-cols-2 gap-2">
             <a href="{{ route('admin.users') }}" class="btn btn-outline justify-start"><i class="bi bi-person-plus text-brand-700" aria-hidden="true"></i> Add User</a>
             <a href="{{ route('admin.students') }}" class="btn btn-outline justify-start"><i class="bi bi-mortarboard text-brand-700" aria-hidden="true"></i> Add Student</a>
-            <a href="{{ route('admin.subjects') }}" class="btn btn-outline justify-start"><i class="bi bi-file-earmark-arrow-up text-brand-700" aria-hidden="true"></i> Import Subjects</a>
+            {{-- Final pre-demo audit (2026-09-20): the Subjects bulk import was removed
+                 with the "Subject applicability" refactor; the label promised an
+                 upload that no longer exists. --}}
+            <a href="{{ route('admin.subjects') }}" class="btn btn-outline justify-start"><i class="bi bi-journal-plus text-brand-700" aria-hidden="true"></i> Manage Subjects</a>
             <a href="{{ route('admin.sections') }}" class="btn btn-outline justify-start"><i class="bi bi-grid text-brand-700" aria-hidden="true"></i> Manage Sections</a>
             <a href="{{ route('admin.academic-terms') }}" class="btn btn-outline justify-start col-span-2"><i class="bi bi-calendar-check text-brand-700" aria-hidden="true"></i> Manage Academic Terms</a>
         </div>

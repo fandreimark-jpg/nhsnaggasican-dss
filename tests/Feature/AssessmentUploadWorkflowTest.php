@@ -71,6 +71,8 @@ class AssessmentUploadWorkflowTest extends TestCase
         $previewResponse->assertOk();
         $previewResponse->assertViewIs('adviser.assessments-preview');
         $previewResponse->assertViewHas('preview', fn($p) => $p['total_rows'] === 1 && $p['matched_rows'] === 1 && $p['total_valid_cells'] === 2);
+        // First upload: nothing exists yet, so no "already recorded" notice.
+        $previewResponse->assertDontSee('data-existing-items-notice', false);
         // Nothing written yet — preview is a dry run.
         $this->assertDatabaseCount('assessments', 0);
         $this->assertDatabaseCount('assessment_scores', 0);
@@ -91,6 +93,36 @@ class AssessmentUploadWorkflowTest extends TestCase
         $this->assertDatabaseHas('assessment_uploads', [
             'section_id' => $section->id, 'subject_id' => $subject->id, 'status' => 'imported', 'imported_count' => 2,
         ]);
+
+        // Final pre-demo audit (2026-09-20) — a REPEAT upload of the same
+        // items must say, on the Preview screen, which items already
+        // exist and that recorded scores will be replaced. The import
+        // itself stays idempotent: same item rows, updated scores, no
+        // duplicates.
+        $again = $this->actingAs($adviser)->post('/adviser/assessments/detect', [
+            'subject_id' => $subject->id, 'grading_period' => 1,
+            'file' => $this->csv("lrn,last_name,first_name,Quiz 1,Final Exam
+100000000020,Dela Cruz,Juan,19,
+"),
+        ]);
+        $storedAgain = $again->viewData('storedFilename');
+        $repeatPreview = $this->actingAs($adviser)->post('/adviser/assessments/preview', [
+            'subject_id' => $subject->id, 'grading_period' => 1, 'stored_filename' => $storedAgain,
+            'original_filename' => 'assessment.csv', 'columns' => $confirmedColumns,
+        ]);
+        $repeatPreview->assertOk();
+        $repeatPreview->assertSee('data-existing-items-notice', false);
+        $repeatPreview->assertSee('2 of these 2 assessment items are already recorded');
+        $repeatPreview->assertSee('replace each learner');
+
+        $this->actingAs($adviser)->post('/adviser/assessments/import', [
+            'subject_id' => $subject->id, 'grading_period' => 1, 'stored_filename' => $storedAgain,
+            'original_filename' => 'assessment.csv', 'columns' => $confirmedColumns,
+        ])->assertSessionHas('success');
+        $this->assertDatabaseCount('assessments', 2);
+        $this->assertDatabaseCount('assessment_scores', 2);
+        $this->assertDatabaseHas('assessment_scores', ['student_id' => $student->id, 'score' => 19]); // updated
+        $this->assertDatabaseHas('assessment_scores', ['student_id' => $student->id, 'score' => 45]); // blank cell kept the old score
     }
 
     /**

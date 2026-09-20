@@ -10,11 +10,24 @@
 
     If there are validation errors from a previous submit (wrong current
     password, blank name, etc.), the modal automatically stays open so
-    the user can see what went wrong — see the class="{{ $errors->any() ... }}" line below.
+    the user can see what went wrong.
+
+    Final pre-demo audit (2026-09-20): the two forms validate into NAMED
+    error bags ('profile' and 'profilePassword' — ProfileController), and
+    only those bags are read here. Reading the default bag meant ANY
+    page's rejected form (Admin > Users, Admin > Students, My Students)
+    popped this modal open over the real one, and the former
+    $errors->only(...) call — not a MessageBag method — turned that into
+    a 500 on every such rejection.
 --}}
+@php
+    $profileErrors  = $errors->getBag('profile');
+    $passwordErrors = $errors->getBag('profilePassword');
+    $profileModalOpen = $profileErrors->any() || $passwordErrors->any();
+@endphp
 <div id="profileModal"
-     class="{{ $errors->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box {{ $errors->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-modal w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto transition-all duration-200">
+     class="{{ $profileModalOpen ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
+    <div class="modal-box {{ $profileModalOpen ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-modal w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto transition-all duration-200">
 
         <div class="flex justify-between items-center mb-4">
             <h3 class="text-lg font-semibold text-ink">My Profile</h3>
@@ -76,11 +89,11 @@
                     <p class="text-xs text-muted mt-1">Required to confirm changes to your login email.</p>
                 </div>
 
-                @if($errors->has('last_name') || $errors->has('first_name') || $errors->has('middle_name') || $errors->has('email') || $errors->has('current_password'))
-                    <div class="alert alert-danger">
+                @if($profileErrors->any())
+                    <div class="alert alert-danger" data-profile-errors>
                         <ul class="list-disc list-inside">
-                            @foreach($errors->only(['last_name','first_name','middle_name','email','current_password']) as $error)
-                                <li>{{ is_array($error) ? $error[0] : $error }}</li>
+                            @foreach($profileErrors->all() as $error)
+                                <li>{{ $error }}</li>
                             @endforeach
                         </ul>
                     </div>
@@ -125,11 +138,11 @@
                     </div>
                 </div>
 
-                @if($errors->has('current_password') || $errors->has('password'))
-                    <div class="alert alert-danger">
+                @if($passwordErrors->any())
+                    <div class="alert alert-danger" data-profile-password-errors>
                         <ul class="list-disc list-inside">
-                            @foreach($errors->only(['current_password','password']) as $error)
-                                <li>{{ is_array($error) ? $error[0] : $error }}</li>
+                            @foreach($passwordErrors->all() as $error)
+                                <li>{{ $error }}</li>
                             @endforeach
                         </ul>
                     </div>

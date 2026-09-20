@@ -111,6 +111,15 @@
                 @else
                     <span class="text-gray-300">—</span>
                 @endif
+                @if(!empty($student['subject_composition']['changed']))
+                    {{-- STEP K — the overall trend compares two different
+                         subject mixes; say so rather than imply the same
+                         subjects were measured twice. --}}
+                    <div class="mt-1 text-[10px] text-gray-500 leading-tight"
+                         title="Term {{ $student['subject_composition']['previous_term'] }} graded: {{ implode(', ', array_merge($student['subject_composition']['shared'], $student['subject_composition']['only_previous'])) ?: '—' }}. Term {{ $student['subject_composition']['current_term'] }} graded: {{ implode(', ', array_merge($student['subject_composition']['shared'], $student['subject_composition']['only_current'])) ?: '—' }}.">
+                        <i class="bi bi-info-circle"></i> Subject mix differs between Term {{ $student['subject_composition']['previous_term'] }} and Term {{ $student['subject_composition']['current_term'] }} — overall averages only
+                    </div>
+                @endif
                 @if($student['consecutive_decline'])
                     <div class="mt-1" title="Average has dropped for 2 terms in a row">
                         <span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-50 text-red-700 border border-red-200">

@@ -1,0 +1,58 @@
+{
+  "version": "legacy_synthetic_prototype",
+  "algorithm": "RandomForestClassifier(n_estimators=200, max_depth=5, min_samples_split=2, min_samples_leaf=1, random_state=42)",
+  "trained_at": "unknown — predates model versioning; artifact mtime is the only record",
+  "feature_names": ["average_grade"],
+  "target_definition": "PREDETERMINED BANDS, NOT A HISTORICAL OUTCOME. Each training sample's class was assigned by construction from the band a human typed it into: average_grade >= 85 -> low, 75-84.9 -> moderate, below 75 -> high. The classifier was then fitted to those labels, so it reproduces the bands it was handed rather than a signal discovered in data.",
+  "feature_schema_version": "0.0.0-legacy",
+  "target_classes": ["low", "moderate", "high"],
+  "prediction_domain": "risk_level",
+  "dataset_type": "synthetic",
+  "dataset_label": "90 hand-typed average_grade literals, 30 per class — see analytics/legacy/prototype_model.py::_synthetic_training_set",
+  "dataset_hash": "",
+  "training_record_count": 90,
+  "test_record_count": 0,
+  "class_distribution": { "low": 30, "moderate": 30, "high": 30 },
+  "train_class_distribution": { "low": 30, "moderate": 30, "high": 30 },
+  "test_class_distribution": {},
+  "school_years_represented": [],
+  "reporting_systems_represented": [],
+  "hyperparameters": {
+    "n_estimators": 200,
+    "max_depth": 5,
+    "min_samples_split": 2,
+    "min_samples_leaf": 1,
+    "random_state": 42
+  },
+  "split_methodology": {
+    "method": "none — 5-fold cross-validation on the synthetic training set only; no held-out data, no cohort split, no real learners"
+  },
+  "missing_value_strategy": "not_applicable — the single feature is always present",
+  "missing_value_policy": "Not applicable: this model reads one always-present feature.",
+  "accuracy": null,
+  "precision": {},
+  "recall": {},
+  "f1": {},
+  "confusion_matrix": [],
+  "feature_importances": { "average_grade": 1.0 },
+  "baseline_comparison": {
+    "note": "No baseline comparison was ever run. A single-threshold rule on average_grade would score identically on this data, which is the point: the model reproduces a rule rather than adding predictive value over it."
+  },
+  "runtime_versions": {
+    "note": "Not recorded at fit time. classify.py compares the unpickling runtime against the versions below at load and warns on a mismatch.",
+    "python": "unknown",
+    "numpy": "unknown",
+    "scikit-learn": "unknown",
+    "joblib": "unknown"
+  },
+  "validation_status": "never_validated_against_real_outcomes",
+  "status": "legacy_active",
+  "limitations": [
+    "Trained on 90 hand-typed synthetic values; no real learner appears in its training data.",
+    "Single feature (average_grade). Laravel computes the full canonical feature set; this model reads one column of it.",
+    "Labels were predetermined by grade band, so the model largely reproduces those bands rather than a learned signal.",
+    "Its reported cross-validation accuracy is expected arithmetic for a perfectly separable one-feature problem and is NOT real-world accuracy.",
+    "Because it only sees an average, it cannot see a failing subject hidden behind a high average — the rule-based failing-subject override in Adviser\\ReportController exists precisely to cover that blind spot."
+  ],
+  "notes": "LEGACY SYNTHETIC PROTOTYPE, retained deliberately so the deployed DSS keeps working while the real training pipeline waits for an authorized historical dataset. This descriptor is hand-written metadata FOR an artifact that predates the registry; it is not the output of a training run. Replace by training a real candidate (analytics/train_model.py) and promoting it (analytics/model_registry.py promote)."
+}

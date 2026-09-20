@@ -226,7 +226,7 @@ class AdminDataHealthChecksTest extends TestCase
         $response = $this->actingAs($admin)->get('/admin/dashboard');
 
         $response->assertOk();
-        $response->assertSee('may have the wrong grading weight');
+        $response->assertSee('with a Subject Group that needs review');
         $response->assertSee('SuspectElective');
         $response->assertSee(route('admin.subjects', ['subject_group_check' => 1]), false);
     }
@@ -253,8 +253,34 @@ class AdminDataHealthChecksTest extends TestCase
         $response = $this->actingAs($admin)->get('/admin/dashboard');
 
         $response->assertOk();
-        $response->assertSee('may have the wrong grading weight');
+        $response->assertSee('with a Subject Group that needs review');
         $response->assertSee('MismatchedSubject');
+    }
+
+    /**
+     * "Subject Group for both grade levels" pass — a subject with NO group
+     * (only possible for data created before the group became required at
+     * both grade levels) is listed for review, never backfilled.
+     */
+    public function test_a_subject_with_no_subject_group_is_detected_at_either_grade_level(): void
+    {
+        $this->healthySection();
+        Subject::factory()->create(['type' => 'core', 'grade_level' => 12, 'name' => 'UnclassifiedTwelve', 'subject_group' => null]);
+        Subject::factory()->create(['type' => 'elective', 'grade_level' => 11, 'name' => 'UnclassifiedEleven', 'subject_group' => null]);
+        $admin = User::factory()->admin()->create();
+
+        $response = $this->actingAs($admin)->get('/admin/dashboard');
+
+        $response->assertOk();
+        $response->assertSee('subjects with a Subject Group that needs review');
+        $response->assertSee('UnclassifiedTwelve');
+        $response->assertSee('UnclassifiedEleven');
+        $this->assertNull(Subject::where('name', 'UnclassifiedTwelve')->value('subject_group'), 'Detection never assigns a value.');
+
+        // The review link lists exactly those subjects, flagged as needing a group.
+        $list = $this->actingAs($admin)->get(route('admin.subjects', ['subject_group_check' => 1]));
+        $list->assertOk()->assertSee('UnclassifiedTwelve')->assertSee('UnclassifiedEleven');
+        $this->assertSame(2, substr_count($list->getContent(), 'Subject Group needed'));
     }
 
     public function test_a_catalog_linked_subject_whose_stored_group_agrees_is_not_flagged(): void

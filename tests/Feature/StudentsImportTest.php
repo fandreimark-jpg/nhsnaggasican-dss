@@ -22,7 +22,7 @@ class StudentsImportTest extends TestCase
 
     private function importCsv(Section $section, array $rows): StudentsImport
     {
-        $csv = "lrn,last_name,first_name,middle_name,gender,birthdate\n";
+        $csv = "lrn,last_name,first_name,middle_name,gender\n";
         foreach ($rows as $row) {
             $csv .= implode(',', $row) . "\n";
         }
@@ -44,7 +44,7 @@ class StudentsImportTest extends TestCase
         $section = Section::factory()->create(['adviser_id' => $adviser->id]);
 
         $import = $this->importCsv($section, [
-            ['100000000001', 'Dela Cruz', 'Juan', 'Santos', 'male', '2008-05-01'],
+            ['100000000001', 'Dela Cruz', 'Juan', 'Santos', 'male'],
         ]);
 
         $this->assertCount(0, $import->failures());
@@ -60,7 +60,7 @@ class StudentsImportTest extends TestCase
         $section = Section::factory()->create(['adviser_id' => $adviser->id]);
 
         $import = $this->importCsv($section, [
-            ['12345', 'Dela Cruz', 'Juan', '', 'male', '2008-05-01'],
+            ['12345', 'Dela Cruz', 'Juan', '', 'male'],
         ]);
 
         $this->assertCount(1, $import->failures());
@@ -74,7 +74,7 @@ class StudentsImportTest extends TestCase
         Student::factory()->create(['section_id' => $section->id, 'lrn' => '100000000002']);
 
         $import = $this->importCsv($section, [
-            ['100000000002', 'Reyes', 'Maria', '', 'female', '2008-05-01'],
+            ['100000000002', 'Reyes', 'Maria', '', 'female'],
         ]);
 
         $this->assertCount(1, $import->failures());
@@ -87,24 +87,37 @@ class StudentsImportTest extends TestCase
         $section = Section::factory()->create(['adviser_id' => $adviser->id]);
 
         $import = $this->importCsv($section, [
-            ['100000000003', 'Santos', 'Pedro', '', 'other', '2008-05-01'],
+            ['100000000003', 'Santos', 'Pedro', '', 'other'],
         ]);
 
         $this->assertCount(1, $import->failures());
         $this->assertDatabaseMissing('students', ['lrn' => '100000000003']);
     }
 
-    public function test_future_birthdate_is_rejected(): void
+    /**
+     * "Student identity and term-specific subject offerings" pass, PART 1 —
+     * birthdate is gone from the learner format. A file still carrying the
+     * old sixth column is not rejected: the column is simply ignored, so a
+     * roster exported before this change imports exactly as a new-format
+     * one does, and nothing about the value (even a nonsense date) matters.
+     */
+    public function test_a_legacy_birthdate_column_is_ignored_rather_than_rejected(): void
     {
         $adviser = User::factory()->create();
         $section = Section::factory()->create(['adviser_id' => $adviser->id]);
 
-        $import = $this->importCsv($section, [
-            ['100000000004', 'Gomez', 'Ana', '', 'female', '2099-01-01'],
-        ]);
+        $csv  = "lrn,last_name,first_name,middle_name,gender,birthdate\n";
+        $csv .= "100000000004,Gomez,Ana,,female,2099-01-01\n";
+        $path = tempnam(sys_get_temp_dir(), 'students_import_') . '.csv';
+        file_put_contents($path, $csv);
 
-        $this->assertCount(1, $import->failures());
-        $this->assertDatabaseMissing('students', ['lrn' => '100000000004']);
+        $import = new StudentsImport($section->id);
+        Excel::import($import, $path);
+        @unlink($path);
+
+        $this->assertCount(0, $import->failures());
+        $this->assertDatabaseHas('students', ['lrn' => '100000000004', 'section_id' => $section->id]);
+        $this->assertFalse(\Illuminate\Support\Facades\Schema::hasColumn('students', 'birthdate'));
     }
 
     public function test_missing_required_field_is_rejected(): void
@@ -113,7 +126,7 @@ class StudentsImportTest extends TestCase
         $section = Section::factory()->create(['adviser_id' => $adviser->id]);
 
         $import = $this->importCsv($section, [
-            ['100000000005', '', 'Ana', '', 'female', '2008-05-01'],
+            ['100000000005', '', 'Ana', '', 'female'],
         ]);
 
         $this->assertCount(1, $import->failures());
@@ -125,7 +138,7 @@ class StudentsImportTest extends TestCase
         $section = Section::factory()->create(['adviser_id' => $adviser->id]);
 
         $import = $this->importCsv($section, [
-            ['100000000006', 'Valid', 'Row', '', 'male', '2008-05-01'],
+            ['100000000006', 'Valid', 'Row', '', 'male'],
             ['bad-lrn', 'Invalid', 'Row', '', 'male', '2008-05-01'],
         ]);
 
@@ -145,8 +158,8 @@ class StudentsImportTest extends TestCase
         $section = Section::factory()->create(['adviser_id' => $adviser->id]);
 
         $import = $this->importCsv($section, [
-            ['100000000008', 'One', 'Row', '', 'male', '2008-05-01'],
-            ['100000000008', 'Two', 'Row', '', 'female', '2008-05-01'],
+            ['100000000008', 'One', 'Row', '', 'male'],
+            ['100000000008', 'Two', 'Row', '', 'female'],
         ]);
 
         // Laravel's 'distinct' rule flags the later duplicate occurrence(s),
@@ -199,9 +212,9 @@ class StudentsImportTest extends TestCase
         $section = Section::factory()->create(['adviser_id' => $adviser->id]);
 
         $import = $this->importCsv($section, [
-            ['100000000101', 'Valid', 'One', '', 'male', '2008-05-01'],
+            ['100000000101', 'Valid', 'One', '', 'male'],
             ['bad-lrn', 'Invalid', 'Row', '', 'male', '2008-05-01'],
-            ['100000000102', 'Valid', 'Two', '', 'female', '2008-05-01'],
+            ['100000000102', 'Valid', 'Two', '', 'female'],
         ]);
 
         $this->assertSame(2, $import->createdCount());
@@ -218,7 +231,7 @@ class StudentsImportTest extends TestCase
         $mySection    = Section::factory()->create(['adviser_id' => $adviser->id]);
 
         $this->importCsv($mySection, [
-            ['100000000007', 'Cruz', 'Jose', '', 'male', '2008-05-01'],
+            ['100000000007', 'Cruz', 'Jose', '', 'male'],
         ]);
 
         $student = Student::where('lrn', '100000000007')->firstOrFail();

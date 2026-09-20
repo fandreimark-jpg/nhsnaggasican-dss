@@ -54,4 +54,13 @@ class AdminDashboardScopingTest extends TestCase
         // The stale 2025-2026 "high" result must not leak into this year's count.
         $response->assertViewHas('highRisk', 0);
     }
+
+    /** Final pre-demo audit (2026-09-20): the Subjects bulk import is gone, so no dashboard control may still offer it. */
+    public function test_the_admin_dashboard_offers_no_import_subjects_quick_action(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $this->actingAs($admin)->get('/admin/dashboard')->assertOk()
+            ->assertDontSee('Import Subjects')
+            ->assertSee('Manage Subjects');
+    }
 }

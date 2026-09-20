@@ -125,7 +125,10 @@ class StudentController extends Controller
             : null;
 
         if ($resolvedSection) {
-            $subjects = Subject::forSection($resolvedSection)->orderBy('type')->orderBy('name')->get();
+            // "Student identity and term-specific subject offerings" pass —
+            // scoped to the selected TERM's offerings, so a Term-1-only
+            // subject is not offered as a Term 2 filter.
+            $subjects = Subject::forSection($resolvedSection, $gradingPeriod)->orderBy('type')->orderBy('name')->get();
         } else {
             // No section selected — keep the full list, but ordered so the
             // view can group it by grade level (still "at least navigable"
@@ -170,16 +173,18 @@ class StudentController extends Controller
         $sortDir = 'asc';
 
         if ($subject) {
-            $sectionScope = function ($q) use ($subject, $request, $schoolYear) {
+            // "Subject applicability" refactor — the sections in scope for
+            // a subject and term come from the SAME resolver every other
+            // screen uses (SubjectApplicabilityService::sectionsOffering(),
+            // the inverse of Subject::forSection()), so a Term-2-only
+            // subject scopes no section in Term 1 and a section's elective
+            // choice is honoured — never a second, hand-written rule.
+            $sectionIdsInScope = (new \App\Services\SubjectApplicabilityService())
+                ->sectionsOffering($subject, $gradingPeriod, $schoolYear)
+                ->pluck('id');
+            $sectionScope = function ($q) use ($sectionIdsInScope, $request, $schoolYear) {
                 $q->where('school_year', $schoolYear)
-                  ->where('grade_level', $subject->grade_level);
-                if ($subject->type === 'elective') {
-                    $q->where('track_id', $subject->track_id)
-                      ->where(function ($q2) use ($subject) {
-                          $q2->whereNull('specialization_id')
-                             ->orWhere('specialization_id', $subject->specialization_id);
-                      });
-                }
+                  ->whereIn('id', $sectionIdsInScope);
                 if ($request->filled('grade_level')) {
                     $q->where('grade_level', $request->input('grade_level'));
                 }
@@ -607,7 +612,9 @@ class StudentController extends Controller
             ->orderByDesc('grading_period')->first();
         $period = (int) $request->input('period', $latestRisk?->grading_period ?? 1);
 
-        $subjects = $section ? Subject::forSection($section)->orderBy('type')->orderBy('name')->get() : collect();
+        // The selected term's offerings — a subject the learner took in
+        // Term 1 only is shown under Term 1, not under every term.
+        $subjects = $section ? Subject::forSection($section, $period)->orderBy('type')->orderBy('name')->get() : collect();
 
         $subjectAnalysis = $subjects->map(function ($subject) use ($student, $section, $period) {
             $result = $this->analysis->analyzeStudent($student, $subject, $section, $period, $section->school_year);
@@ -651,9 +658,20 @@ class StudentController extends Controller
             )
             : null;
 
+        // "Student identity and term-specific subject offerings" pass, STEP
+        // K — two separate signals, never merged: the OVERALL term trend
+        // (term averages, even when the subject mix changed) and the
+        // SAME-SUBJECT trend (only subjects graded in both terms), plus
+        // the exact subject-set difference so the page can say which.
+        $termTrend = [
+            'overall'     => $this->dashboardAnalytics->computeTrend($riskHistory),
+            'composition' => $this->dashboardAnalytics->subjectCompositionBetween($student->id, $riskHistory),
+            'same_subject' => $this->dashboardAnalytics->computeSameSubjectTrend($student->id, $riskHistory),
+        ];
+
         return view('principal.student-detail', compact(
             'student', 'section', 'period', 'subjectAnalysis', 'riskHistory', 'interventions', 'latestRisk', 'dssStatus',
-            'schoolYear', 'isHistoricalYear', 'enrollmentYears', 'riskHistoryAllYears'
+            'schoolYear', 'isHistoricalYear', 'enrollmentYears', 'riskHistoryAllYears', 'termTrend'
         ));
     }
 }

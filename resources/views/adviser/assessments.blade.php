@@ -6,6 +6,7 @@
     : 'No section assigned')
 
 @section('content')
+@include('partials.validation-errors')
 
 @include('partials.section-school-year-context')
 
@@ -165,8 +166,11 @@
     @endunless
 
     @if(!$selectedSubject)
-        <x-empty-state icon="bi-book" message="No subjects are offered to your section yet."
-            hint="An Admin assigns subjects to your section's track and grade level." />
+        {{-- "Student identity and term-specific subject offerings" pass —
+             subjects are assigned per academic term, so this is a
+             statement about THIS term, not the section as a whole. --}}
+        <x-empty-state icon="bi-book" message="No subjects are assigned to {{ $section->name }} for Term {{ $selectedPeriod }}."
+            hint="An Admin assigns subjects to a section one academic term at a time (Admin > Sections > Subjects). Switch the term above to see another term's subjects." />
     @else
     {{-- TASK 2 of "DO 015 grading weights" — GradingEngine already
          combines same-role items correctly, but two Examination items
@@ -181,6 +185,18 @@
             @endforeach
         </ul>
         <p class="mt-1 text-amber-700">These will be combined as one score for that role — edit an item's role if this isn't intended.</p>
+    </div>
+    @endif
+
+    {{-- Final pre-demo audit (2026-09-20) — an Examination item with NO
+         role is excluded from the Examination component whenever other
+         items carry one (GradingEngine::examinationPercentage()). Say so
+         instead of letting recorded scores silently count for nothing. --}}
+    @if($unroledExamItemNames->isNotEmpty())
+    <div class="bg-amber-50 border border-amber-200 text-amber-800 text-sm p-4 rounded-lg mx-6 mt-3" data-unroled-exam-warning>
+        <p class="font-medium"><i class="bi bi-exclamation-triangle-fill"></i> {{ $unroledExamItemNames->count() === 1 ? 'One Examination item has' : $unroledExamItemNames->count() . ' Examination items have' }} no role and {{ $unroledExamItemNames->count() === 1 ? 'is' : 'are' }} not counted in the Examination component</p>
+        <p class="mt-1">{{ $unroledExamItemNames->implode(', ') }}</p>
+        <p class="mt-1 text-amber-700">Because other Examination items for this subject carry a role (Summative Test 1 / 2, Term Examination), the Examination percentage is computed from role items only. Edit an item and set its role for its scores to count — an item left without a role stays recorded but does not change any grade.</p>
     </div>
     @endif
 

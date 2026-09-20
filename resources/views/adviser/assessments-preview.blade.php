@@ -9,6 +9,24 @@
      never a block: zero LRN matches is almost certainly the wrong file
      or wrong section, but the adviser may have a good reason. Dismissible,
      and Confirm & Import below stays enabled either way. --}}
+{{-- Final pre-demo audit (2026-09-20) — a re-upload updates existing
+     items and REPLACES recorded scores; say so before the adviser confirms. --}}
+@if($existingItemNames->isNotEmpty())
+<div id="existingItemsNotice" class="bg-amber-50 border border-amber-200 text-amber-800 text-sm p-4 rounded-lg mb-4 flex items-start justify-between gap-3" data-existing-items-notice>
+    <div>
+        <p class="font-medium"><i class="bi bi-exclamation-triangle-fill"></i> {{ $existingItemNames->count() }} of these {{ count($columns) }} assessment {{ count($columns) === 1 ? 'item is' : 'items are' }} already recorded for {{ $subject->name }}, Term {{ $gradingPeriod }}</p>
+        <p class="mt-1">{{ $existingItemNames->implode(', ') }}</p>
+        <p class="mt-1">
+            Importing will update {{ $existingItemNames->count() === 1 ? 'that item' : 'those items' }} and <strong>replace each learner's recorded score with the value in this file</strong>.
+            A learner whose cell is blank in this file keeps the score already recorded. If this is not a corrected re-upload, cancel now.
+        </p>
+    </div>
+    <button type="button" onclick="document.getElementById('existingItemsNotice').remove()" aria-label="Dismiss" class="shrink-0 text-amber-500 hover:text-amber-700">
+        <i class="bi bi-x-lg"></i>
+    </button>
+</div>
+@endif
+
 @if($rosterMismatch)
 <div id="rosterMismatchNotice" class="bg-amber-50 border border-amber-200 text-amber-800 text-sm p-4 rounded-lg mb-4 flex items-start justify-between gap-3">
     <div>

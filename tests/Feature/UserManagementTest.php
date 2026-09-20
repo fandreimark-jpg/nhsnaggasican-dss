@@ -170,6 +170,14 @@ class UserManagementTest extends TestCase
         $response = $this->from('/login')->post('/login', ['email' => 'disabled-adviser2@naggasican.edu.ph', 'password' => 'password']);
 
         $response->assertSessionHasErrors(['email' => 'Your account has been disabled. Contact the administrator.']);
+
+        // Final pre-demo audit (2026-09-20): the session is invalidated
+        // before the error is thrown, so a plain back() lost its previous
+        // URL, landed on "/" and bounced to /login — and the message
+        // expired on the way. The redirect must go straight to /login
+        // and the NEXT page load must actually render the reason.
+        $response->assertRedirect('/login');
+        $this->get('/login')->assertSee('Your account has been disabled. Contact the administrator.');
     }
 
     public function test_an_active_users_login_still_works_normally(): void

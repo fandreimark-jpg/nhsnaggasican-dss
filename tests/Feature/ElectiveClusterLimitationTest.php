@@ -50,13 +50,13 @@ class ElectiveClusterLimitationTest extends TestCase
 
         // The section is assigned exactly the 2 it actually takes — Physics
         // is never assigned, so it never becomes part of forSection()'s
-        // result for this section at all.
-        \App\Models\SectionSubject::create(['section_id' => $section->id, 'subject_id' => $preCalc->id, 'school_year' => $section->school_year]);
-        \App\Models\SectionSubject::create(['section_id' => $section->id, 'subject_id' => $biology->id, 'school_year' => $section->school_year]);
+        // result for this section at all. ("Student identity and
+        // term-specific subject offerings" pass: an offering is per term.)
+        AcademicTerm::ensureExistFor($section->school_year);
+        \App\Models\SectionSubject::offer($section, $preCalc, 1);
+        \App\Models\SectionSubject::offer($section, $biology, 1);
 
         $student = Student::factory()->create(['section_id' => $section->id]);
-
-        AcademicTerm::ensureExistFor($section->school_year);
 
         // The student only ever takes 2 of the 3 — there is no way to
         // supply a Physics grade for a subject they were never enrolled in.

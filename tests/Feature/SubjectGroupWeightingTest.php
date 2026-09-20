@@ -21,6 +21,10 @@ use Tests\TestCase;
  * (no Examination component at all — ex_weight is null) computes a
  * complete grade from 2 components instead of being reported incomplete.
  */
+// NOTE ('SSHS ECR grading correction', 2026-09-20): these Grade 12
+// sections carry an EXPLICIT k12_2013 curriculum because this file's
+// intent is the DO 8, s. 2015 (legacy) path. An unset curriculum in
+// SY 2026-2027 now resolves to DO 015 for both grade levels.
 class SubjectGroupWeightingTest extends TestCase
 {
     use RefreshDatabase;
@@ -84,7 +88,7 @@ class SubjectGroupWeightingTest extends TestCase
 
     public function test_a_grade_12_subject_still_computes_at_25_50_25(): void
     {
-        $section = Section::factory()->create(['school_year' => '2026-2027', 'grade_level' => 12]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create(['subject_group' => 'core_academic']);
         $student = Student::factory()->create(['section_id' => $section->id]);
 

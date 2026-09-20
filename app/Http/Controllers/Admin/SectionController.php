@@ -9,13 +9,9 @@ use App\Models\Specialization;
 use App\Models\Subject;
 use App\Models\User;
 use App\Helpers\LogActivity;
-use App\Http\Controllers\Concerns\SummarizesImportFailures;
-use App\Http\Controllers\Concerns\ValidatesSpreadsheetUpload;
-use App\Imports\SectionsImport;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
-use Maatwebsite\Excel\Facades\Excel;
 
 /**
  * SectionController (Admin)
@@ -25,8 +21,6 @@ use Maatwebsite\Excel\Facades\Excel;
  */
 class SectionController extends Controller
 {
-    use SummarizesImportFailures;
-    use ValidatesSpreadsheetUpload;
 
     /**
      * Show all sections with their related data.
@@ -45,8 +39,16 @@ class SectionController extends Controller
         // it silently blocks the next term. Bounded to this page's section
         // list (typically small), same cost shape as other per-row lookups
         // elsewhere in this app.
+        // One count PER TERM (subjects can differ between terms) — resolved
+        // from the subject configuration by Subject::forSection().
         $sections->each(function (Section $section) {
-            $section->subject_count = Subject::forSection($section)->count();
+            $counts = [];
+            foreach (\App\Models\AcademicTerm::termNumbers() as $term) {
+                $counts[$term] = Subject::forSection($section, $term)->count();
+            }
+            $section->subject_counts = $counts;
+            // Kept for anything still reading the single figure: the largest term's count.
+            $section->subject_count = max($counts);
         });
 
         // All advisers, each tagged (via ->section) with whichever section
@@ -83,7 +85,12 @@ class SectionController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'name'              => 'required|string|max:255',
+            // One section of a given name per grade level per school year
+            // (pre-demo audit, 2026-09-20 — a duplicate "Curie" used to be
+            // accepted; the DB now carries the same unique index).
+            'name'              => ['required', 'string', 'max:255',
+                Rule::unique('sections', 'name')
+                    ->where(fn($q) => $q->where('grade_level', (int) $request->grade_level)->where('school_year', $request->school_year))],
             'grade_level'       => 'required|in:11,12',
             'track_id'          => 'required|exists:tracks,id',
             'specialization_id' => 'required|exists:specializations,id',
@@ -100,6 +107,8 @@ class SectionController extends Controller
             // roster, once it arrives) is what actually requires setting
             // it explicitly for every section it creates.
             'curriculum'        => 'nullable|in:sshs,k12_2013',
+        ], [
+            'name.unique' => 'A section with this name already exists for that grade level and school year.',
         ]);
 
         // Same one-section-per-adviser-per-school-year rule update() applies.
@@ -131,67 +140,6 @@ class SectionController extends Controller
             ->with('success', 'Section created successfully!');
     }
 
-    /**
-     * Bulk-import sections from an Excel/CSV file. See App\Imports\SectionsImport
-     * for the expected column layout and every row-failure/warning rule —
-     * same transaction-wrapped pattern as Admin\TrackController::import().
-     * Unlike that import, sections are NOT idempotent (there's no natural
-     * code to firstOrCreate() on), so a mid-file failure could otherwise
-     * leave a partially-applied file behind; the transaction still exists
-     * for that reason, even though SkipsOnFailure means a bad row is
-     * skipped rather than throwing.
-     */
-    public function import(Request $request)
-    {
-        $request->validateWithBag('import', [
-            'file' => $this->spreadsheetFileRule(),
-        ]);
-
-        $import = new SectionsImport();
-
-        DB::transaction(function () use ($import, $request) {
-            Excel::import($import, $request->file('file'));
-        });
-
-        $failures = $import->failures();
-        $summary  = $import->importedCount . ' section(s)';
-
-        // A warning is not an error and must not look like one — see
-        // SectionsImport::$duplicateAdviserWarnings' docblock (the same
-        // adviser_email on more than one row never blocks the import).
-        $warnings = collect($import->duplicateAdviserWarnings)
-            ->map(fn(array $names, string $email) => "\"{$email}\" is assigned to more than one section (" . implode(', ', $names) . ') — only the first will appear on that adviser\'s own dashboard.')
-            ->values()
-            ->all();
-
-        if ($failures->count() > 0) {
-            $result = $this->summarizeImportFailures($failures, $import);
-
-            LogActivity::log(
-                'import_sections',
-                "Imported {$summary}, " . $result['skippedCount'] . ' row(s) skipped',
-                'sections',
-                null
-            );
-
-            return redirect()->route('admin.sections')
-                ->with('warning', "{$summary} imported. " . $result['skippedCount'] . ' row(s) were skipped:')
-                ->with('import_errors', $result['rowMessages'])
-                ->with('import_header_hint', $result['headerHint'])
-                ->with('import_warnings', $warnings);
-        }
-
-        LogActivity::log(
-            'import_sections',
-            "Bulk imported {$summary} via file upload",
-            'sections',
-            null
-        );
-
-        return redirect()->route('admin.sections')
-            ->with('success', "{$summary} imported successfully!")
-            ->with('import_warnings', $warnings);
-    }
 
     /**
      * Update an existing section.
@@ -203,7 +151,10 @@ class SectionController extends Controller
         $adviserId = $request->adviser_id ?: null;
 
         $request->validate([
-            'name'              => 'required|string|max:255',
+            'name'              => ['required', 'string', 'max:255',
+                Rule::unique('sections', 'name')
+                    ->where(fn($q) => $q->where('grade_level', (int) $request->grade_level)->where('school_year', $request->school_year))
+                    ->ignore($section->id)],
             'grade_level'       => 'required|in:11,12',
             'track_id'          => 'required|exists:tracks,id',
             'specialization_id' => 'required|exists:specializations,id',
@@ -212,6 +163,8 @@ class SectionController extends Controller
             // another admin) be assigned as a section's adviser.
             'adviser_id'        => ['nullable', Rule::exists('users', 'id')->where('role', 'adviser')],
             'curriculum'        => 'nullable|in:sshs,k12_2013',
+        ], [
+            'name.unique' => 'A section with this name already exists for that grade level and school year.',
         ]);
 
         // Prevent assigning an adviser who is already assigned to another

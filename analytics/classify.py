@@ -1,474 +1,418 @@
-import sys
+"""
+PRODUCTION INFERENCE ONLY.
+
+This file loads the active approved model and predicts. It does not train,
+does not generate training data, does not cross-validate, and does not
+write a metrics report. Those belong to `train_model.py` (the one
+authoritative training entry point) and, for the retained prototype,
+`legacy/prototype_model.py`.
+
+If no model is available, this file FAILS with a controlled error. It never
+quietly fabricates one — a production classifier that trains itself from
+hand-typed grade bands whenever its artifact is missing is a silent
+correctness failure dressed as resilience.
+
+MODEL RESOLUTION ORDER
+----------------------
+1. `model_registry`'s ACTIVE model, if one has been explicitly promoted.
+2. Otherwise the LEGACY SYNTHETIC PROTOTYPE (`analytics/model_cache.pkl`,
+   described by `analytics/legacy/legacy_model.json`) — retained so the
+   deployed DSS keeps working, and clearly labelled as synthetic in every
+   result it produces.
+3. Otherwise: a controlled error. No model, no prediction.
+
+THE MODEL CURRENTLY SERVING IS THE LEGACY SYNTHETIC PROTOTYPE. It was
+trained on 90 hand-typed average_grade values whose classes were assigned
+by predetermined grade bands. Its accuracy figures are not real-world
+accuracy. See `analytics/README.md`, "Why the previous prototype could be
+described as hardcoded".
+
+FEATURE ORDER comes from the loaded model's own metadata, never from the
+order Laravel happened to serialise its JSON in. See
+`schema.build_feature_vector()`.
+
+I/O CONTRACT (unchanged for Laravel):
+    python classify.py <input.json> <output.json>
+
+Input: a JSON list of per-learner feature dicts.
+Output: a JSON list of result dicts, one per input row, each carrying
+    student_id, average_grade, risk_level, confidence, plus model_version
+    and feature_schema_version so a stored result can always be traced back
+    to the model that produced it.
+
+On failure the output file receives a structured {"error": ...} object and
+the process exits non-zero. Python tracebacks are never written to it.
+"""
+
+from __future__ import annotations
+
 import json
 import os
-import argparse
-from datetime import datetime
-import numpy as np
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import cross_val_score, cross_val_predict, train_test_split
-from sklearn.metrics import confusion_matrix, classification_report
+import sys
 
-# ============================================================================
-# TRAINING DATA LIMITATION (documented per project policy — do not remove)
-#
-# This model is trained on ONE feature (average_grade) against 90 PURELY
-# SYNTHETIC samples that are just clean numeric boundaries matching the
-# calibrated thresholds below (85-100 / 75-84.9 / 0-74.9 — see
-# train_model()'s docstring for why these were recalibrated from the
-# original 90/75/60 split). The 100% cross-validation
-# accuracy reported in model_accuracy.txt is EXPECTED, not evidence of
-# real-world validity — a single-feature threshold problem with hand-picked,
-# perfectly-separable training points will always score perfectly. This
-# model has never been trained or validated against real student outcomes.
-#
-# Laravel (see App\Services\RiskFeatureExtractor and
-# Adviser\ReportController::runAnalytics) now sends a richer feature set —
-# ww_mean, pt_mean, exam_mean, failing_subject_count, weak_component_count,
-# prev_term_average, trend_delta — alongside average_grade. classify_students()
-# below intentionally does NOT read any of them yet: retraining to actually
-# use them now would trade this simple, well-understood model for a more
-# complex one with no real assessment data yet to validate it against (the
-# assessment-evidence layer was only just built). The extra fields are
-# included in the payload so that once real data has accumulated, doing that
-# retrain is a small follow-up with something real to check it against —
-# not a second speculative rebuild. Any future retrain must be validated
-# against real (not synthetic) student outcomes before being trusted, and
-# this comment must be updated to reflect what was actually validated.
-# ============================================================================
+ANALYTICS_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, ANALYTICS_DIR)
 
-# Path where the trained model is cached after first run
-# Avoids retraining on every report submission — improves performance
-MODEL_PATH = os.path.join(os.path.dirname(__file__), 'model_cache.pkl')
+import model_registry
+import schema as schema_module
+from schema import SchemaError
+
+# The retained prototype. Loaded only when the registry has no active model.
+LEGACY_MODEL_PATH = os.path.join(ANALYTICS_DIR, 'model_cache.pkl')
+LEGACY_METADATA_PATH = os.path.join(ANALYTICS_DIR, 'legacy', 'legacy_model.json')
+
+# Laravel's historical key for what schema.py calls `current_average`. Both
+# are accepted on input; see resolve_feature_aliases().
+FEATURE_ALIASES = {
+    'current_average': ('average_grade',),
+    'prev_period_average': ('prev_term_average',),
+}
 
 
-def get_model():
-    """Load the deployed model. Missing artifacts require explicit operator action."""
+class InferenceError(RuntimeError):
+    """
+    A controlled failure with an operator-readable message. Everything
+    raised deliberately by this module is one of these, so main() can
+    distinguish "we know what went wrong" from an unexpected crash and
+    still never leak a traceback into the output file.
+    """
+
+    def __init__(self, message: str, code: str = 'inference_error'):
+        super().__init__(message)
+        self.code = code
+
+
+# ---------------------------------------------------------------------------
+# Model loading
+# ---------------------------------------------------------------------------
+
+def load_legacy_prototype():
+    """Loads model_cache.pkl plus its hand-written descriptor. Raises InferenceError if either is missing."""
     import joblib
 
-    if not os.path.isfile(MODEL_PATH):
-        raise FileNotFoundError('The deployed analytics model is missing. Restore the approved model artifact; automatic training is disabled.')
-    return joblib.load(MODEL_PATH)
-
-
-def train_model():
-    """
-    Train the Random Forest classifier using DepEd SHS grading thresholds.
-
-    "Correctness and interface pass" TASK 3 — RECALIBRATED. The prior
-    bands (low >=90, moderate 75-89, high 60-74, with <60 hardcoded to
-    high) put nearly the school's entire passing cohort in one 15-point
-    "moderate" band: a learner averaging 87 and one averaging 79 both
-    read as moderate, telling the Principal nothing (observed live: 39 of
-    40 learners moderate, 1 low, 0 high — see CLAUDE.md's "Known
-    limitations"). These bands are still a single-feature (average_grade)
-    threshold — that limitation is NOT solved here, only calibrated so
-    the three levels correspond to something meaningful under THIS
-    school's grading, anchored to figures already used elsewhere in this
-    codebase (PerformanceAnalysisService::DEFAULT_TARGET = 75,
-    InTermStatusService::FAILING_THRESHOLD = 74) rather than percentiles
-    of any one section's snapshot, which would not generalize:
-
-    - LOW RISK      : 85 - 100 (DepEd "Very Satisfactory"/"Outstanding" —
-                       comfortably above the 75 passing mark)
-    - MODERATE RISK : 75 - 84.9 (DepEd "Fairly Satisfactory"/
-                       "Satisfactory" — passing, but close to the line)
-    - HIGH RISK     : 0 - 74.9 (below the DepEd passing mark — genuinely
-                       failing, not merely "not excellent")
-
-    High now covers the FULL 0-74.9 range directly in training data,
-    rather than a 60-74 band with a hardcoded `< 60` override — that
-    override existed because the old High band's training data (60-74)
-    left grades below 60 outside anything the model had seen; extending
-    the band itself removes the need for a bypass. See
-    CannotDeliverUndecidedInterventionTest for an unrelated task's tests —
-    this one's calibration check lives in test_classify.py's
-    TestRiskLevelDistribution.
-
-    Training data: 30 samples per class = 90 total.
-    Balanced dataset — equal samples per class prevents model bias.
-    """
-
-    # LOW RISK samples — grades from 85 to 100 (30 samples)
-    low_risk = [
-        [85.0], [85.5], [86.0], [86.5], [87.0],
-        [87.5], [88.0], [88.5], [89.0], [89.5],
-        [90.0], [91.0], [92.0], [93.0], [94.0],
-        [95.0], [96.0], [97.0], [98.0], [99.0],
-        [100.0],[85.3], [86.8], [88.3], [90.3],
-        [92.7], [94.5], [96.5], [98.5], [99.2],
-    ]
-
-    # MODERATE RISK samples — grades from 75 to 84.9 (30 samples)
-    moderate_risk = [
-        [75.0], [75.5], [76.0], [76.5], [77.0],
-        [77.5], [78.0], [78.5], [79.0], [79.5],
-        [80.0], [80.5], [81.0], [81.5], [82.0],
-        [82.5], [83.0], [83.5], [84.0], [84.5],
-        [84.9], [75.3], [76.8], [78.3], [79.8],
-        [80.3], [81.7], [82.9], [83.5], [84.7],
-    ]
-
-    # HIGH RISK samples — grades from 0 to 74.9 (30 samples), spread
-    # across the FULL failing range rather than only 60-74 (see the
-    # docstring above on why the old <60 hardcoded override is gone).
-    high_risk = [
-        [74.9], [73.0], [71.0], [69.0], [67.0],
-        [65.0], [63.0], [61.0], [59.0], [56.0],
-        [53.0], [50.0], [47.0], [44.0], [41.0],
-        [38.0], [35.0], [32.0], [29.0], [26.0],
-        [23.0], [20.0], [16.0], [12.0], [8.0],
-        [5.0], [3.0], [1.0], [0.5], [0.0],
-    ]
-
-    X_train = np.array(low_risk + moderate_risk + high_risk)
-
-    # Labels: 0 = low, 1 = moderate, 2 = high
-    y_train = np.array(
-        [0] * len(low_risk) +
-        [1] * len(moderate_risk) +
-        [2] * len(high_risk)
-    )
-
-    # Random Forest with 200 decision trees
-    # n_estimators=200: more trees = more votes = more accurate classification
-    # random_state=42: ensures reproducible results on every run
-    # max_depth=5: prevents overfitting by limiting tree depth
-    model = RandomForestClassifier(
-        n_estimators=200,
-        random_state=42,
-        max_depth=5,
-        min_samples_split=2,
-        min_samples_leaf=1,
-    )
-    model.fit(X_train, y_train)
-
-    # Cross-validation — evaluates model accuracy on unseen FOLDS of this
-    # same synthetic dataset (never on real student outcomes — see
-    # TRAINING DATA LIMITATION above). cv=5: splits data into 5 folds,
-    # tests on each fold once. cross_val_predict below reuses the exact
-    # same 5-fold split to produce the confusion matrix / per-class
-    # report from genuinely held-out-per-fold predictions, not
-    # trivially-perfect in-sample ones — see write_model_accuracy_report().
-    try:
-        class_names = ['low', 'moderate', 'high']
-        scores = cross_val_score(model, X_train, y_train, cv=5, scoring='accuracy')
-        cv_predictions = cross_val_predict(model, X_train, y_train, cv=5)
-
-        write_model_accuracy_report(
-            model=model,
-            scores=scores,
-            y_true=y_train,
-            y_pred=cv_predictions,
-            class_names=class_names,
-            class_counts={'Low risk': len(low_risk), 'Moderate risk': len(moderate_risk), 'High risk': len(high_risk)},
+    if not os.path.isfile(LEGACY_MODEL_PATH):
+        raise InferenceError(
+            'No active model has been promoted and the legacy prototype artifact '
+            '(analytics/model_cache.pkl) is missing. Restore an approved model artifact or promote a '
+            'candidate with `python analytics/model_registry.py promote <version>`. '
+            'Automatic training is disabled by design.',
+            code='no_model_available',
         )
-    except Exception:
-        pass  # Reporting failure is non-critical — it must never block classification.
 
-    return model
+    if not os.path.isfile(LEGACY_METADATA_PATH):
+        raise InferenceError(
+            'analytics/legacy/legacy_model.json is missing. The legacy model cannot be served without its '
+            'descriptor, because the descriptor is what declares its feature order and that it is synthetic.',
+            code='legacy_metadata_missing',
+        )
+
+    with open(LEGACY_METADATA_PATH, encoding='utf-8') as f:
+        metadata = json.load(f)
+
+    return joblib.load(LEGACY_MODEL_PATH), metadata
 
 
-def write_model_accuracy_report(model, scores, y_true, y_pred, class_names, class_counts):
+def load_model():
     """
-    Rewrites model_accuracy.txt so the caveat travels WITH the number —
-    see the "honest model evaluation" prompt. This file gets read,
-    cited, and screenshotted on its own; a reader who opens only this
-    file, with no other context, must not be able to come away thinking
-    100% means the model works on real students.
-
-    Order matters and is deliberate:
-      1. what the training data actually is (synthetic, hand-constructed)
-      2. what feature it uses (one of the seven Laravel sends)
-      3. the metrics (accuracy, per-fold, confusion matrix, per-class
-         precision/recall/F1, class distribution)
-      4. IMMEDIATELY after the metrics — not at the bottom under a
-         heading someone would skip — the plain-language reason a
-         perfect score here is expected arithmetic, not a finding
-      5. that it has never been validated against real outcomes
-      6. what real validation would actually require
-      7. WORK ORDER Part 6c — the trained model's own feature_importances_,
-         direct numeric evidence of point 2 in the model's own numbers
-         rather than only a comment. Single-feature training makes this
-         trivially [1.0]; that triviality IS the finding, not a bug in
-         this report.
+    Returns (estimator, metadata). Resolution order is documented at the
+    top of this file. Never trains anything.
     """
-    avg = round(scores.mean() * 100, 2)
-    cm = confusion_matrix(y_true, y_pred)
-    report = classification_report(y_true, y_pred, target_names=class_names, digits=4, zero_division=0)
+    try:
+        model, metadata = model_registry.load_active_model()
+    except FileNotFoundError as e:
+        raise InferenceError(str(e), code='registry_inconsistent')
 
-    log_path = os.path.join(os.path.dirname(__file__), 'model_accuracy.txt')
-    with open(log_path, 'w', encoding='utf-8') as f:
-        f.write("=" * 78 + "\n")
-        f.write("NAGGASICAN NHS DSS — RISK CLASSIFIER MODEL REPORT\n")
-        f.write(f"Generated: {datetime.now().isoformat(timespec='seconds')}\n")
-        f.write("=" * 78 + "\n\n")
+    if model is not None:
+        return model, metadata
 
-        f.write("1. TRAINING DATA\n")
-        f.write("-" * 78 + "\n")
-        f.write(f"SYNTHETIC data: {len(y_true)} hand-constructed samples, not real student\n")
-        f.write("records. Each sample's class was assigned by construction according to\n")
-        f.write("the DepEd grade thresholds below — the classes are perfectly separable\n")
-        f.write("by design, not discovered by the model.\n")
-        for label, count in class_counts.items():
-            f.write(f"  {label}: {count} samples\n")
-        f.write("\n")
-
-        f.write("2. FEATURES USED\n")
-        f.write("-" * 78 + "\n")
-        f.write("ONE feature: average_grade.\n")
-        f.write("Laravel sends SEVEN features per student (average_grade, ww_mean,\n")
-        f.write("pt_mean, exam_mean, weak_component_count, prev_term_average,\n")
-        f.write("trend_delta) — this model reads only the first. See the TRAINING DATA\n")
-        f.write("LIMITATION comment at the top of classify.py for why.\n\n")
-
-        f.write("3. METRICS (5-fold cross-validation on the synthetic training set)\n")
-        f.write("-" * 78 + "\n")
-        f.write(f"Cross-validation Accuracy: {avg}%\n")
-        f.write(f"Per-fold scores: {[round(float(s) * 100, 2) for s in scores]}\n\n")
-
-        f.write("Confusion matrix (rows = actual, columns = predicted; order low/moderate/high):\n")
-        header = "             " + "".join(f"{name:>12}" for name in class_names)
-        f.write(header + "\n")
-        for name, row in zip(class_names, cm):
-            f.write(f"{name:>12} " + "".join(f"{v:>12}" for v in row) + "\n")
-        f.write("\n")
-
-        f.write("Precision / recall / F1 per class:\n")
-        f.write(report + "\n")
-
-        f.write("4. WHAT THIS SCORE ACTUALLY MEANS\n")
-        f.write("-" * 78 + "\n")
-        f.write("A perfect or near-perfect score above is the EXPECTED ARITHMETIC RESULT\n")
-        f.write("of testing a single-feature model against hand-picked, perfectly\n")
-        f.write("separable training points (every value >=85 was labelled low, 75-84.9\n")
-        f.write("moderate, below 75 high, by construction) — it is NOT evidence that this\n")
-        f.write("model has learned anything predictive about real students, and it is\n")
-        f.write("NOT evidence of real-world predictive validity. A trivial single-\n")
-        f.write("threshold rule would score the same on this data.\n\n")
-
-        f.write("5. VALIDATION STATUS\n")
-        f.write("-" * 78 + "\n")
-        f.write("This model has NEVER been trained or validated against real student\n")
-        f.write("outcomes. Every number above describes performance on synthetic data\n")
-        f.write("only.\n\n")
-
-        f.write("6. WHAT REAL VALIDATION WOULD REQUIRE\n")
-        f.write("-" * 78 + "\n")
-        f.write("At least one full school year of real student grades with KNOWN\n")
-        f.write("end-of-year outcomes (e.g. did the student actually end up at risk /\n")
-        f.write("fail / need intervention), held out from training and evaluated on\n")
-        f.write("after the fact — see train_from_real_data() in classify.py, which\n")
-        f.write("this report's numbers do NOT come from and were not used to produce.\n\n")
-
-        f.write("7. FEATURE IMPORTANCE (this trained model)\n")
-        f.write("-" * 78 + "\n")
-        feature_names = ['average_grade']
-        for name, importance in zip(feature_names, model.feature_importances_):
-            f.write(f"  {name}: {importance:.4f} ({importance * 100:.1f}%)\n")
-        f.write("\n")
-        f.write("Reads as 100% on average_grade because average_grade is the ONLY\n")
-        f.write("feature this model was trained on — direct numeric confirmation of\n")
-        f.write("section 2, in the model's own numbers rather than only a comment.\n")
-        f.write("A healthy multi-feature model trained on real outcomes would instead\n")
-        f.write("show importance SPREAD across several of the seven features Laravel\n")
-        f.write("already sends (ww_mean, pt_mean, exam_mean, weak_component_count,\n")
-        f.write("prev_term_average, trend_delta) rather than concentrated in one\n")
-        f.write("column — a single feature still dominating after a real retrain\n")
-        f.write("would itself be a finding worth investigating, not an assumption to\n")
-        f.write("start from.\n")
+    return load_legacy_prototype()
 
 
-def classify_students(grades_data, model):
+def check_runtime_compatibility(metadata: dict) -> list:
     """
-    Classify each student's risk level based on their average grade.
+    Compares the versions a model was fitted under against the versions
+    unpickling it now. Returns a list of human-readable warnings; never
+    raises, because a minor version drift is usually harmless and refusing
+    to serve on it would take the DSS down for a cosmetic reason.
 
-    Args:
-        grades_data: list of dicts with at least { student_id, average_grade }.
-            Laravel now also sends ww_mean, pt_mean, exam_mean,
-            failing_subject_count, weak_component_count, prev_term_average,
-            trend_delta — intentionally unused here for now, see the
-            TRAINING DATA LIMITATION note at the top of this file.
-        model: trained RandomForestClassifier
-
-    Returns:
-        list of { student_id, average_grade, risk_level, confidence }
-
-    Confidence score = percentage of trees that agreed on the classification.
-    Example: 198 out of 200 trees said 'high' → confidence = 99%
+    A MAJOR version difference in scikit-learn is reported explicitly —
+    that is the case where a silently-degraded unpickle is plausible and
+    the operator needs to know rather than find out from wrong predictions.
     """
-    label_map = {0: 'low', 1: 'moderate', 2: 'high'}
-    results   = []
+    warnings = []
+    recorded = metadata.get('runtime_versions') or {}
+    current = model_registry.runtime_versions()
 
-    for student in grades_data:
-        student_id    = student['student_id']
-        average_grade = float(student['average_grade'])
+    for package in ('scikit-learn', 'numpy', 'joblib'):
+        was = str(recorded.get(package, 'unknown'))
+        now = str(current.get(package, 'unknown'))
+        if was in ('unknown', 'not installed', ''):
+            continue
+        if was == now:
+            continue
+        severity = 'MAJOR' if was.split('.')[0] != now.split('.')[0] else 'minor'
+        warnings.append(
+            f"{severity} version difference for {package}: model fitted under {was}, running {now}. "
+            f"A model unpickled under a different {package} major version may behave differently than it did when evaluated."
+        )
 
-        # Correctness and interface pass" TASK 3 — no more hardcoded `< 60`
-        # override: the High band's training data now spans the full
-        # 0-74.9 failing range (see train_model()), so the model itself
-        # already covers this instead of a bypass around it.
+    return warnings
 
-        # Run classification — model returns predicted class index
-        prediction = model.predict([[average_grade]])[0]
 
-        # predict_proba returns probability for each class [low, moderate, high]
-        # max() of these probabilities is the confidence score
-        probabilities = model.predict_proba([[average_grade]])[0]
+def verify_schema_compatibility(metadata: dict) -> None:
+    """
+    Refuses to serve a model whose declared feature-schema major version
+    does not match `schema.FEATURE_SCHEMA_VERSION`.
+
+    The legacy prototype declares `0.0.0-legacy` and is exempt: it predates
+    the canonical schema, reads a single always-present column, and is
+    served through the explicit legacy path with a documented feature list
+    of its own. Exempting it is not a loophole in the check — it is the
+    check acknowledging that the prototype was never under this contract.
+    """
+    declared = str(metadata.get('feature_schema_version', ''))
+    if declared.endswith('-legacy'):
+        return
+
+    if not declared:
+        raise InferenceError(
+            'The active model declares no feature_schema_version. A model with no schema version cannot be '
+            'checked for compatibility and will not be served.',
+            code='schema_version_missing',
+        )
+
+    if schema_module.major_version(declared) != schema_module.major_version(schema_module.FEATURE_SCHEMA_VERSION):
+        raise InferenceError(
+            f"Feature-schema mismatch: the active model was fitted against schema {declared}, this runtime is "
+            f"{schema_module.FEATURE_SCHEMA_VERSION}. Retrain a candidate against the current schema and promote it; "
+            f"serving a model across an incompatible schema change would feed features into the wrong columns.",
+            code='schema_incompatible',
+        )
+
+
+def verify_prediction_domain(metadata: dict) -> None:
+    """
+    The production contract (App\\Models\\RiskResult, every Principal
+    screen) speaks three ordered risk levels: low / moderate / high. The
+    candidate training target is BINARY: intervention / no_intervention.
+
+    These are different questions. "Did this learner receive a documented
+    intervention" is not a severity scale, and there is no defensible
+    automatic translation from one to the other — mapping intervention ->
+    high and no_intervention -> low would invent a severity the model never
+    predicted and erase the moderate level entirely.
+
+    So: a binary-target model is REFUSED here rather than quietly mapped.
+    Making it serveable is a deliberate design decision (an explicit,
+    documented compatibility layer, or changing what the UI shows) taken
+    with the school, not a mapping added to make a test pass.
+    """
+    domain = metadata.get('prediction_domain', 'risk_level')
+    if domain == 'risk_level':
+        return
+
+    raise InferenceError(
+        f"The active model predicts '{domain}' "
+        f"({', '.join(metadata.get('target_classes') or [])}), but this inference endpoint is contracted to return "
+        f"a three-level risk_level (low/moderate/high) that the DSS stores and displays. These are different "
+        f"questions and there is no automatic mapping between them. Keep this model out of production until an "
+        f"explicit compatibility design is agreed — see analytics/README.md, 'Rule-based DSS layer'.",
+        code='prediction_domain_mismatch',
+    )
+
+
+# ---------------------------------------------------------------------------
+# Feature preparation
+# ---------------------------------------------------------------------------
+
+def resolve_feature_aliases(row: dict) -> dict:
+    """
+    Fills a canonical feature name from its historical Laravel alias when
+    the canonical key is absent, so a payload from either side of the
+    rename works. Never overwrites a canonical value that is present.
+
+    This is a compatibility shim with one job and a known end: once Laravel
+    sends only canonical names everywhere, FEATURE_ALIASES empties and this
+    becomes a no-op. It exists so the rename could ship without a
+    lockstep deploy, not as a permanent second vocabulary.
+    """
+    resolved = dict(row)
+    for canonical, aliases in FEATURE_ALIASES.items():
+        if resolved.get(canonical) is not None:
+            continue
+        for alias in aliases:
+            if alias in resolved and resolved[alias] is not None:
+                resolved[canonical] = resolved[alias]
+                break
+    return resolved
+
+
+def prepare_matrix(payload: list, feature_names: list):
+    """
+    Builds the feature matrix in the model's own declared order.
+
+    Raises InferenceError naming the offending row and column rather than
+    letting a SchemaError escape — an adviser pressing Submit Report should
+    produce a log line an admin can act on, not a stack trace.
+    """
+    import numpy as np
+
+    matrix = []
+    for index, row in enumerate(payload):
+        if not isinstance(row, dict):
+            raise InferenceError(f'row {index} is not an object', code='malformed_payload')
+        if 'student_id' not in row:
+            raise InferenceError(f'row {index} has no student_id', code='malformed_payload')
+
+        try:
+            matrix.append(schema_module.build_feature_vector(resolve_feature_aliases(row), feature_names))
+        except SchemaError as e:
+            raise InferenceError(f'row {index} (student_id {row.get("student_id")}): {e}', code='malformed_payload')
+
+    return np.array(matrix, dtype=float)
+
+
+# ---------------------------------------------------------------------------
+# Prediction
+# ---------------------------------------------------------------------------
+
+def classify_students(payload: list, model, metadata: dict) -> list:
+    """
+    Runs the model over `payload` and returns one structured result per
+    input row, in input order.
+
+    `confidence` is the share of the forest that voted for the predicted
+    class, expressed 0-100 — a measure of the model's internal agreement,
+    not of how likely the prediction is to be correct about a learner.
+
+    `student_id` is a correlation identifier only. It is carried through
+    from input to output and is NEVER part of the feature matrix: it never
+    reaches `prepare_matrix`, whose columns come solely from
+    `feature_names`.
+    """
+    if not payload:
+        return []
+
+    feature_names = list(metadata.get('feature_names') or [])
+    if not feature_names:
+        raise InferenceError(
+            'The loaded model declares no feature_names. Feature ORDER is positional and load-bearing; '
+            'a model that does not record its own column order cannot be served safely.',
+            code='feature_names_missing',
+        )
+
+    matrix = prepare_matrix(payload, feature_names)
+
+    expected = getattr(model, 'n_features_in_', None)
+    if expected is not None and expected != len(feature_names):
+        raise InferenceError(
+            f'Model/metadata disagreement: the estimator was fitted on {expected} feature(s) but its metadata '
+            f'lists {len(feature_names)} ({", ".join(feature_names)}). Refusing to predict.',
+            code='feature_count_mismatch',
+        )
+
+    classes = list(metadata.get('target_classes') or schema_module.RISK_LEVELS)
+    predictions = model.predict(matrix)
+    probabilities = model.predict_proba(matrix)
+
+    version = metadata.get('version', 'unknown')
+    schema_version = metadata.get('feature_schema_version', 'unknown')
+    dataset_type = metadata.get('dataset_type', 'unknown')
+
+    results = []
+    for row, prediction, proba in zip(payload, predictions, probabilities):
+        index = int(prediction)
+        if not 0 <= index < len(classes):
+            raise InferenceError(
+                f'Model predicted class index {index}, which its metadata does not name '
+                f'(target_classes = {classes}).',
+                code='unknown_class_index',
+            )
+
+        canonical_average = resolve_feature_aliases(row).get('current_average')
 
         results.append({
-            'student_id':    student_id,
-            'average_grade': average_grade,
-            'risk_level':    label_map[prediction],
-            'confidence':    round(float(max(probabilities)) * 100, 2),
+            'student_id': row['student_id'],
+            # Echoed back because Laravel persists it on the RiskResult row
+            # alongside the prediction. Kept under its historical key so the
+            # stored contract does not move; `current_average` is its
+            # canonical name in schema.py.
+            'average_grade': None if canonical_average is None else float(canonical_average),
+            'risk_level': classes[index],
+            'prediction': classes[index],
+            'confidence': round(float(max(proba)) * 100, 2),
+            'model_version': version,
+            'feature_schema_version': schema_version,
+            'dataset_type': dataset_type,
         })
 
     return results
 
 
-def train_from_real_data(csv_path, test_size=0.25, random_state=42):
-    """
-    NOT called anywhere in this file, NOT wired into get_model(), and does
-    NOT touch model_cache.pkl or model_accuracy.txt — see the "honest
-    model evaluation" prompt's Task 4. This exists so that retraining on
-    the full feature set, once real outcome data exists, is a
-    configuration change (point this at a CSV) rather than a rewrite.
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
-    Expected CSV columns (header row required), one row per student per
-    term:
-        average_grade, ww_mean, pt_mean, exam_mean, weak_component_count,
-        prev_term_average, trend_delta, outcome
-    `outcome` is the KNOWN GROUND-TRUTH label — what actually happened to
-    that student (e.g. their real end-of-year risk status) — one of
-    'low', 'moderate', 'high'. Not a prediction, not a guess. Every row
-    must have all seven numeric features populated; this function does
-    not handle missing values.
-
-    Unlike the synthetic model above (which reads only average_grade),
-    this trains on the FULL seven-feature set Laravel already sends —
-    the retrain the TRAINING DATA LIMITATION comment describes as
-    premature until real data like this exists. Splits the CSV into a
-    training portion and a held-out test portion (never seen during
-    training) via train_test_split, trains only on the training portion,
-    and reports Task 1's metrics computed against the held-out portion —
-    genuine out-of-sample performance, not cross-validation folds of the
-    same synthetic data.
-
-    Returns (model, metrics_dict). Prints the held-out metrics to stdout;
-    does not write any file. Whether/how to promote the returned model to
-    production (e.g. saving it over model_cache.pkl) is a decision for
-    whoever calls this with real data — deliberately not automated here.
-    """
-    import csv as csv_module
-
-    feature_columns = [
-        'average_grade', 'ww_mean', 'pt_mean', 'exam_mean',
-        'weak_component_count', 'prev_term_average', 'trend_delta',
-    ]
-    label_to_index = {'low': 0, 'moderate': 1, 'high': 2}
-    class_names = ['low', 'moderate', 'high']
-
-    X, y = [], []
-    with open(csv_path, newline='') as f:
-        for row in csv_module.DictReader(f):
-            X.append([float(row[col]) for col in feature_columns])
-            y.append(label_to_index[row['outcome'].strip().lower()])
-
-    X = np.array(X)
-    y = np.array(y)
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=random_state, stratify=y
-    )
-
-    model = RandomForestClassifier(
-        n_estimators=200,
-        random_state=random_state,
-        max_depth=5,
-        min_samples_split=2,
-        min_samples_leaf=1,
-    )
-    model.fit(X_train, y_train)
-
-    y_pred = model.predict(X_test)
-    metrics = {
-        'train_samples':         len(y_train),
-        'test_samples':          len(y_test),
-        'held_out_test_accuracy': round(float((y_pred == y_test).mean()) * 100, 2),
-        'confusion_matrix':      confusion_matrix(y_test, y_pred).tolist(),
-        'classification_report': classification_report(y_test, y_pred, target_names=class_names, digits=4, zero_division=0),
-    }
-
-    print('=== train_from_real_data: held-out test metrics (real data) ===')
-    print(f"Train samples: {metrics['train_samples']}, held-out test samples: {metrics['test_samples']}")
-    print(f"Held-out test accuracy: {metrics['held_out_test_accuracy']}%")
-    print('Confusion matrix (rows = actual, columns = predicted; order low/moderate/high):')
-    print(np.array(metrics['confusion_matrix']))
-    print(metrics['classification_report'])
-
-    return model, metrics
-
-
-def main():
-    """
-    Entry point — called by Laravel via exec().
-
-    Arguments:
-        sys.argv[1] = path to input JSON file (grades data from Laravel)
-        sys.argv[2] = path to output JSON file (results for Laravel to read)
-
-    Flow:
-        Laravel writes grades → Python reads → classifies → Python writes results → Laravel reads
-
-    --train-from-real-data <csv_path> is a SEPARATE, opt-in path (Task 4
-    of the "honest model evaluation" prompt) — when absent, everything
-    below this check behaves exactly as it always has.
-    """
-    parser = argparse.ArgumentParser(add_help=True, description='Naggasican NHS DSS risk classifier')
-    parser.add_argument('input_file', nargs='?', help='Path to input JSON file (grades data from Laravel)')
-    parser.add_argument('output_file', nargs='?', help='Path to output JSON file (results for Laravel to read)')
-    parser.add_argument(
-        '--train-from-real-data', metavar='CSV_PATH', dest='train_from_real_data',
-        help='Train and evaluate against real student outcome data (see train_from_real_data() docstring for the expected CSV columns). '
-             'Does not affect the default classification path and does not touch model_cache.pkl.'
-    )
-    args = parser.parse_args()
-
-    if args.train_from_real_data:
-        train_from_real_data(args.train_from_real_data)
-        return
-
-    if not args.input_file or not args.output_file:
-        print('Usage: classify.py <input_file> <output_file>')
-        return
-
-    input_file  = args.input_file
-    output_file = args.output_file
-
-    # Read grades data from Laravel
+def _write_json(path: str, data) -> bool:
     try:
-        with open(input_file, 'r') as f:
-            grades_data = json.load(f)
-    except Exception as e:
-        print(f'Error reading input file: {e}')
-        return
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f)
+        return True
+    except OSError as e:
+        print(f'Error writing output file: {e}', file=sys.stderr)
+        return False
 
-    # Empty data — write empty results and exit
-    if not grades_data:
-        with open(output_file, 'w') as f:
-            json.dump([], f)
-        return
 
-    # Load or train the model, then classify
-    model   = get_model()
-    results = classify_students(grades_data, model)
+def _fail(output_file: str | None, message: str, code: str) -> int:
+    """Writes a structured error (never a traceback) and returns the exit code."""
+    print(f'{code}: {message}', file=sys.stderr)
+    if output_file:
+        _write_json(output_file, {'error': {'code': code, 'message': message}})
+    return 1
 
-    # Write results for Laravel to read
+
+def main(argv=None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+
+    if len(argv) != 2:
+        print('Usage: classify.py <input_file> <output_file>', file=sys.stderr)
+        print('This script performs INFERENCE ONLY. To train, use analytics/train_model.py.', file=sys.stderr)
+        return 2
+
+    input_file, output_file = argv
+
     try:
-        with open(output_file, 'w') as f:
-            json.dump(results, f)
-    except Exception as e:
-        print(f'Error writing output file: {e}')
+        with open(input_file, encoding='utf-8') as f:
+            payload = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        return _fail(output_file, f'could not read the input payload: {e}', 'bad_input_file')
+
+    if not isinstance(payload, list):
+        return _fail(output_file, 'the input payload must be a JSON list of learner feature objects', 'malformed_payload')
+
+    if not payload:
+        return 0 if _write_json(output_file, []) else 1
+
+    try:
+        model, metadata = load_model()
+        verify_schema_compatibility(metadata)
+        verify_prediction_domain(metadata)
+
+        for warning in check_runtime_compatibility(metadata):
+            print(f'WARNING: {warning}', file=sys.stderr)
+
+        results = classify_students(payload, model, metadata)
+    except InferenceError as e:
+        return _fail(output_file, str(e), e.code)
+    except Exception as e:  # noqa: BLE001 — deliberately broad; see below
+        # An unexpected failure must still not leak a traceback into a file
+        # Laravel reads and an adviser could see. The type and message go to
+        # stderr (captured in the Laravel log), the output file gets a
+        # structured error.
+        return _fail(output_file, f'unexpected {type(e).__name__} during classification', 'unexpected_error')
+
+    return 0 if _write_json(output_file, results) else 1
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

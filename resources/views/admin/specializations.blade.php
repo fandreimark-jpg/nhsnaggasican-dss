@@ -4,8 +4,8 @@
 @section('subtitle', 'Manage SHS specializations per track')
 
 @section('content')
+@include('partials.validation-errors')
 
-@include('partials.import-result')
 
 <div class="card mb-0">
     <div class="flex items-center justify-between px-5 py-4 border-b border-line">
@@ -14,10 +14,6 @@
             <p class="text-xs text-muted"><x-count-label :count="$specializations->count()" noun="specialization" total /></p>
         </div>
         <div class="flex items-center gap-3">
-            <button type="button" onclick="openImportSpecializationsModal()"
-                class="bg-white border border-brand-700 text-brand-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-50 whitespace-nowrap">
-                <i class="bi bi-upload"></i> Import Specializations
-            </button>
             <button type="button" onclick="openAddSpecModal()"
                 class="btn btn-primary whitespace-nowrap">
                 <i class="bi bi-plus-lg"></i> Add Specialization
@@ -70,7 +66,7 @@
             <tr>
                 <td colspan="4">
                     <x-empty-state message="No specializations yet." icon="bi-collection"
-                        hint='Specializations belong to a track — add a track first, then use "Add Specialization" or "Import Specializations" above.' />
+                        hint='Specializations belong to a track — add a track first, then use "Add Specialization" above.' />
                 </td>
             </tr>
             @endforelse
@@ -131,50 +127,5 @@
 </div>
 {{-- Modal logic now lives in resources/js/modal.js. --}}
 
-{{-- IMPORT SPECIALIZATIONS MODAL --}}
-<div id="importSpecializationsModal"
-     class="{{ $errors->import->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box {{ $errors->import->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200">
-
-        <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-ink">Import Specializations</h3>
-            <button type="button" onclick="closeImportSpecializationsModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
-        </div>
-
-        @if($errors->import->any())
-            <div class="alert alert-danger mb-4">
-                <ul class="list-disc list-inside">
-                    @foreach($errors->import->all() as $error)
-                        <li>{{ $error }}</li>
-                    @endforeach
-                </ul>
-            </div>
-        @endif
-
-        <p class="text-sm text-muted mb-4">
-            Upload an Excel (.xlsx) or CSV file. Required columns:
-            <strong>name, code, track</strong>. Track is matched by name
-            or code (e.g. "Academic Track" or "ACAD") and must already
-            exist. Code must be unique across all specializations; name
-            must be unique within its track. Code is auto-uppercased.
-        </p>
-
-        <form method="POST" action="{{ route('admin.specializations.import') }}"
-              enctype="multipart/form-data" class="space-y-4" data-loading="Importing specializations...">
-            @csrf
-            <input type="file" name="file" accept=".xlsx,.xls,.csv" required
-                   class="w-full border rounded-lg px-3 py-2 text-sm">
-
-            <div class="flex justify-end gap-3 pt-2">
-                <button type="button" onclick="closeImportSpecializationsModal()"
-                        class="px-4 py-2 text-sm text-muted">Cancel</button>
-                <button type="submit"
-                        class="btn btn-primary">
-                    Upload & Import
-                </button>
-            </div>
-        </form>
-    </div>
-</div>
 
 @endsection

@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\Grade;
 use App\Models\RiskResult;
 use App\Models\Section;
-use App\Models\Student;
 use App\Models\Subject;
 use Illuminate\Support\Facades\DB;
 
@@ -36,14 +35,21 @@ class SubjectAnalysisService
      *        this school year combined.
      * @return array<int, array{subject: Subject, components: array, weakest_component: ?string, student_count: int, failure_rate: ?float, failing_count: int, graded_count: int, at_risk_count: int}>
      */
-    public function getSubjectSummaries(?string $schoolYear = null, ?int $sectionId = null, ?int $term = null): array
+    public function getSubjectSummaries(?string $schoolYear = null, ?int $sectionId = null, ?int $term = null, ?int $gradeLevel = null): array
     {
         $schoolYear ??= Section::activeSchoolYear();
+
+        // "Student identity and term-specific subject offerings" pass, STEP
+        // J — the scope is School Year + Academic Term + Grade Level +
+        // Section. A grade-level filter is a set of sections; both it and
+        // a single section become one whereIn on section_id so every
+        // query below scopes identically.
+        $sectionIds = $this->scopedSectionIds($schoolYear, $sectionId, $gradeLevel);
 
         $rows = DB::table('assessment_scores')
             ->join('assessments', 'assessments.id', '=', 'assessment_scores.assessment_id')
             ->where('assessments.school_year', $schoolYear)
-            ->when($sectionId, fn($q) => $q->where('assessments.section_id', $sectionId))
+            ->when($sectionIds !== null, fn($q) => $q->whereIn('assessments.section_id', $sectionIds))
             ->when($term, fn($q) => $q->where('assessments.grading_period', $term))
             ->select(
                 'assessments.subject_id',
@@ -65,8 +71,8 @@ class SubjectAnalysisService
         // bail out just because $rows is empty. Only the component-average
         // half of the page is empty in that case.
         $subjectIdsWithData = $rows->pluck('subject_id')
-            ->merge($this->subjectIdsWithGrades($schoolYear, $sectionId, $term))
-            ->merge($this->subjectIdsAtRisk($schoolYear, $sectionId, $term))
+            ->merge($this->subjectIdsWithGrades($schoolYear, $sectionIds, $term))
+            ->merge($this->subjectIdsAtRisk($schoolYear, $sectionIds, $term))
             ->unique();
 
         if ($subjectIdsWithData->isEmpty()) {
@@ -74,9 +80,9 @@ class SubjectAnalysisService
         }
 
         $bySubject = $rows->groupBy('subject_id');
-        $belowTargetCounts = $this->getBelowTargetCounts($schoolYear, $sectionId, $term);
-        $failureStats = $this->getFailureStats($schoolYear, $sectionId, $term);
-        $atRiskCounts = $this->getAtRiskCountsBySubject($schoolYear, $sectionId, $term);
+        $belowTargetCounts = $this->getBelowTargetCounts($schoolYear, $sectionIds, $term);
+        $failureStats = $this->getFailureStats($schoolYear, $sectionIds, $term);
+        $atRiskCounts = $this->getAtRiskCountsBySubject($schoolYear, $sectionIds, $term);
 
         return Subject::whereIn('id', $subjectIdsWithData)
             ->orderBy('name')
@@ -132,20 +138,70 @@ class SubjectAnalysisService
             ->all();
     }
 
+    /**
+     * Subjects OFFERED in the selected scope that have no evidence, grades,
+     * or risk results yet — listed so the Principal can tell "offered but
+     * nothing recorded" apart from "not offered this term". Only
+     * answerable for one section and one term (an offering is per section
+     * per term); null otherwise.
+     *
+     * @return ?\Illuminate\Support\Collection<int, Subject>
+     */
+    public function offeredWithoutData(string $schoolYear, ?int $sectionId, ?int $term, array $summaries): ?\Illuminate\Support\Collection
+    {
+        if (!$sectionId || !$term) {
+            return null;
+        }
+
+        $section = Section::where('id', $sectionId)->where('school_year', $schoolYear)->first();
+        if (!$section) {
+            return null;
+        }
+
+        $withData = collect($summaries)->map(fn($row) => $row['subject']->id);
+
+        return Subject::forSection($section, $term)
+            ->whereNotIn('id', $withData)
+            ->orderBy('type')->orderBy('name')
+            ->get();
+    }
+
+    /**
+     * The section ids the scope covers: one section, every section of a
+     * grade level in the year, or null for "every section". An explicit
+     * section that is not in the year (or grade level) yields an empty
+     * set, never a silent fall-back to the whole school.
+     *
+     * @return ?array<int, int>
+     */
+    private function scopedSectionIds(string $schoolYear, ?int $sectionId, ?int $gradeLevel): ?array
+    {
+        if (!$sectionId && !$gradeLevel) {
+            return null;
+        }
+
+        return Section::where('school_year', $schoolYear)
+            ->when($gradeLevel, fn($q) => $q->where('grade_level', $gradeLevel))
+            ->when($sectionId, fn($q) => $q->where('id', $sectionId))
+            ->pluck('id')
+            ->map(fn($id) => (int) $id)
+            ->all();
+    }
+
     /** Subject ids with at least one Grade row this scope — so a subject with grades but zero assessment_scores still appears. */
-    private function subjectIdsWithGrades(string $schoolYear, ?int $sectionId, ?int $term): \Illuminate\Support\Collection
+    private function subjectIdsWithGrades(string $schoolYear, ?array $sectionIds, ?int $term): \Illuminate\Support\Collection
     {
         return Grade::where('school_year', $schoolYear)
-            ->when($sectionId, fn($q) => $q->where('section_id', $sectionId))
+            ->when($sectionIds !== null, fn($q) => $q->whereIn('section_id', $sectionIds))
             ->when($term, fn($q) => $q->where('grading_period', $term))
             ->distinct()
             ->pluck('subject_id');
     }
 
     /** Subject ids that are some student's weakest-subject this scope. */
-    private function subjectIdsAtRisk(string $schoolYear, ?int $sectionId, ?int $term): \Illuminate\Support\Collection
+    private function subjectIdsAtRisk(string $schoolYear, ?array $sectionIds, ?int $term): \Illuminate\Support\Collection
     {
-        return $this->latestRiskResultsQuery($schoolYear, $sectionId, $term)
+        return $this->latestRiskResultsQuery($schoolYear, $sectionIds, $term)
             ->whereNotNull('weakest_subject_id')
             ->pluck('weakest_subject_id');
     }
@@ -153,10 +209,10 @@ class SubjectAnalysisService
     /**
      * @return array<int, array{graded_count: int, failing_count: int}>
      */
-    private function getFailureStats(string $schoolYear, ?int $sectionId, ?int $term): array
+    private function getFailureStats(string $schoolYear, ?array $sectionIds, ?int $term): array
     {
         $graded = Grade::where('school_year', $schoolYear)
-            ->when($sectionId, fn($q) => $q->where('section_id', $sectionId))
+            ->when($sectionIds !== null, fn($q) => $q->whereIn('section_id', $sectionIds))
             ->when($term, fn($q) => $q->where('grading_period', $term))
             ->where('is_verified', true)
             ->where('is_provisional', false)
@@ -166,7 +222,7 @@ class SubjectAnalysisService
             ->pluck('graded_count', 'subject_id');
 
         $failing = Grade::where('school_year', $schoolYear)
-            ->when($sectionId, fn($q) => $q->where('section_id', $sectionId))
+            ->when($sectionIds !== null, fn($q) => $q->whereIn('section_id', $sectionIds))
             ->when($term, fn($q) => $q->where('grading_period', $term))
             ->failing()
             ->select('subject_id', DB::raw('COUNT(*) as failing_count'))
@@ -182,9 +238,9 @@ class SubjectAnalysisService
     }
 
     /** @return array<int, int> [subject_id => count of students at moderate/high risk with this subject weakest] */
-    private function getAtRiskCountsBySubject(string $schoolYear, ?int $sectionId, ?int $term): array
+    private function getAtRiskCountsBySubject(string $schoolYear, ?array $sectionIds, ?int $term): array
     {
-        return $this->latestRiskResultsQuery($schoolYear, $sectionId, $term)
+        return $this->latestRiskResultsQuery($schoolYear, $sectionIds, $term)
             ->whereNotNull('weakest_subject_id')
             ->whereIn('risk_level', ['moderate', 'high'])
             ->select('weakest_subject_id', DB::raw('COUNT(*) as at_risk_count'))
@@ -201,10 +257,13 @@ class SubjectAnalysisService
      * counts read from the same underlying rows, not two independent
      * queries that could silently disagree. $term filters by
      * grading_period directly (a RiskResult IS scoped to one term); a
-     * section filter joins through students, since risk_results itself
-     * has no section_id.
+     * section filter reads risk_results.section_id — the section the
+     * learner was in when the result was generated ("Multi-school-year
+     * academic history", PART 11) — never students.section_id, which is
+     * only the learner's CURRENT placement and would mis-scope a
+     * historical year after promotion.
      */
-    private function latestRiskResultsQuery(string $schoolYear, ?int $sectionId, ?int $term)
+    private function latestRiskResultsQuery(string $schoolYear, ?array $sectionIds, ?int $term)
     {
         $latestIds = RiskResult::where('school_year', $schoolYear)
             ->when($term, fn($q) => $q->where('grading_period', $term))
@@ -213,9 +272,7 @@ class SubjectAnalysisService
             ->pluck('id');
 
         return RiskResult::whereIn('id', $latestIds)
-            ->when($sectionId, function ($q) use ($sectionId) {
-                $q->whereIn('student_id', Student::where('section_id', $sectionId)->pluck('id'));
-            });
+            ->when($sectionIds !== null, fn($q) => $q->whereIn('section_id', $sectionIds));
     }
 
     /**
@@ -227,12 +284,12 @@ class SubjectAnalysisService
      *
      * @return array<int, array<string, int>> [subject_id => [component => count below target]]
      */
-    private function getBelowTargetCounts(string $schoolYear, ?int $sectionId = null, ?int $term = null): array
+    private function getBelowTargetCounts(string $schoolYear, ?array $sectionIds = null, ?int $term = null): array
     {
         $perStudentTotals = DB::table('assessment_scores')
             ->join('assessments', 'assessments.id', '=', 'assessment_scores.assessment_id')
             ->where('assessments.school_year', $schoolYear)
-            ->when($sectionId, fn($q) => $q->where('assessments.section_id', $sectionId))
+            ->when($sectionIds !== null, fn($q) => $q->whereIn('assessments.section_id', $sectionIds))
             ->when($term, fn($q) => $q->where('assessments.grading_period', $term))
             ->select(
                 'assessments.subject_id',

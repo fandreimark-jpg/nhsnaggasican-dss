@@ -38,7 +38,10 @@ class GradeEncodingScopeTest extends TestCase
             ],
         ]);
 
-        $response->assertSessionHas('success');
+        // Final pre-demo audit (2026-09-20): still refused (nothing written),
+        // but the adviser is TOLD so instead of "saved successfully".
+        $response->assertSessionMissing('success');
+        $response->assertSessionHas('error', fn($m) => str_contains($m, 'Saved 0 grade(s)') && str_contains($m, '1 row(s) were not saved'));
         $this->assertDatabaseMissing('grades', [
             'student_id' => $student->id,
             'subject_id' => $foreignSubject->id,

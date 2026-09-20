@@ -120,7 +120,6 @@
                 <th scope="col">Last Name</th>
                 <th scope="col">First Name</th>
                 <th scope="col">Middle Name</th>
-                <th scope="col">Birthdate</th>
                 <th scope="col">Gender</th>
                 <th scope="col">Section <span class="font-normal text-gray-400">(current)</span></th>
                 <th scope="col">Enrollment History</th>
@@ -134,7 +133,6 @@
                 <td class="font-medium text-ink">{{ $student->last_name }}</td>
                 <td>{{ $student->first_name }}</td>
                 <td class="text-gray-500">{{ $student->middle_name ?? '—' }}</td>
-                <td class="capitalize">{{ $student->formatted_birthdate }}</td>
                 <td class="capitalize">{{ $student->gender }}</td>
                 <td>
                     {{ $student->section->name ?? '—' }}
@@ -348,12 +346,6 @@
                         <option value="female">Female</option>
                     </select>
                 </div>
-                <div>
-                    <label class="form-label">Birthdate</label>
-                    <input type="date" name="birthdate" id="ps_birthdate"
-                           value="{{ old('birthdate') }}"
-                           class="form-input">
-                </div>
             </div>
 
             <div>
@@ -425,7 +417,7 @@
                 <p class="font-medium text-ink">
                     <i class="bi bi-upload text-brand-700"></i> I already have a CSV
                 </p>
-                <p class="text-xs text-gray-500 mt-1.5">Import a roster file directly — lrn, last_name, first_name, middle_name, gender, birthdate.</p>
+                <p class="text-xs text-gray-500 mt-1.5">Import a roster file directly — lrn, last_name, first_name, middle_name, gender.</p>
             </button>
 
             <button type="button" onclick="closeAddStudentsChooserModal(); openAddStudentModal();"
@@ -563,13 +555,6 @@
                         <option value="female" {{ old('gender') == 'female' ? 'selected' : '' }}>Female</option>
                     </select>
                 </div>
-                <div>
-                    <label class="form-label">Birthdate</label>
-                    <input type="date" name="birthdate"
-                           max="{{ date('Y-m-d') }}"
-                           value="{{ old('birthdate') }}"
-                           class="form-input">
-                </div>
             </div>
 
             <div>
@@ -619,7 +604,7 @@
 
         <p class="text-sm text-muted mb-4">
             Upload an Excel (.xlsx) or CSV file. Required columns:
-            <strong>lrn, last_name, first_name, middle_name, gender, birthdate</strong>.
+            <strong>lrn, last_name, first_name, middle_name, gender</strong>.
             All rows are imported into the section selected below.
         </p>
 
@@ -687,7 +672,7 @@
         <p class="text-xs text-muted mb-4">
             Name split: everything before the comma is the last name; after it, the last word becomes the middle
             name and the rest becomes the first name. Gender comes from which block (male/female) the row is in.
-            Birthdate is always left blank — it isn't in the E-Class Record. Review the CSV before importing it.
+            Review the CSV before importing it.
         </p>
 
         <form method="POST" action="{{ route('admin.students.extract-roster') }}"

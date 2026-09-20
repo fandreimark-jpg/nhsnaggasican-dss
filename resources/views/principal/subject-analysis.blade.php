@@ -13,12 +13,21 @@
 @endphp
 
 {{-- Unified filter toolbar — School Year / Section / Term, one card. --}}
-<x-ui.filter-bar id="subjectAnalysisFilters" :clear="route('principal.subject-analysis', ['school_year' => $schoolYear])" :show-clear="(bool) ($selectedSection || $selectedTerm)">
+<x-ui.filter-bar id="subjectAnalysisFilters" :clear="route('principal.subject-analysis', ['school_year' => $schoolYear])" :show-clear="(bool) ($selectedSection || $selectedTerm || ($selectedGradeLevel ?? null))">
     <div class="filter-field">
         <label class="form-label" for="saSchoolYear">School Year</label>
         <select id="saSchoolYear" name="school_year" onchange="this.form.submit()" class="form-select-sm">
             @foreach($schoolYears as $sy)
                 <option value="{{ $sy }}" {{ $schoolYear === $sy ? 'selected' : '' }}>{{ $sy }}{{ !$isHistoricalYear && $sy === $schoolYear ? ' (active)' : '' }}</option>
+            @endforeach
+        </select>
+    </div>
+    <div class="filter-field">
+        <label class="form-label" for="saGradeLevel">Grade Level</label>
+        <select id="saGradeLevel" name="grade_level" onchange="this.form.submit()" class="form-select-sm">
+            <option value="">All grade levels</option>
+            @foreach($gradeLevels ?? [] as $gl)
+                <option value="{{ $gl }}" {{ (string) ($selectedGradeLevel ?? '') === (string) $gl ? 'selected' : '' }}>Grade {{ $gl }}</option>
             @endforeach
         </select>
     </div>
@@ -45,7 +54,7 @@
         </select>
     </div>
     <x-slot:trailing>
-        <span class="pill"><span class="pill-label">Viewing</span> SY {{ $schoolYear }} · {{ $selectedTerm ? 'Term ' . $selectedTerm : 'All terms' }}</span>
+        <span class="pill"><span class="pill-label">Viewing</span> SY {{ $schoolYear }}{{ ($selectedGradeLevel ?? null) ? ' · Grade ' . $selectedGradeLevel : '' }} · {{ $selectedTerm ? 'Term ' . $selectedTerm : 'All terms' }}</span>
         @if($isHistoricalYear)
             <x-ui.status-badge tone="gray" icon="bi-archive" label="Historical Record" />
         @endif
@@ -139,6 +148,22 @@
         </tbody>
     </table>
     </div>
+
+    {{-- "Student identity and term-specific subject offerings" pass, STEP J
+         — offered in this section/term but with nothing recorded yet. Only
+         shown when one section AND one term are selected, because an
+         offering is per section per term. A subject offered in Term 1
+         only is simply absent under Term 2 — not listed here as "missing". --}}
+    @if(($offeredWithoutData ?? null) !== null)
+        <div class="px-5 py-3 border-t border-line text-xs text-muted">
+            @if($offeredWithoutData->isEmpty())
+                <i class="bi bi-check2-circle"></i> Every subject assigned to this section for Term {{ $selectedTerm }} has evidence, grades, or risk results above.
+            @else
+                <i class="bi bi-journal"></i> Assigned to this section for Term {{ $selectedTerm }} but with nothing recorded yet:
+                <strong>{{ $offeredWithoutData->pluck('name')->implode(', ') }}</strong>.
+            @endif
+        </div>
+    @endif
 </x-panel>
 
 @endsection

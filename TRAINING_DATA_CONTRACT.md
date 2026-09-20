@@ -6,6 +6,20 @@ implemented in `analytics/schema.py` and enforced by
 `analytics/dataset_validator.py` — this document explains the *why*; those
 two files are the source of truth for the exact column names and rules.
 
+`python analytics/schema.py` prints the live contract (every feature, its
+definition, its allowed range, whether it may be blank, the target and the
+forbidden columns) straight from the code, which is the version to trust if
+this document and that output ever disagree. `analytics/README.md` covers
+the operational side: validating a file, training, evaluating, promoting.
+
+**Update, 2026-09-19 (ML architecture correction pass).** Three additions to
+what is below: `missing_assessment_count` counts ABSENT RECORDS, never zeros
+(a recorded 0 is a score); which features may legitimately be blank is now
+declared in code (`schema.OPTIONAL_FEATURE_COLUMNS`) and enforced per row;
+and each feature has an allowed numeric range (`schema.FEATURE_RANGES`), so
+an impossible value such as `current_average = 145` is a rejected row with a
+stated reason rather than a training sample.
+
 **Nothing described here has been run against real data.** No school-
 authorized historical dataset exists in this repository as of this writing.
 This document and the code behind it exist so that when one arrives, using
@@ -93,14 +107,19 @@ not a WW/PT/Exam weight. See "Academic rules vs. ML" below.
 ## Forbidden columns
 
 A dataset containing any of these is rejected outright, not silently
-stripped: `name`, `first_name`, `last_name`, `middle_name`, `address`,
-`phone`, `email`, `contact_number`, `parent_name`, `guardian_name`,
-`guardian_contact`, `lrn`.
+stripped: `name`, `student_name`, `full_name`, `first_name`, `last_name`,
+`middle_name`, `address`, `phone`, `mobile`, `email`, `contact_number`,
+`parent_name`, `guardian_name`, `guardian_contact`, `parent_contact`,
+`birthdate`, `birth_date`, `date_of_birth`, `lrn`.
+
+Birthdate is on that list for two reasons: it was removed from the learner
+record entirely (see CLAUDE.md, PART 1 of the term-specific subject
+offerings pass) and it is not an ML feature.
 
 ## Privacy
 
-Do not include: student name, address, phone, email, or parent/guardian
-information. The real LRN must never appear as a feature — the
+Do not include: student name, address, phone, email, birthdate, or
+parent/guardian information. The real LRN must never appear as a feature — the
 `anonymous_student_id` column exists specifically so a dataset can be built
 and reasoned about without carrying real identifying information end to end.
 

@@ -5,13 +5,9 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Specialization;
 use App\Models\Track;
-use App\Http\Controllers\Concerns\SummarizesImportFailures;
-use App\Http\Controllers\Concerns\ValidatesSpreadsheetUpload;
-use App\Imports\SpecializationsImport;
 use App\Helpers\LogActivity;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
-use Maatwebsite\Excel\Facades\Excel;
 
 /**
  * SpecializationController (Admin)
@@ -22,8 +18,6 @@ use Maatwebsite\Excel\Facades\Excel;
  */
 class SpecializationController extends Controller
 {
-    use SummarizesImportFailures;
-    use ValidatesSpreadsheetUpload;
 
     /** Show all specializations with their parent track. */
     public function index()
@@ -60,48 +54,6 @@ class SpecializationController extends Controller
             ->with('success', 'Specialization added successfully!');
     }
 
-    /**
-     * Bulk-import specializations from an Excel/CSV file. See
-     * App\Imports\SpecializationsImport for the expected column layout
-     * (name, code, track) and duplicate-detection rules.
-     */
-    public function import(Request $request)
-    {
-        $request->validateWithBag('import', [
-            'file' => $this->spreadsheetFileRule(),
-        ]);
-
-        $import = new SpecializationsImport();
-        Excel::import($import, $request->file('file'));
-
-        $failures = $import->failures();
-
-        if ($failures->count() > 0) {
-            $result = $this->summarizeImportFailures($failures, $import);
-
-            LogActivity::log(
-                'import_specializations',
-                'Imported ' . $import->importedCount . ' specialization(s), ' . $result['skippedCount'] . ' row(s) skipped',
-                'specializations',
-                null
-            );
-
-            return redirect()->route('admin.specializations')
-                ->with('warning', $import->importedCount . ' specialization(s) imported. ' . $result['skippedCount'] . ' row(s) were skipped:')
-                ->with('import_errors', $result['rowMessages'])
-                ->with('import_header_hint', $result['headerHint']);
-        }
-
-        LogActivity::log(
-            'import_specializations',
-            'Bulk imported ' . $import->importedCount . ' specialization(s) via file upload',
-            'specializations',
-            null
-        );
-
-        return redirect()->route('admin.specializations')
-            ->with('success', $import->importedCount . ' specialization(s) imported successfully!');
-    }
 
     /** Update an existing specialization. */
     public function update(Request $request, $id)

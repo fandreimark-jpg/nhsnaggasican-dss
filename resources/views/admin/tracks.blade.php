@@ -4,8 +4,8 @@
 @section('subtitle', 'Manage SHS tracks')
 
 @section('content')
+@include('partials.validation-errors')
 
-@include('partials.import-result')
 
 <div class="card mb-0">
     <div class="flex items-center justify-between px-5 py-4 border-b border-line">
@@ -14,10 +14,6 @@
             <p class="text-xs text-muted"><x-count-label :count="$tracks->count()" noun="track" total /></p>
         </div>
         <div class="flex items-center gap-3">
-            <button type="button" onclick="openImportTracksModal()"
-                class="bg-white border border-brand-700 text-brand-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-50 whitespace-nowrap">
-                <i class="bi bi-upload"></i> Import Tracks
-            </button>
             <button type="button" onclick="openAddTrackModal()"
                 class="btn btn-primary whitespace-nowrap">
                 <i class="bi bi-plus-lg"></i> Add Track
@@ -84,7 +80,7 @@
             <tr>
                 <td colspan="5">
                     <x-empty-state message="No tracks yet." icon="bi-diagram-3"
-                        hint='Use "Add Track" or "Import Tracks" above to get started.' />
+                        hint='Use "Add Track" above to get started.' />
                 </td>
             </tr>
             @endforelse
@@ -144,52 +140,5 @@
      data-store-url attribute on the form above instead of a
      separate inline <script> variable. --}}
 
-{{-- IMPORT TRACKS MODAL --}}
-<div id="importTracksModal"
-     class="{{ $errors->import->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box {{ $errors->import->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200">
-
-        <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-ink">Import Tracks</h3>
-            <button type="button" onclick="closeImportTracksModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
-        </div>
-
-        @if($errors->import->any())
-            <div class="alert alert-danger mb-4">
-                <ul class="list-disc list-inside">
-                    @foreach($errors->import->all() as $error)
-                        <li>{{ $error }}</li>
-                    @endforeach
-                </ul>
-            </div>
-        @endif
-
-        <p class="text-sm text-muted mb-4">
-            Upload an Excel (.xlsx) or CSV file. Required columns:
-            <strong>track_name, track_code, specialization_name, specialization_code</strong>.
-            One row per specialization — repeat the same track on each of
-            its rows. Leave both specialization columns blank on a row to
-            add a track with no specializations yet. Codes are
-            auto-uppercased. Re-uploading the same file is safe — matching
-            tracks/specializations are reused, never duplicated.
-        </p>
-
-        <form method="POST" action="{{ route('admin.tracks.import') }}"
-              enctype="multipart/form-data" class="space-y-4" data-loading="Importing tracks...">
-            @csrf
-            <input type="file" name="file" accept=".xlsx,.xls,.csv" required
-                   class="w-full border rounded-lg px-3 py-2 text-sm">
-
-            <div class="flex justify-end gap-3 pt-2">
-                <button type="button" onclick="closeImportTracksModal()"
-                        class="px-4 py-2 text-sm text-muted">Cancel</button>
-                <button type="submit"
-                        class="btn btn-primary">
-                    Upload & Import
-                </button>
-            </div>
-        </form>
-    </div>
-</div>
 
 @endsection

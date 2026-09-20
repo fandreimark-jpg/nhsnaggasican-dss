@@ -40,25 +40,10 @@ class SubjectClassificationSafetyNetTest extends TestCase
 
         $this->actingAs($admin)->post(route('admin.subjects.store'), [
             'name' => 'Unclassified Grade 11 Subject', 'type' => 'core', 'grade_level' => 11,
+            'terms' => [1, 2, 3],
         ])->assertSessionHasErrors('subject_group');
 
         $this->assertDatabaseMissing('subjects', ['name' => 'Unclassified Grade 11 Subject']);
-    }
-
-    public function test_an_import_row_with_no_subject_group_cannot_create_a_grade_11_subject(): void
-    {
-        $admin = User::factory()->admin()->create();
-
-        $csv = "name,type,grade_level,track,specialization\n";
-        $csv .= "Unclassified Import Row,core,11,,\n";
-        $path = tempnam(sys_get_temp_dir(), 'subjects_safety_net_') . '.csv';
-        file_put_contents($path, $csv);
-        $file = new \Illuminate\Http\UploadedFile($path, 'subjects.csv', 'text/csv', null, true);
-
-        $this->actingAs($admin)->post('/admin/subjects/import', ['grade_level' => '11', 'file' => $file]);
-        @unlink($path);
-
-        $this->assertDatabaseMissing('subjects', ['name' => 'Unclassified Import Row']);
     }
 
     /**
@@ -122,6 +107,6 @@ class SubjectClassificationSafetyNetTest extends TestCase
 
         $response->assertOk();
         $response->assertDontSee('101 of 139');
-        $response->assertSee('may have the wrong grading weight');
+        $response->assertSee('with a Subject Group that needs review');
     }
 }

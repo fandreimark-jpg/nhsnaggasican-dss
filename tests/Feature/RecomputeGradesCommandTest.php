@@ -18,6 +18,10 @@ use Tests\TestCase;
  * grading weights and reports a before/after table, applying nothing
  * until confirmed.
  */
+// NOTE ('SSHS ECR grading correction', 2026-09-20): these Grade 12
+// sections carry an EXPLICIT k12_2013 curriculum because this file's
+// intent is the DO 8, s. 2015 (legacy) path. An unset curriculum in
+// SY 2026-2027 now resolves to DO 015 for both grade levels.
 class RecomputeGradesCommandTest extends TestCase
 {
     use RefreshDatabase;
@@ -101,7 +105,7 @@ class RecomputeGradesCommandTest extends TestCase
     {
         // Grade 12 stays on do8_2015 25/50/25 — unchanged by this task,
         // so a verified grade recomputes to the exact same values.
-        $section = Section::factory()->create(['school_year' => '2026-2027', 'grade_level' => 12]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create();
         $student = Student::factory()->create(['section_id' => $section->id]);
         $adviser = User::factory()->create();
@@ -123,7 +127,7 @@ class RecomputeGradesCommandTest extends TestCase
 
     public function test_a_grade_that_no_longer_computes_as_complete_is_skipped_not_blanked(): void
     {
-        $section = Section::factory()->create(['school_year' => '2026-2027', 'grade_level' => 12]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create();
         $student = Student::factory()->create(['section_id' => $section->id]);
         $adviser = User::factory()->create();

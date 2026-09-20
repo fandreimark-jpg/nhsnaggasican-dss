@@ -18,6 +18,10 @@ use Tests\TestCase;
  * Adviser Assessments and Principal Students tables. No value changes —
  * this is purely a legibility fix.
  */
+// NOTE ('SSHS ECR grading correction', 2026-09-20): these Grade 12
+// sections carry an EXPLICIT k12_2013 curriculum because this file's
+// intent is the DO 8, s. 2015 (legacy) path. An unset curriculum in
+// SY 2026-2027 now resolves to DO 015 for both grade levels.
 class ComputedTransmutedClarityTest extends TestCase
 {
     use RefreshDatabase;
@@ -41,7 +45,7 @@ class ComputedTransmutedClarityTest extends TestCase
     public function test_adviser_assessments_shows_lifted_from_marker_when_transmutation_raises_a_sub_75_grade(): void
     {
         $adviser = User::factory()->create();
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create(['grade_level' => 12, 'type' => 'core']);
         $student = Student::factory()->create(['section_id' => $section->id, 'last_name' => 'LiftedCase']);
 
@@ -61,7 +65,7 @@ class ComputedTransmutedClarityTest extends TestCase
     public function test_no_lifted_marker_when_computed_grade_is_already_at_or_above_75(): void
     {
         $adviser = User::factory()->create();
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create(['grade_level' => 12, 'type' => 'core']);
         $student = Student::factory()->create(['section_id' => $section->id, 'last_name' => 'AlreadyPassing']);
 

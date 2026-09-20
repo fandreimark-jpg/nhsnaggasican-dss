@@ -2,66 +2,58 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Helpers\LogActivity;
 use App\Http\Controllers\Controller;
+use App\Models\DepedSubjectCatalog;
+use App\Models\Specialization;
 use App\Models\Subject;
 use App\Models\SubjectGroupWeight;
 use App\Models\Track;
-use App\Models\Specialization;
-use App\Http\Controllers\Concerns\SummarizesImportFailures;
-use App\Http\Controllers\Concerns\ValidatesSpreadsheetUpload;
-use App\Imports\SubjectsImport;
-use Maatwebsite\Excel\Facades\Excel;
-use App\Helpers\LogActivity;
+use App\Services\GradingEngine;
+use App\Services\SubjectApplicabilityService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 /**
- * SubjectController (Admin)
+ * Admin > Subjects — THE place a subject's academic applicability is
+ * configured ("Subject applicability" refactor, 2026-09-20): grade level,
+ * type, track / specialization for an elective, subject group (DO 015
+ * grading weights, Grade 11 only), and TERMS TAUGHT. Every section then
+ * resolves its subjects from this configuration automatically through
+ * SubjectApplicabilityService — nothing is assigned section by section
+ * and term by term any more.
  *
- * Manages SHS subjects — both core and elective.
- * Core subjects apply to all sections of a grade level.
- * Elective subjects are tied to a specific track and optionally a specialization.
+ * Grading weights are never typed here: they are resolved from the DepEd
+ * catalog (exact name match, linked automatically on save) or the
+ * subject group, and shown read-only on the list.
+ *
+ * The bulk "Import Subjects" upload that used to live here was REMOVED —
+ * no official file format for subject master data exists at the school
+ * or at DepEd, and inventing one is exactly what CLAUDE.md's "no custom
+ * spreadsheet" rule forbids. Add/Edit is the way subjects are managed.
  */
 class SubjectController extends Controller
 {
-    use SummarizesImportFailures;
-    use ValidatesSpreadsheetUpload;
+    public function __construct(private SubjectApplicabilityService $applicability = new SubjectApplicabilityService())
+    {
+    }
 
     /**
-     * Every do015_2026 subject_group a subject can be assigned — read from
-     * subject_group_weights itself rather than hardcoded, so a future
-     * scheme's different group list is a seeded row, never a code
-     * change. Scoped to 'do015_2026': the five do8_* rows are resolved
-     * automatically by GradingEngine::resolveDo8GroupKey() from a
-     * section's track and a subject's type, never chosen by a human — a
-     * subject's own subject_group column isn't even read for the
-     * do8_2015 scheme. Offering them here would let an admin put DO 8
-     * weights on a DO 015 subject, silently. 'all' is also excluded:
-     * that's do8_2015's scheme-wide fallback bucket, never a real group
-     * a subject is actually assigned.
-     *
-     * "Subject classification and grading weights cleanup" pass — kept as
-     * the view's full dropdown source (Blade needs every group, labelled,
-     * to build the type-filtered <select> client-side), but the
-     * authoritative type/group consistency check is
-     * SubjectGroupWeight::classificationError(), not this method.
+     * Every subject group a subject may be assigned, Grade 11 or Grade 12
+     * (SubjectGroupWeight::allGroups() — the one authoritative list, the
+     * DO 015, s. 2026 Table 10 groups). Scoped to that scheme on purpose
+     * (never a do8_* row) — see CLAUDE.md, "The five do8_* rows must never
+     * be human-selectable": those are computed from a section's track.
      */
     private function availableSubjectGroups()
     {
         return collect(SubjectGroupWeight::allGroups());
     }
 
-    /**
-     * Show all subjects with optional type filter (core/elective), or
-     * filtered to the "may have the wrong grading weight" set the Admin
-     * dashboard's Data Health check links to — see Subject::
-     * withSuspectSubjectGroup() ("ECR alignment" work order, PART 4b), the
-     * one place that query exists so this filter and the dashboard count
-     * can never drift apart.
-     * URL: /admin/subjects?type=core or ?type=elective or ?subject_group_check=1
-     */
     public function index()
     {
-        $subjects = Subject::with(['track', 'specialization', 'catalog'])
+        $subjects = Subject::with(['track', 'specialization', 'catalog', 'terms'])
             ->when(request('type'), fn($q) => $q->where('type', request('type')))
             ->when(request('subject_group_check'), fn($q) => $q->whereIn('id', Subject::withSuspectSubjectGroup()->pluck('id')))
             ->orderBy('grade_level')
@@ -69,200 +61,133 @@ class SubjectController extends Controller
             ->orderBy('name')
             ->get();
 
-        // SYSTEM_FIXES_AND_ML_AUDIT.md, "Grading details per subject" —
-        // resolved the same way GradingEngine actually resolves it (catalog
-        // row wins over subject_group, per CLAUDE.md's resolution order),
-        // not a second copy of the arithmetic, so this can never drift from
-        // what a grade actually computes to. Grade 12 (do8_2015) is
-        // deliberately NOT resolved to a number here: that scheme weights by
-        // a SECTION's track, not by subject_group at all (subject_group
-        // isn't even read for do8_2015 — see GradingEngine::
-        // resolveDo8GroupKey()), so guessing one here would show a
-        // plausible-looking percentage that may not be what any given
-        // section's grade actually uses.
-        $subjects->each(function (Subject $subject) {
-            if ($subject->catalog) {
+        // Grading Profile — resolved, read-only, by THE grading engine
+        // ("Grading policy display" pass, 2026-09-20). GradingEngine::
+        // resolveSubjectProfile() runs resolveWeightProfile() — the exact
+        // path computeGrade() takes — for every section context the subject
+        // can be graded in (DO 015 needs none; DO 8 reads the section's
+        // track). The page no longer carries its own copy of the
+        // resolution order, and a Grade 12 subject shows the same figures
+        // its assessments are graded with. A subject whose contexts
+        // disagree (a core subject when tracks with different DO 8
+        // branches exist) is shown as "resolved by section context" with
+        // every variant, never one figure picked for it.
+        $engine = new GradingEngine();
+        $subjects->each(function (Subject $subject) use ($engine) {
+            try {
+                $resolution = $engine->resolveSubjectProfile($subject);
+            } catch (\Throwable $e) {
+                // An unclassified subject (no catalog row, no group) throws
+                // in SubjectGroupWeight::resolve() — that is "Not configured".
+                $subject->grading_weights_display = null;
+                return;
+            }
+
+            $label = fn(array $p) => $p['source'] === 'catalog'
+                ? 'DepEd Strengthened SHS catalog (exact subject match)'
+                : ($p['scheme'] === 'do8_2015' ? 'DO 8, s. 2015 — ' : 'DO 015, s. 2026 — ') . SubjectGroupWeight::labelFor($p['group_key']);
+
+            if (!$resolution['resolved']) {
                 $subject->grading_weights_display = [
-                    'source' => 'catalog', 'ww' => $subject->catalog->ww_weight,
-                    'pt' => $subject->catalog->pt_weight, 'ex' => $subject->catalog->ex_weight,
+                    'source'   => 'section_context',
+                    'variants' => array_map(fn($v) => [
+                        'track' => ($v['track'] ?? '(no track)') . ' / ' . match ($v['curriculum'] ?? null) { 'sshs' => 'Strengthened SHS', 'k12_2013' => '2013 curriculum', default => 'curriculum unset' },
+                        'ww' => $v['profile']['ww_weight'], 'pt' => $v['profile']['pt_weight'], 'ex' => $v['profile']['ex_weight'],
+                        'label' => $label($v['profile']),
+                    ], $resolution['variants']),
                 ];
                 return;
             }
 
-            if ($subject->grade_level == 11) {
-                try {
-                    $w = SubjectGroupWeight::resolve('do015_2026', $subject->subject_group);
-                    $subject->grading_weights_display = [
-                        'source' => 'subject_group', 'ww' => $w->ww_weight, 'pt' => $w->pt_weight, 'ex' => $w->ex_weight,
-                    ];
-                } catch (\Throwable $e) {
-                    $subject->grading_weights_display = null;
-                }
-                return;
-            }
-
-            // Grade 12 / do8_2015 — see note above.
-            $subject->grading_weights_display = ['source' => 'do8_by_track'];
+            $p = $resolution['profile'];
+            $subject->grading_weights_display = [
+                'source' => $p['source'], 'scheme' => $p['scheme'], 'group_key' => $p['group_key'],
+                'ww' => $p['ww_weight'], 'pt' => $p['pt_weight'], 'ex' => $p['ex_weight'],
+                'label' => $label($p),
+            ];
         });
 
         $tracks          = Track::with('specializations')->orderBy('name')->get();
         $specializations = Specialization::with('track')->orderBy('name')->get();
         $subjectGroups   = $this->availableSubjectGroups();
+        $termNumbers     = $this->applicability->termNumbers();
 
-        return view('admin.subjects', compact('subjects', 'tracks', 'specializations', 'subjectGroups'));
+        return view('admin.subjects', compact('subjects', 'tracks', 'specializations', 'subjectGroups', 'termNumbers'));
     }
 
-    /**
-     * Create a new subject.
-     * Track and specialization are only saved for elective subjects.
-     * Core subjects have null track_id and specialization_id.
-     */
     public function store(Request $request)
     {
-        $request->validate([
-            'name'              => 'required|string|max:255',
-            'type'              => 'required|in:core,elective',
-            'grade_level'       => 'required|in:11,12',
-            'subject_group'     => 'nullable|string',
-            'track_id'          => 'nullable|exists:tracks,id',
-            'specialization_id' => 'nullable|exists:specializations,id',
-        ]);
+        $data = $this->validated($request);
 
-        // Validate the RAW submitted value first — a Grade 12 row that
-        // submits a value anyway must be rejected outright, never silently
-        // dropped. Only after it's confirmed consistent (or confirmed
-        // blank) does Grade 12 get coerced to null for storage.
-        $rawSubjectGroup = $request->subject_group !== '' ? $request->subject_group : null;
-
-        if ($error = SubjectGroupWeight::classificationError($request->type, (int) $request->grade_level, $rawSubjectGroup)) {
+        if ($error = SubjectGroupWeight::classificationError($data['type'], (int) $data['grade_level'], $data['subject_group'])) {
             return back()->withErrors(['subject_group' => $error])->withInput();
         }
 
-        $subjectGroup = $request->grade_level == 12 ? null : $rawSubjectGroup;
+        $subject = DB::transaction(function () use ($data) {
+            $subject = Subject::create($this->attributesToStore($data));
+            $subject->syncTerms($data['terms']);
 
-        Subject::create([
-            'name'              => $request->name,
-            'type'              => $request->type,
-            'grade_level'       => $request->grade_level,
-            'subject_group'     => $subjectGroup,
-            // Only elective subjects have track/specialization
-            'track_id'          => $request->type === 'elective' ? $request->track_id : null,
-            'specialization_id' => $request->type === 'elective' ? $request->specialization_id : null,
-        ]);
+            return $subject;
+        });
 
         LogActivity::log(
             'create_subject',
-            'Created ' . $request->role . ' subjects: ' . $request->name,
+            "Created subject {$subject->name} (Grade {$subject->grade_level}, {$subject->type}; terms taught: {$subject->termsLabel()})",
             'subjects',
-            null
+            $subject->id
         );
 
         return redirect()->route('admin.subjects')
-            ->with('success', 'Subject added successfully!');
+            ->with('success', 'Subject added successfully!' . $this->catalogNote($subject));
     }
 
-    /**
-     * Bulk-import subjects from an Excel/CSV file so Admin doesn't have to
-     * manually encode every subject. See App\Imports\SubjectsImport for the
-     * expected column layout and validation/duplicate rules.
-     */
-    public function import(Request $request)
-    {
-        $request->validateWithBag('import', [
-            'grade_level' => 'required|in:11,12',
-            'file'        => $this->spreadsheetFileRule(),
-        ]);
-
-        $import = new SubjectsImport((int) $request->grade_level);
-        Excel::import($import, $request->file('file'));
-
-        $failures = $import->failures();
-
-        // "Subject classification and grading weights cleanup" pass — a
-        // subject whose name exactly matches a deped_subject_catalog row
-        // was auto-linked (catalog_id set); its grading weights now come
-        // from that catalog row, not subject_group. Reported here so an
-        // Admin can see it happened, since nothing prompts for it on the
-        // import form. Set on both branches below — a row can auto-link
-        // and still import cleanly.
-        $importWarnings = [];
-        if (!empty($import->catalogLinkedNames)) {
-            $importWarnings[] = count($import->catalogLinkedNames) . ' subject(s) matched the DepEd Strengthened SHS catalog by name and were auto-linked (grading weights come from the catalog, not Subject Group): '
-                . implode(', ', $import->catalogLinkedNames) . '.';
-        }
-
-        if ($failures->count() > 0) {
-            $result = $this->summarizeImportFailures($failures, $import);
-
-            LogActivity::log(
-                'import_subjects',
-                'Imported ' . $import->importedCount . ' subject(s), ' . $result['skippedCount'] . ' row(s) skipped',
-                'subjects',
-                null
-            );
-
-            return redirect()->route('admin.subjects')
-                ->with('warning', $import->importedCount . ' subject(s) imported. ' . $result['skippedCount'] . ' row(s) were skipped:')
-                ->with('import_errors', $result['rowMessages'])
-                ->with('import_header_hint', $result['headerHint'])
-                ->with('import_warnings', $importWarnings);
-        }
-
-        LogActivity::log(
-            'import_subjects',
-            'Bulk imported ' . $import->importedCount . ' subject(s) via file upload',
-            'subjects',
-            null
-        );
-
-        return redirect()->route('admin.subjects')
-            ->with('success', $import->importedCount . ' subject(s) imported successfully!')
-            ->with('import_warnings', $importWarnings);
-    }
-
-    /** Update an existing subject. */
     public function update(Request $request, $id)
     {
-        $subject = Subject::findOrFail($id);
+        $subject = Subject::with('terms')->findOrFail($id);
 
-        $request->validate([
-            'name'              => 'required|string|max:255',
-            'type'              => 'required|in:core,elective',
-            'grade_level'       => 'required|in:11,12',
-            'subject_group'     => 'nullable|string',
-            'track_id'          => 'nullable|exists:tracks,id',
-            'specialization_id' => 'nullable|exists:specializations,id',
-        ]);
+        $data = $this->validated($request, $subject);
 
-        // Validate the RAW submitted value first — a Grade 12 row that
-        // submits a value anyway must be rejected outright, never silently
-        // dropped. Only after it's confirmed consistent (or confirmed
-        // blank) does Grade 12 get coerced to null for storage.
-        $rawSubjectGroup = $request->subject_group !== '' ? $request->subject_group : null;
-
-        if ($error = SubjectGroupWeight::classificationError($request->type, (int) $request->grade_level, $rawSubjectGroup)) {
+        if ($error = SubjectGroupWeight::classificationError($data['type'], (int) $data['grade_level'], $data['subject_group'])) {
             return back()->withErrors(['subject_group' => $error])->withInput();
         }
 
-        $subjectGroup = $request->grade_level == 12 ? null : $rawSubjectGroup;
+        // HISTORY PROTECTION — an edit that would take this subject away
+        // from a section and term that already holds records for it
+        // (removing a term it was taught in, changing its grade level,
+        // moving an elective to another track/specialization, turning an
+        // elective into a core subject of a grade level it was not
+        // taught in, ...) is refused, naming every affected pair. The
+        // records are never deleted, orphaned or hidden; the Admin keeps
+        // the applicability that history depends on.
+        $attributes = $this->attributesToStore($data, $subject) + ['terms' => $data['terms']];
+        $conflicts = $this->applicability->historyConflicts($subject, $attributes);
 
-        $subject->update([
-            'name'              => $request->name,
-            'type'              => $request->type,
-            'grade_level'       => $request->grade_level,
-            'subject_group'     => $subjectGroup,
-            'track_id'          => $request->type === 'elective' ? $request->track_id : null,
-            'specialization_id' => $request->type === 'elective' ? $request->specialization_id : null,
-        ]);
+        if ($conflicts->isNotEmpty()) {
+            $named = $conflicts->map(fn($c) => "{$c['section']->name} Term {$c['term']} ("
+                . $c['counts']->map(fn($n, $table) => "{$n} " . str_replace('_', ' ', $table))->implode(', ') . ')')
+                ->implode('; ');
+
+            return back()->withErrors([
+                'terms' => "This change cannot be saved because academic records already exist for {$subject->name} where it would no longer apply: {$named}. Keep the grade level, track/specialization and Terms Taught those records depend on.",
+            ])->withInput();
+        }
+
+        DB::transaction(function () use ($subject, $data) {
+            $subject->update($this->attributesToStore($data, $subject));
+            $subject->syncTerms($data['terms']);
+        });
+
+        LogActivity::log(
+            'update_subject',
+            "Updated subject {$subject->name} (Grade {$subject->grade_level}, {$subject->type}; terms taught: {$subject->fresh('terms')->termsLabel()})",
+            'subjects',
+            $subject->id
+        );
 
         return redirect()->route('admin.subjects')
-            ->with('success', 'Subject updated successfully!');
+            ->with('success', 'Subject updated successfully!' . $this->catalogNote($subject->fresh()));
     }
 
-    /**
-     * Delete a subject.
-     * Cannot delete if grades have been recorded for this subject.
-     */
     public function destroy($id)
     {
         $subject = Subject::findOrFail($id);
@@ -276,5 +201,94 @@ class SubjectController extends Controller
 
         return redirect()->route('admin.subjects')
             ->with('success', 'Subject deleted successfully!');
+    }
+
+    /**
+     * The one validation both store() and update() run. Terms Taught is a
+     * list of term numbers that must each exist in academic_terms
+     * (AcademicTerm::termNumbers()), at least one of them; a duplicate
+     * name at the same grade level is refused (the rule the removed bulk
+     * importer enforced, kept alive on the form).
+     *
+     * @return array{name: string, type: string, grade_level: int, subject_group: ?string, track_id: ?int, specialization_id: ?int, terms: array<int, int>}
+     */
+    private function validated(Request $request, ?Subject $existing = null): array
+    {
+        $termNumbers = $this->applicability->termNumbers();
+
+        $request->validate([
+            'name'              => ['required', 'string', 'max:255',
+                Rule::unique('subjects', 'name')
+                    ->where(fn($q) => $q->where('grade_level', (int) $request->grade_level))
+                    ->ignore($existing?->id)],
+            'type'              => 'required|in:core,elective',
+            'grade_level'       => 'required|in:11,12',
+            'subject_group'     => 'nullable|string',
+            'track_id'          => 'nullable|exists:tracks,id',
+            'specialization_id' => 'nullable|exists:specializations,id',
+            'terms'             => 'required|array|min:1',
+            'terms.*'           => ['integer', Rule::in($termNumbers)],
+        ], [
+            'name.unique'   => 'A subject with this name already exists for that grade level.',
+            'terms.required' => 'Select at least one term this subject is taught in.',
+            'terms.min'      => 'Select at least one term this subject is taught in.',
+            'terms.*.in'     => 'One of the selected terms does not exist. Terms are ' . implode(', ', array_map(fn($t) => 'Term ' . $t, $termNumbers)) . '.',
+        ]);
+
+        // A specialization must belong to the chosen track — an elective
+        // cannot point at a strand of a different track.
+        $trackId = $request->type === 'elective' && $request->filled('track_id') ? (int) $request->track_id : null;
+        $specializationId = $request->type === 'elective' && $request->filled('specialization_id') ? (int) $request->specialization_id : null;
+
+        if ($specializationId !== null) {
+            $spec = Specialization::find($specializationId);
+            if ($trackId === null || !$spec || (int) $spec->track_id !== $trackId) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'specialization_id' => 'The selected specialization does not belong to the selected track.',
+                ]);
+            }
+        }
+
+        // The RAW submitted group is what classificationError() judges —
+        // the same rule for Grade 11 and Grade 12 ("Subject Group for both
+        // grade levels" pass); an empty select is null, never a default.
+        $rawSubjectGroup = $request->subject_group !== '' ? $request->subject_group : null;
+
+        return [
+            'name'              => $request->name,
+            'type'              => $request->type,
+            'grade_level'       => (int) $request->grade_level,
+            'subject_group'     => $rawSubjectGroup,
+            'track_id'          => $trackId,
+            'specialization_id' => $specializationId,
+            'terms'             => collect($request->input('terms'))->map(fn($t) => (int) $t)->unique()->sort()->values()->all(),
+        ];
+    }
+
+    /**
+     * The columns written to subjects. The DepEd catalog link is resolved
+     * by exact, case-insensitive name when the subject has none yet (the
+     * same rule the removed bulk importer applied to every row); an
+     * existing link is never re-pointed or dropped by an edit.
+     */
+    private function attributesToStore(array $data, ?Subject $existing = null): array
+    {
+        return [
+            'name'              => $data['name'],
+            'type'              => $data['type'],
+            'grade_level'       => $data['grade_level'],
+            'subject_group'     => $data['subject_group'],
+            'track_id'          => $data['track_id'],
+            'specialization_id' => $data['specialization_id'],
+            'catalog_id'        => $existing?->catalog_id
+                ?? DepedSubjectCatalog::whereRaw('LOWER(course_title) = ?', [mb_strtolower(trim($data['name']))])->value('id'),
+        ];
+    }
+
+    private function catalogNote(Subject $subject): string
+    {
+        return $subject->catalog_id
+            ? " {$subject->name} matches the DepEd Strengthened SHS catalog by name and was linked to it — its grading weights come from the catalog."
+            : '';
     }
 }

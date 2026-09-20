@@ -53,13 +53,11 @@ class Student extends Model
         'middle_name',
         'section_id',   // Which section the student belongs to
         'gender',       // 'male' or 'female'
-        'birthdate',
-    ];
-
-    // Tells Laravel to treat 'birthdate' as a real date object (Carbon)
-    // instead of a plain string, so ->format() works on it.
-    protected $casts = [
-        'birthdate' => 'date',
+        // birthdate was removed from the learner record in the "Student
+        // identity and term-specific subject offerings" pass — the required
+        // learner format is lrn / last_name / first_name / middle_name /
+        // gender only. The column itself is dropped by
+        // 2026_09_18_000001_drop_birthdate_from_students_table.
     ];
 
     // =============================================
@@ -73,16 +71,6 @@ class Student extends Model
     public function getFullNameAttribute()
     {
         return $this->last_name . ', ' . $this->first_name . ' ' . $this->middle_name;
-    }
-
-    /**
-     * Returns the birthdate as MM/DD/YYYY instead of the raw YYYY-MM-DD
-     * that comes straight from the database.
-     * Accessible as $student->formatted_birthdate
-     */
-    public function getFormattedBirthdateAttribute()
-    {
-        return $this->birthdate ? $this->birthdate->format('m/d/Y') : null;
     }
 
     // =============================================

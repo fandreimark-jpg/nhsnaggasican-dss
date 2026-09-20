@@ -20,6 +20,10 @@ use Tests\TestCase;
  * full-page redirect — same business logic, only the response shape
  * branches.
  */
+// NOTE ('SSHS ECR grading correction', 2026-09-20): these Grade 12
+// sections carry an EXPLICIT k12_2013 curriculum because this file's
+// intent is the DO 8, s. 2015 (legacy) path. An unset curriculum in
+// SY 2026-2027 now resolves to DO 015 for both grade levels.
 class VerifyGradeJsonResponseTest extends TestCase
 {
     use RefreshDatabase;
@@ -45,7 +49,7 @@ class VerifyGradeJsonResponseTest extends TestCase
     public function test_a_json_accept_header_gets_a_json_body_on_success(): void
     {
         $adviser = User::factory()->create();
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create(['grade_level' => 12, 'type' => 'core']);
         $student = Student::factory()->create(['section_id' => $section->id]);
 
@@ -74,7 +78,7 @@ class VerifyGradeJsonResponseTest extends TestCase
     public function test_without_a_json_accept_header_it_still_redirects(): void
     {
         $adviser = User::factory()->create();
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create(['grade_level' => 12, 'type' => 'core']);
         $student = Student::factory()->create(['section_id' => $section->id]);
 

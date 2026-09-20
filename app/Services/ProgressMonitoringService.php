@@ -295,24 +295,21 @@ class ProgressMonitoringService
         string $componentKey,
         ?Carbon $asOf
     ): array {
-        $scores = AssessmentScore::where('student_id', $student->id)
-            ->whereHas('assessment', function ($q) use ($subject, $section, $gradingPeriod, $schoolYear, $componentKey) {
-                $q->where('subject_id', $subject->id)
-                  ->where('section_id', $section->id)
-                  ->where('grading_period', $gradingPeriod)
-                  ->where('school_year', $schoolYear)
-                  ->where('component', $componentKey);
-            })
-            ->when($asOf, fn($q) => $q->where('created_at', '<=', $asOf))
-            ->with('assessment')
-            ->get();
+        // "Performance audit" pass — the same rows the per-call query here
+        // used to fetch (this student's scores for this subject/section/
+        // term/year/component, cut off at $asOf on the score's created_at),
+        // read from the evidence GradingEngine already holds for the
+        // section/term. See GradingEngine::scoredItems().
+        $scores = collect($this->performanceAnalysis->engine()->scoredItems(
+            $student, $subject, $section, $gradingPeriod, $schoolYear, $componentKey, $asOf
+        ));
 
         if ($scores->isEmpty()) {
             return ['percentage' => null, 'item_count' => 0, 'earned' => 0.0, 'max' => 0.0];
         }
 
-        $earned = $scores->sum(fn($s) => (float) $s->score);
-        $max = $scores->sum(fn($s) => (float) $s->assessment->max_score);
+        $earned = $scores->sum(fn($row) => (float) $row['score']->score);
+        $max = $scores->sum(fn($row) => (float) $row['assessment']->max_score);
 
         if ($max <= 0) {
             return ['percentage' => null, 'item_count' => $scores->count(), 'earned' => $earned, 'max' => $max];

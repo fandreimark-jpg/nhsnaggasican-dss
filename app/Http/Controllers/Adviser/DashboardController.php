@@ -40,11 +40,6 @@ class DashboardController extends Controller
             ? Student::enrolledIn($section)->count()
             : 0;
 
-        // Get subjects for this section (core + elective filtered by track/spec)
-        $subjects = $section
-            ? Subject::forSection($section)->get()
-            : collect();
-
         // "ECR alignment" work order, PART 6 — expected grades now come
         // from SectionElectiveStatus PER TERM (an elective doesn't
         // necessarily run every term), the same shared source of truth
@@ -132,6 +127,10 @@ class DashboardController extends Controller
         // evidence already on file, across every subject this section
         // takes, so it has something to say from the first upload onward.
         $openTerm = $section ? (AcademicTerm::currentOpenTerm($section->school_year) ?? 1) : 1;
+        // "Student identity and term-specific subject offerings" pass — the
+        // subjects evaluated are the OPEN term's offerings, not every
+        // subject the section takes at some point in the year.
+        $subjects = $section ? Subject::forSection($section, $openTerm)->get() : collect();
         $allInTermRows = $section
             ? $this->buildInTermRows($section, $students, $subjects, $openTerm)
             : collect();
@@ -222,7 +221,7 @@ class DashboardController extends Controller
         // TransmutationService::fallbackActiveFor().
         $transmutationBanner = null;
         $fallbackScheme = config('dss.transmutation_fallback_scheme');
-        if ($section && $fallbackScheme && (new TransmutationService())->fallbackActiveFor($section->grade_level, $section->school_year)) {
+        if ($section && $fallbackScheme && (new TransmutationService())->fallbackActiveFor($section->grade_level, $section->school_year, $section->curriculum)) {
             $transmutationBanner = [
                 'fallback_scheme' => $fallbackScheme,
                 'grade_levels'    => [$section->grade_level],

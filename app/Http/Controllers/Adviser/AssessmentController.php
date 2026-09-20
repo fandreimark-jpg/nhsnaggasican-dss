@@ -15,11 +15,13 @@ use App\Models\Student;
 use App\Helpers\LogActivity;
 use App\Http\Controllers\Concerns\ValidatesSpreadsheetUpload;
 use App\Services\AssessmentUploadService;
+use App\Services\EcrSubjectTermResolver;
 use App\Services\TempUploadPruner;
 use App\Services\InTermStatusService;
 use App\Services\PerformanceAnalysisService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -60,7 +62,8 @@ class AssessmentController extends Controller
     public function __construct(
         private AssessmentUploadService $uploads = new AssessmentUploadService(),
         private PerformanceAnalysisService $analysis = new PerformanceAnalysisService(),
-        private InTermStatusService $inTermStatus = new InTermStatusService()
+        private InTermStatusService $inTermStatus = new InTermStatusService(),
+        private EcrSubjectTermResolver $ecrTerms = new EcrSubjectTermResolver()
     ) {
     }
 
@@ -74,13 +77,16 @@ class AssessmentController extends Controller
                 'selectedPeriod' => 1, 'items' => collect(), 'openTerm' => null, 'performance' => collect(),
                 'staleRiskTerms' => [], 'sectionStudents' => collect(), 'modalStudents' => collect(),
                 'itemScoresByAssessment' => collect(), 'autoOpenAddItem' => false, 'prefillComponent' => null,
-                'performanceByStudentId' => collect(), 'duplicateExamRoleWarnings' => collect(),
+                'performanceByStudentId' => collect(), 'duplicateExamRoleWarnings' => collect(), 'unroledExamItemNames' => collect(),
                 'statusFilter' => null,
             ]);
         }
 
-        $subjects = Subject::forSection($section)->orderBy('type')->orderBy('name')->get();
+        // "Student identity and term-specific subject offerings" pass — the
+        // subject list is the selected TERM's offerings (Subject::forSection()
+        // with a term), so a Term-1-only subject never appears under Term 2.
         $selectedPeriod = (int) $request->input('period', 1);
+        $subjects = Subject::forSection($section, $selectedPeriod)->orderBy('type')->orderBy('name')->get();
         $selectedSubjectId = $request->input('subject_id') ?: $subjects->first()?->id;
         $selectedSubject = $subjects->firstWhere('id', (int) $selectedSubjectId);
 
@@ -108,6 +114,21 @@ class AssessmentController extends Controller
             ->groupBy('exam_role')
             ->filter(fn($group) => $group->count() > 1)
             ->map(fn($group, $role) => $group->pluck('name')->implode(', '));
+
+        // Final pre-demo audit (2026-09-20) — the mirror image of the
+        // warning above. GradingEngine::examinationPercentage() weighs
+        // the Examination component by role (ST1/ST2/TE) as soon as ANY
+        // item carries a role, and an item with NO role is then excluded
+        // from the component entirely. That rule is deliberate (DO 015's
+        // Examination is the two Summative Tests and the Term Exam), but
+        // it was silent: the live demo data held 18 "Additional Practice
+        // EX" items with no role whose scores counted for nothing, and
+        // nothing on screen said so. Named here so the adviser can set a
+        // role (Edit) or accept that the item is record-only.
+        $examItems = $items->where('component', 'examination');
+        $unroledExamItemNames = $examItems->whereNotNull('exam_role')->isNotEmpty()
+            ? $examItems->whereNull('exam_role')->pluck('name')
+            : collect();
 
         // A historical (non-active-year) section has no writable term at all —
         // its terms may still be flagged open, but AcademicTerm::acceptsWrites()
@@ -227,7 +248,7 @@ class AssessmentController extends Controller
         return view('adviser.assessments', compact(
             'section', 'subjects', 'selectedSubject', 'selectedPeriod', 'items', 'openTerm', 'performance',
             'staleRiskTerms', 'sectionStudents', 'modalStudents', 'itemScoresByAssessment',
-            'autoOpenAddItem', 'prefillComponent', 'performanceByStudentId', 'duplicateExamRoleWarnings',
+            'autoOpenAddItem', 'prefillComponent', 'performanceByStudentId', 'duplicateExamRoleWarnings', 'unroledExamItemNames',
             'statusFilter'
         ));
     }
@@ -251,10 +272,18 @@ class AssessmentController extends Controller
             'file'       => $this->spreadsheetFileRule(),
         ]);
 
-        $subject = Subject::forSection($section)->where('id', $request->subject_id)->first();
+        // The subject must be APPLICABLE to this section in this term —
+        // SubjectApplicabilityService, from Admin > Subjects' configuration
+        // (grade level, track/specialization, Terms Taught). Checked before
+        // the file is even opened, and never relaxed by what the file
+        // says: an upload is evidence, not master data ("Subject
+        // applicability" refactor — the former ECR term synchronization
+        // is gone). A Term-2-only subject posted against Term 1 stops here.
+        $subject = $this->offeredSubjectOrNull($section, $gradingPeriod, (int) $request->subject_id);
+
         if (!$subject) {
             return redirect()->route('adviser.assessments', ['period' => $gradingPeriod])
-                ->with('error', 'That subject is not offered to your section.');
+                ->with('error', $this->notOfferedMessage($section, $gradingPeriod, (int) $request->subject_id));
         }
 
         if (!AcademicTerm::acceptsWrites($section->school_year, $gradingPeriod)) {
@@ -271,7 +300,34 @@ class AssessmentController extends Controller
         $request->file('file')->storeAs(self::TEMP_DIR, $storedFilename, 'local');
 
         $absolutePath = Storage::disk('local')->path(self::TEMP_DIR . '/' . $storedFilename);
-        $detected = $this->uploads->detectColumns($absolutePath, $gradingPeriod, $section);
+
+        // PRESCRIBED ECR IDENTITY CHECK — before a single column is read.
+        // A workbook whose INPUT DATA names a different section, subject,
+        // grade level or school year, or a term the subject does not run
+        // in, is the WRONG FILE, and is refused rather than shown as a
+        // dismissible notice. Returns null for anything that is not a
+        // prescribed Strengthened SHS ECR (the flat CSV/XLSX path and the
+        // Grade 12 workbook are unaffected).
+        // A file with a spreadsheet extension that the reader cannot open
+        // (truncated, corrupt, or renamed) is a controlled refusal, not a
+        // 500 — the extension rule (spreadsheetFileRule) deliberately does
+        // not sniff content, so this is where an unreadable file is caught.
+        try {
+            $ecrTermResult = $this->ecrTerms->validate($absolutePath, $section, $subject, $gradingPeriod);
+
+            if ($blocked = $this->ecrTerms->blockingMessage($ecrTermResult)) {
+                Storage::disk('local')->delete(self::TEMP_DIR . '/' . $storedFilename);
+                return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
+                    ->with('error', $blocked);
+            }
+
+            $detected = $this->uploads->detectColumns($absolutePath, $gradingPeriod, $section);
+        } catch (\PhpOffice\PhpSpreadsheet\Exception | \ValueError $e) {
+            Storage::disk('local')->delete(self::TEMP_DIR . '/' . $storedFilename);
+            Log::warning('Assessment upload could not be read as a spreadsheet.', ['userId' => auth()->id(), 'exception' => get_class($e)]);
+            return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
+                ->with('error', 'That file could not be read as a spreadsheet. It may be corrupted, truncated, or not really an Excel/CSV file — open it in Excel to check, save it again, and upload once more.');
+        }
         $detectedFormat = $this->uploads->lastDetectedFormat();
 
         if (empty($detected['columns'])) {
@@ -308,18 +364,38 @@ class AssessmentController extends Controller
         // DIFFERENT subject than the one selected. Needs every subject
         // this section takes (not just the selected one) to have anything
         // to compare against — see AssessmentUploadService::detectFilenameSubjectMismatch().
-        $sectionSubjects = Subject::forSection($section)->get();
+        $sectionSubjects = Subject::forSection($section, $gradingPeriod)->get();
         $filenameMismatch = $this->uploads->detectFilenameSubjectMismatch(
             $request->file('file')->getClientOriginalName(),
             $subject,
             $sectionSubjects
         );
 
-        // "ECR alignment" work order, PART 5f — dismissible, non-blocking,
-        // only ever populated for a file actually read through the ECR
-        // profile. Never overwrites the subject's own weights — see
-        // EcrReaderService::checkWeightMismatch().
+        // "ECR alignment" work order, PART 5f — only ever populated for a
+        // file actually read through an ECR profile. Never overwrites the
+        // subject's own weights — see EcrReaderService::checkWeightMismatch().
         $weightMismatch = $this->uploads->checkEcrWeightMismatch($absolutePath, $subject, $gradingPeriod, $section);
+
+        // "SSHS ECR grading correction" (2026-09-20): a workbook whose OWN
+        // catalog category (cluster + course title, looked up exactly as the
+        // workbook's term sheets do) contradicts the selected subject's
+        // configured grading profile is REFUSED, not shown as a dismissible
+        // notice — importing it would file scores under a subject the
+        // school grades differently, and nothing here may rewrite master
+        // data to make it fit. The only non-blocking case is the OTHER
+        // ELECTIVE / SPECIAL CURRICULAR PROGRAM note, where DepEd publishes
+        // no weight to compare against.
+        if ($weightMismatch !== null && $this->uploads->ecrWeightMismatchBlocks($weightMismatch)) {
+            Storage::disk('local')->delete(self::TEMP_DIR . '/' . $storedFilename);
+            return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
+                ->with('error', $weightMismatch);
+        }
+
+        // What the workbook could NOT confirm (a blank cover cell), as
+        // opposed to what it contradicted — a contradiction already
+        // refused the upload above. See EcrSubjectTermResolver for why
+        // those two cases are handled differently.
+        $metadataMismatch = $this->ecrTerms->advisoryMessage($ecrTermResult);
 
         return view('adviser.assessments-verify', [
             'section'          => $section,
@@ -332,6 +408,7 @@ class AssessmentController extends Controller
             'originalName'     => $request->file('file')->getClientOriginalName(),
             'filenameMismatch' => $filenameMismatch,
             'weightMismatch'   => $weightMismatch,
+            'metadataMismatch' => $metadataMismatch,
             'detectedFormat'   => $detectedFormat,
             'unresolvedLearnerNames' => $this->uploads->lastUnresolvedLearnerNames(),
         ]);
@@ -361,10 +438,10 @@ class AssessmentController extends Controller
             'columns.*.max_score'       => 'required|numeric|min:0.01',
         ]);
 
-        $subject = Subject::forSection($section)->where('id', $request->subject_id)->first();
+        $subject = $this->offeredSubjectOrNull($section, $gradingPeriod, (int) $request->subject_id);
         if (!$subject) {
             return redirect()->route('adviser.assessments', ['period' => $gradingPeriod])
-                ->with('error', 'That subject is not offered to your section.');
+                ->with('error', $this->notOfferedMessage($section, $gradingPeriod, (int) $request->subject_id));
         }
 
         if (!AcademicTerm::acceptsWrites($section->school_year, $gradingPeriod)) {
@@ -376,6 +453,18 @@ class AssessmentController extends Controller
         if (!Storage::disk('local')->exists($relativePath)) {
             return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
                 ->with('error', 'The uploaded file has expired. Please upload it again.');
+        }
+
+        // BACKEND ENFORCEMENT, NOT UI HIDING. detect() already refused a
+        // workbook belonging to another class, but detect/preview/import
+        // are three separate POSTs — a crafted request can start here. The
+        // check is re-run against the stored file so the refusal cannot be
+        // skipped by replaying a later step.
+        if ($blocked = $this->ecrTerms->blockingMessage(
+            $this->ecrTerms->validate(Storage::disk('local')->path($relativePath), $section, $subject, $gradingPeriod)
+        )) {
+            return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
+                ->with('error', $blocked);
         }
 
         $columnMapping = [];
@@ -404,6 +493,22 @@ class AssessmentController extends Controller
         // file or the wrong section, not a normal amount of typos.
         $rosterMismatch = $preview['total_rows'] > 0 && $preview['matched_rows'] === 0;
 
+        // Final pre-demo audit (2026-09-20) — a REPEAT upload. import()
+        // matches an item by (subject, section, term, year, name) and
+        // updates it in place, then overwrites each learner's score with
+        // the file's value. That is the intended semantics for a re-upload
+        // of a corrected E-Class Record, but the preview never said which
+        // columns already existed, so an adviser re-uploading by mistake
+        // had no warning that recorded scores were about to be replaced.
+        // Named here — a dry run must describe every write it implies.
+        $existingItemNames = Assessment::where('subject_id', $subject->id)
+            ->where('section_id', $section->id)
+            ->where('grading_period', $gradingPeriod)
+            ->where('school_year', $section->school_year)
+            ->whereIn('name', array_keys($columnMapping))
+            ->orderBy('component')->orderBy('name')
+            ->pluck('name');
+
         return view('adviser.assessments-preview', [
             'section'         => $section,
             'subject'         => $subject,
@@ -413,6 +518,7 @@ class AssessmentController extends Controller
             'columns'         => $request->input('columns'),
             'preview'         => $preview,
             'rosterMismatch'  => $rosterMismatch,
+            'existingItemNames' => $existingItemNames,
         ]);
     }
 
@@ -436,10 +542,10 @@ class AssessmentController extends Controller
             'columns.*.max_score'       => 'required|numeric|min:0.01',
         ]);
 
-        $subject = Subject::forSection($section)->where('id', $request->subject_id)->first();
+        $subject = $this->offeredSubjectOrNull($section, $gradingPeriod, (int) $request->subject_id);
         if (!$subject) {
             return redirect()->route('adviser.assessments', ['period' => $gradingPeriod])
-                ->with('error', 'That subject is not offered to your section.');
+                ->with('error', $this->notOfferedMessage($section, $gradingPeriod, (int) $request->subject_id));
         }
 
         if (!AcademicTerm::acceptsWrites($section->school_year, $gradingPeriod)) {
@@ -454,6 +560,18 @@ class AssessmentController extends Controller
         if (!Storage::disk('local')->exists($relativePath)) {
             return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
                 ->with('error', 'The uploaded file has expired. Please upload it again.');
+        }
+
+        // BACKEND ENFORCEMENT, NOT UI HIDING. detect() already refused a
+        // workbook belonging to another class, but detect/preview/import
+        // are three separate POSTs — a crafted request can start here. The
+        // check is re-run against the stored file so the refusal cannot be
+        // skipped by replaying a later step.
+        if ($blocked = $this->ecrTerms->blockingMessage(
+            $this->ecrTerms->validate(Storage::disk('local')->path($relativePath), $section, $subject, $gradingPeriod)
+        )) {
+            return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
+                ->with('error', $blocked);
         }
 
         $columnMapping = [];
@@ -574,9 +692,9 @@ class AssessmentController extends Controller
             return back()->withErrors($validator, 'addItem')->withInput();
         }
 
-        $subject = Subject::forSection($section)->where('id', $request->input('subject_id'))->first();
+        $subject = $this->offeredSubjectOrNull($section, $gradingPeriod, (int) $request->input('subject_id'));
         if (!$subject) {
-            return back()->withErrors(['item_name' => 'That subject is not offered to your section.'], 'addItem')->withInput();
+            return back()->withErrors(['item_name' => $this->notOfferedMessage($section, $gradingPeriod, (int) $request->input('subject_id'))], 'addItem')->withInput();
         }
 
         if (!AcademicTerm::acceptsWrites($section->school_year, $gradingPeriod)) {
@@ -799,6 +917,9 @@ class AssessmentController extends Controller
             foreach ($parsedScores as $studentId => $value) {
                 if ($value === null) {
                     AssessmentScore::where('assessment_id', $assessment->id)->where('student_id', $studentId)->delete();
+                    // Query-builder delete fires no model event — tell the
+                    // evidence cache by hand (see GradingEngine::invalidateEvidence()).
+                    \App\Services\GradingEngine::invalidateEvidence();
                     continue;
                 }
 
@@ -832,5 +953,25 @@ class AssessmentController extends Controller
         return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
             ->with('success', 'Updated "' . $assessment->name . '".')
             ->with('edit_summary', $summary);
+    }
+
+    /**
+     * The subject must be applicable to this section IN THIS TERM
+     * (Subject::forSection() with the term — SubjectApplicabilityService),
+     * not merely somewhere in the section's year. Null means refuse;
+     * notOfferedMessage() says why in the one wording
+     * SubjectOfferingService owns.
+     */
+    private function offeredSubjectOrNull(Section $section, int $gradingPeriod, int $subjectId): ?Subject
+    {
+        return Subject::forSection($section, $gradingPeriod)->where('id', $subjectId)->first();
+    }
+
+    private function notOfferedMessage(Section $section, int $gradingPeriod, int $subjectId): string
+    {
+        $subject = Subject::find($subjectId);
+
+        return (new \App\Services\SubjectOfferingService())
+            ->notOfferedMessage($subject?->name ?? 'That subject', $section, $gradingPeriod);
     }
 }

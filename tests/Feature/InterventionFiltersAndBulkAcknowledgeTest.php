@@ -9,6 +9,7 @@ use App\Models\Student;
 use App\Models\Subject;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
@@ -25,8 +26,12 @@ class InterventionFiltersAndBulkAcknowledgeTest extends TestCase
     {
         $adviser = User::factory()->create();
         $section = Section::factory()->create(['adviser_id' => $adviser->id, 'grade_level' => 11, 'school_year' => '2026-2027']);
-        $subjectA = Subject::factory()->create(['grade_level' => 11, 'type' => 'core', 'name' => 'Subject A']);
-        $subjectB = Subject::factory()->create(['grade_level' => 11, 'type' => 'core', 'name' => 'Subject B']);
+        // Distinct names per call: subjects are unique on (name, grade_level)
+        // at the database since the pre-demo audit, and one test builds two
+        // adviser sections.
+        $suffix = ' ' . Str::random(6);
+        $subjectA = Subject::factory()->create(['grade_level' => 11, 'type' => 'core', 'name' => 'Subject A' . $suffix]);
+        $subjectB = Subject::factory()->create(['grade_level' => 11, 'type' => 'core', 'name' => 'Subject B' . $suffix]);
 
         return compact('adviser', 'section', 'subjectA', 'subjectB');
     }

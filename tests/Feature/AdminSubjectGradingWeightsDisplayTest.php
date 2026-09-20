@@ -59,14 +59,39 @@ class AdminSubjectGradingWeightsDisplayTest extends TestCase
         $response->assertSee('DepEd Strengthened SHS catalog');
     }
 
-    public function test_a_grade_12_subject_does_not_guess_a_do8_weight(): void
+    /**
+     * "Grading policy display" + "SSHS ECR grading correction" passes
+     * (2026-09-20) — a Grade 12 subject shows the figures GradingEngine::
+     * resolveWeightProfile() would grade it with, never a placeholder and
+     * never a guess: DO 015 in SY 2026-2027 unless a section is explicitly
+     * on the 2013 curriculum, and both contexts when both kinds exist.
+     */
+    public function test_a_grade_12_subject_shows_the_engines_do015_figures_and_do8_only_for_an_explicit_2013_section(): void
     {
         $admin = User::factory()->admin()->create();
-        Subject::factory()->create(['name' => 'Oral Communication', 'type' => 'core', 'grade_level' => 12]);
+        Subject::factory()->create(['name' => 'Oral Communication', 'type' => 'core', 'grade_level' => 12, 'subject_group' => 'core_academic']);
 
-        $response = $this->actingAs($admin)->get('/admin/subjects');
+        // SY 2026-2027, no explicit curriculum: DO 015 for Grade 12 as for
+        // Grade 11 ("SSHS ECR grading correction") — Core is 20/50/30.
+        $html = $this->actingAs($admin)->get('/admin/subjects')->assertOk()->getContent();
+        $this->assertStringNotContainsString('by section track', $html);
+        $this->assertStringContainsString('data-grading-key="core_academic"', $html);
+        $this->assertStringContainsString('DO 015, s. 2026', $html);
 
-        $response->assertOk();
-        $response->assertSee('by section track');
+        // Only an EXPLICIT 2013-curriculum section brings DO 8 into view. When
+        // every Grade 12 section is such a section, DO 8 IS the single answer...
+        $track = \App\Models\Track::factory()->create(['code' => 'ACAD']);
+        $year = \App\Models\Section::activeSchoolYear();
+        \App\Models\Section::factory()->create(['grade_level' => 12, 'school_year' => $year, 'curriculum' => 'k12_2013', 'track_id' => $track->id]);
+        $html = $this->actingAs($admin)->get('/admin/subjects')->assertOk()->getContent();
+        $this->assertStringContainsString('data-grading-key="do8_core"', $html);
+        $this->assertStringContainsString('Core Subjects', $html);
+
+        // ...and once an SSHS (or unset) section exists beside it, both
+        // contexts are shown rather than one figure being picked.
+        \App\Models\Section::factory()->create(['grade_level' => 12, 'school_year' => $year, 'curriculum' => null, 'track_id' => $track->id]);
+        $html = $this->actingAs($admin)->get('/admin/subjects')->assertOk()->getContent();
+        $this->assertStringContainsString('Resolved by section context', $html);
+        $this->assertStringContainsString('2013 curriculum', $html);
     }
 }

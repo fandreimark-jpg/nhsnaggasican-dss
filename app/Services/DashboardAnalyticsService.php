@@ -13,7 +13,6 @@ use App\Models\Specialization;
 use App\Models\Student;
 use App\Models\StudentEnrollment;
 use App\Models\Subject;
-use App\Models\SubjectGroupWeight;
 use App\Models\Track;
 use App\Models\User;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -158,9 +157,9 @@ class DashboardAnalyticsService
      * COMPUTED grade (GradingEngine's raw weighted evidence — the SAME
      * per-scheme, per-subject-group weights and the SAME "every
      * applicable component or it doesn't count" completeness rule as
-     * GradingEngine::computeGrade(), reused via SubjectGroupWeight so
-     * this can never silently drift from what GradingEngine itself
-     * would compute) per term, across every student/subject pair with
+     * GradingEngine::computeGrade(), read through GradingEngine::
+     * resolveWeightProfile() itself so this can never silently drift
+     * from what GradingEngine would compute) per term, across every student/subject pair with
      * complete evidence, straight from Assessment/AssessmentScore.
      * Deliberately NOT `grades.grade` (the official grade): that column
      * only fills in once an adviser manually encodes or verifies a
@@ -182,20 +181,34 @@ class DashboardAnalyticsService
      */
     private function computeAssessmentEvidenceTrend(string $schoolYear): array
     {
-        $subjectGroups = Subject::pluck('subject_group', 'id');
-        // "ECR alignment" work order, PART 3a — curriculum, not just grade
-        // level, decides the scheme now; see TransmutationService::schemeFor().
-        $sectionSchemes = Section::where('school_year', $schoolYear)->select('id', 'grade_level', 'curriculum')->get()
-            ->mapWithKeys(fn($section) => [
-                $section->id => (new TransmutationService())->schemeFor((int) $section->grade_level, $schoolYear, $section->curriculum),
-            ]);
+        // THE resolver ("Grading policy display" pass, 2026-09-20): the
+        // weights each (section, subject) bucket is judged by come from
+        // GradingEngine::resolveWeightProfile() — catalog row, then the
+        // scheme's group, with DO 8 read from the SECTION's track — exactly
+        // what computeGrade() uses. This used to call
+        // SubjectGroupWeight::resolve($scheme, $subject_group) directly,
+        // which skipped the catalog for Grade 11 and put every Grade 12
+        // bucket on the DO 8 'all' row instead of its track bucket.
+        // Resolved once per distinct (section, subject) pair, not per row.
+        $engine = new GradingEngine();
+        $sectionsById = Section::where('school_year', $schoolYear)->with('track')->get()->keyBy('id');
+        $subjectsById = Subject::all()->keyBy('id');
+        $profileCache = [];
+        $profileFor = function (int $sectionId, int $subjectId) use (&$profileCache, $engine, $sectionsById, $subjectsById): ?array {
+            $cacheKey = $sectionId . '|' . $subjectId;
+            if (!array_key_exists($cacheKey, $profileCache)) {
+                $section = $sectionsById->get($sectionId);
+                $subject = $subjectsById->get($subjectId);
+                try {
+                    $profileCache[$cacheKey] = ($section && $subject) ? $engine->resolveWeightProfile($section, $subject) : null;
+                } catch (\Throwable $e) {
+                    // An unclassified subject has no weights — its buckets
+                    // cannot be judged and are skipped, never defaulted.
+                    $profileCache[$cacheKey] = null;
+                }
+            }
 
-        // (scheme, subject_group) -> SubjectGroupWeight, resolved once per
-        // distinct pair actually seen below rather than per row.
-        $weightsCache = [];
-        $weightsFor = function (string $scheme, ?string $subjectGroup) use (&$weightsCache) {
-            $cacheKey = $scheme . '|' . ($subjectGroup ?? '');
-            return $weightsCache[$cacheKey] ??= SubjectGroupWeight::resolve($scheme, $subjectGroup);
+            return $profileCache[$cacheKey];
         };
 
         $rows = DB::table('assessment_scores')
@@ -226,13 +239,15 @@ class DashboardAnalyticsService
         $counts = [1 => 0, 2 => 0, 3 => 0];
 
         foreach ($buckets as $bucket) {
-            $scheme = $sectionSchemes[$bucket['section_id']] ?? TransmutationService::DEFAULT_SCHEME;
-            $weights = $weightsFor($scheme, $subjectGroups[$bucket['subject_id']] ?? null);
+            $profile = $profileFor((int) $bucket['section_id'], (int) $bucket['subject_id']);
+            if ($profile === null) {
+                continue;
+            }
 
             $weightMap = [
-                'written_work'     => (float) $weights->ww_weight,
-                'performance_task' => (float) $weights->pt_weight,
-                'examination'      => $weights->ex_weight !== null ? (float) $weights->ex_weight : null,
+                'written_work'     => $profile['ww_weight'],
+                'performance_task' => $profile['pt_weight'],
+                'examination'      => $profile['ex_weight'],
             ];
             $requiredKeys = array_keys(array_filter($weightMap, fn($w) => $w !== null));
 
@@ -316,14 +331,33 @@ class DashboardAnalyticsService
         // One pass over every section's resolved subjects — feeds both
         // "sections with no subjects resolved" AND the in-use subject set
         // the next check needs, rather than querying forSection() twice.
+        // "Student identity and term-specific subject offerings" pass —
+        // "no subjects resolved" is year-wide (any term), while the
+        // in-use set for the assessment check below is the OPEN term's
+        // offerings only, since a Term-1-only subject is not expected to
+        // have Term 2 evidence. Sections still on the curriculum default
+        // (no term-specific assignments at all) are listed separately as
+        // an attention item — nothing is broken, but the section has not
+        // yet been told which subjects it takes per term.
         $sectionsWithNoSubjects = collect();
+        // "Subject applicability" refactor — the one per-section decision
+        // left is an SSHS section's elective choice; a section whose track
+        // has electives to offer but has chosen none is flagged (yellow),
+        // exactly SectionElectiveStatus::isFullyConfigured()'s question.
+        $sectionsAwaitingElectiveChoice = collect();
         $inUseSubjectIds = collect();
+        $electiveStatus = new SectionElectiveStatus();
         foreach ($sections as $section) {
             $subjectIds = Subject::forSection($section)->pluck('id');
             if ($subjectIds->isEmpty()) {
                 $sectionsWithNoSubjects->push($section);
             }
-            $inUseSubjectIds = $inUseSubjectIds->merge($subjectIds);
+            if ($section->school_year === $schoolYear && !$electiveStatus->isFullyConfigured($section)) {
+                $sectionsAwaitingElectiveChoice->push($section);
+            }
+            $inUseSubjectIds = $inUseSubjectIds->merge(
+                $openTerm ? Subject::forSection($section, $openTerm)->pluck('id') : $subjectIds
+            );
         }
         $inUseSubjectIds = $inUseSubjectIds->unique()->values();
 
@@ -364,6 +398,7 @@ class DashboardAnalyticsService
             'subjectsWithNoAssessments'  => $subjectsWithNoAssessments,
             'usersNeverLoggedIn'         => $usersNeverLoggedIn,
             'subjectsWithSuspectGroup'   => $subjectsWithSuspectGroup,
+            'sectionsAwaitingElectiveChoice' => $sectionsAwaitingElectiveChoice->values(),
         ];
     }
 
@@ -546,12 +581,24 @@ class DashboardAnalyticsService
      */
     private function computeInTermStatusCounts(string $schoolYear, int $term): array
     {
+        // "Performance audit" pass — the Principal dashboard asks for the
+        // open term's counts twice per request (getInTermStatusSummary()
+        // and getInTermStatusTrend()); the second answer is the first one.
+        // Instance-scoped, so it never outlives the request.
+        return $this->inTermStatusCounts[$schoolYear . '|' . $term] ??= $this->computeInTermStatusCountsUncached($schoolYear, $term);
+    }
+
+    /** @var array<string, array{On Track: int, Needs Attention: int, At Risk: int, total: int}> */
+    private array $inTermStatusCounts = [];
+
+    private function computeInTermStatusCountsUncached(string $schoolYear, int $term): array
+    {
         $counts = ['On Track' => 0, 'Needs Attention' => 0, 'At Risk' => 0];
         $total = 0;
 
         $sections = Section::where('school_year', $schoolYear)->get();
         foreach ($sections as $section) {
-            $subjects = Subject::forSection($section)->get();
+            $subjects = Subject::forSection($section, $term)->get();
             if ($subjects->isEmpty()) {
                 continue;
             }
@@ -741,6 +788,9 @@ class DashboardAnalyticsService
                 'was_overridden'          => $latestRisk->was_overridden ?? false,
                 'ml_risk_level'           => $latestRisk->ml_risk_level ?? null,
                 'trend'                   => $this->computeTrend($history),
+                // STEP K — whether the overall trend above compares two
+                // different subject mixes; the view says so when it does.
+                'subject_composition'     => $this->subjectCompositionBetween($student->id, $history),
                 'consecutive_decline'     => $this->computeConsecutiveDecline($history),
                 'subject_declines'        => $this->computeSubjectDeclines($student->id, $history),
                 // Kept only long enough to compute weakest_subject_component
@@ -929,9 +979,38 @@ class DashboardAnalyticsService
     /**
      * Subjects that dropped 5+ points since the last term, worst decline
      * first — catches a subject-specific decline that the overall average
-     * could otherwise mask.
+     * could otherwise mask. A subset of computeSameSubjectTrend(): only a
+     * subject graded in BOTH compared terms can decline.
      */
     public function computeSubjectDeclines(int $studentId, $history): array
+    {
+        $declines = array_values(array_filter(
+            $this->computeSameSubjectTrend($studentId, $history),
+            fn(array $row) => $row['diff'] <= -5
+        ));
+
+        usort($declines, fn($a, $b) => $a['diff'] <=> $b['diff']);
+
+        return $declines;
+    }
+
+    /**
+     * SAME-SUBJECT TREND — "Student identity and term-specific subject
+     * offerings" pass, STEP K. Subjects may differ between terms, so a
+     * subject-level comparison is only ever made between the SAME subject
+     * graded in both of the two most recent terms on record:
+     *
+     *   VALID:   General Mathematics Term 1 vs General Mathematics Term 2
+     *   INVALID: Effective Communication Term 1 vs Basic Calculus Term 2
+     *
+     * A subject present in only one of the two terms is simply not in this
+     * list — see subjectCompositionBetween() for that half of the story.
+     * computeTrend() (the OVERALL term trend on average_grade) is a
+     * different, coarser signal and deliberately stays separate.
+     *
+     * @return array<int, array{subject: string, subject_id: int, from: float, to: float, diff: float}>
+     */
+    public function computeSameSubjectTrend(int $studentId, $history): array
     {
         if ($history->count() < 2) {
             return [];
@@ -950,31 +1029,73 @@ class DashboardAnalyticsService
             ->where('grading_period', $currentResult->grading_period)
             ->where('school_year', $currentResult->school_year)
             ->with('subject')
+            ->orderBy('subject_id')
             ->get();
 
-        $declines = [];
-
+        $rows = [];
         foreach ($currentGrades as $g) {
             $prev = $previousGrades[$g->subject_id] ?? null;
-
             if ($prev === null) {
                 continue;
             }
 
-            $diff = $g->grade - $prev;
-
-            if ($diff <= -5) {
-                $declines[] = [
-                    'subject' => $g->subject->name ?? 'Unknown',
-                    'from'    => $prev,
-                    'to'      => $g->grade,
-                    'diff'    => $diff,
-                ];
-            }
+            $rows[] = [
+                'subject'    => $g->subject->name ?? 'Unknown',
+                'subject_id' => (int) $g->subject_id,
+                'from'       => (float) $prev,
+                'to'         => (float) $g->grade,
+                'diff'       => round((float) $g->grade - (float) $prev, 2),
+            ];
         }
 
-        usort($declines, fn($a, $b) => $a['diff'] <=> $b['diff']);
+        return $rows;
+    }
 
-        return $declines;
+    /**
+     * Did the SET of graded subjects change between the two terms the
+     * overall trend compares? computeTrend() compares term averages even
+     * when the subject mix differs (Term 1: General Mathematics, Effective
+     * Communication; Term 2: General Mathematics, Basic Calculus) — that
+     * is still a legitimate overall trend, but the interface must not
+     * imply every underlying subject was identical. This says exactly
+     * which subjects were shared and which were not, so every screen
+     * showing a trend can say so in words.
+     *
+     * Null when there are fewer than two terms on record (nothing is
+     * being compared).
+     *
+     * @return ?array{changed: bool, previous_term: int, current_term: int, shared: string[], only_previous: string[], only_current: string[]}
+     */
+    public function subjectCompositionBetween(int $studentId, $history): ?array
+    {
+        if ($history->count() < 2) {
+            return null;
+        }
+
+        $n = $history->count();
+        $previousResult = $history[$n - 2];
+        $currentResult  = $history[$n - 1];
+
+        $namesFor = fn($result) => Grade::where('student_id', $studentId)
+            ->where('grading_period', $result->grading_period)
+            ->where('school_year', $result->school_year)
+            ->with('subject')
+            ->get()
+            ->map(fn($g) => $g->subject->name ?? 'Unknown')
+            ->unique()
+            ->sort()
+            ->values();
+
+        $previous = $namesFor($previousResult);
+        $current  = $namesFor($currentResult);
+
+        return [
+            'changed'       => $previous->diff($current)->isNotEmpty() || $current->diff($previous)->isNotEmpty(),
+            'previous_term' => (int) $previousResult->grading_period,
+            'current_term'  => (int) $currentResult->grading_period,
+            'shared'        => $previous->intersect($current)->values()->all(),
+            'only_previous' => $previous->diff($current)->values()->all(),
+            'only_current'  => $current->diff($previous)->values()->all(),
+        ];
     }
 }

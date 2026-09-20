@@ -10,6 +10,7 @@ use App\Models\Section;
 use App\Models\Student;
 use App\Models\Subject;
 use App\Models\SubjectGroupWeight;
+use App\Models\Track;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -61,8 +62,208 @@ class GradingEngine
     /** The 3 roles the Examination component can split into under a scheme that defines exam_role_shares — see ExamRoleShare. */
     private const EXAM_ROLES = ['st1', 'st2', 'term_exam'];
 
+    /**
+     * "Performance audit" pass — EVIDENCE CACHE.
+     *
+     * computeGrade() used to run ~7 queries per call (assessment ids per
+     * component, this student's scores per component, the weight row, the
+     * exam-role shares, the transmutation band), and every dashboard calls
+     * it once per (student, subject, term): the Principal dashboard alone
+     * made 1,076 calls and 7,715 queries per page load. The arithmetic
+     * below is byte-for-byte what it was; only WHERE the rows come from
+     * changed. Each (section, term, school year) scope is now read ONCE —
+     * every assessment item in it and every score against those items —
+     * and each call filters that in memory using the exact same
+     * predicates the per-call queries used.
+     *
+     * Staleness is guarded by a process-wide GENERATION counter: every
+     * Eloquent save/delete on the evidence and reference tables bumps it
+     * (see AppServiceProvider::boot()), and a cache entry built under an
+     * older generation is discarded on its next read. The one non-Eloquent
+     * write in the app (a query-builder delete in
+     * Adviser\AssessmentController::updateItem()) calls invalidateEvidence()
+     * itself. A new engine instance always starts empty, so nothing here
+     * crosses requests — the cache lives on the instance, only the
+     * generation is static.
+     *
+     * The numeric values are cast ONCE when the evidence is loaded: every
+     * (float) $score->score / (float) $item->max_score the arithmetic
+     * used to do per read goes through Eloquent's decimal:2 cast, which
+     * costs ~7us each — thousands of times per dashboard. The same cast
+     * produces the same float; it just runs once per row now.
+     *
+     * @var array<string, array{
+     *     generation: int,
+     *     by_subject_component: array<int, array<string, array<int, Assessment>>>,
+     *     max: array<int, float>,
+     *     roles: array<int, ?string>,
+     *     scores: array<int, array<int, AssessmentScore>>,
+     *     values: array<int, array<int, float>>,
+     * }>
+     */
+    private array $evidence = [];
+
+    /** @var array<int|string, mixed> per-instance memo of reference rows (catalog, weights, exam-role shares), generation-checked */
+    private array $referenceMemo = [];
+    private int $referenceGeneration = -1;
+
+    private static int $generation = 0;
+
+    /**
+     * Marks every evidence/reference cache stale. Called automatically from
+     * model events (AppServiceProvider); call it by hand after any write to
+     * assessments / assessment_scores / the grading reference tables that
+     * bypasses Eloquent model events (query-builder update/delete/insert).
+     */
+    public static function invalidateEvidence(): void
+    {
+        self::$generation++;
+    }
+
+    public static function evidenceGeneration(): int
+    {
+        return self::$generation;
+    }
+
     public function __construct(private TransmutationService $transmutation = new TransmutationService())
     {
+    }
+
+    /**
+     * How many assessment ITEMS this student has a recorded score for in
+     * this subject/section/term/year — any component. The same count
+     * InTermStatusService::fromAnalysis() used to run as its own query
+     * per row (AssessmentScore where student_id ... whereHas assessment),
+     * now answered from the evidence already loaded for the grade.
+     */
+    public function scoredItemCount(Student $student, Subject $subject, Section $section, int $gradingPeriod, string $schoolYear): int
+    {
+        $evidence = $this->evidenceFor($section, $gradingPeriod, $schoolYear);
+        $studentScores = $evidence['scores'][$student->id] ?? [];
+
+        if ($studentScores === []) {
+            return 0;
+        }
+
+        $count = 0;
+        foreach ($evidence['by_subject_component'][$subject->id] ?? [] as $items) {
+            foreach ($items as $assessmentId => $item) {
+                if (isset($studentScores[$assessmentId])) {
+                    $count++;
+                }
+            }
+        }
+
+        return $count;
+    }
+
+    /**
+     * This student's scored items for ONE component of one subject/
+     * section/term/year, in assessment-id order, optionally only the
+     * scores recorded on or before $asOf (assessment_scores.created_at —
+     * when the score was entered, not when the item was defined). The
+     * rows ProgressMonitoringService::componentPercentageAsOf() used to
+     * query per call, now read from the evidence already loaded.
+     *
+     * The cutoff is compared on the same 'Y-m-d H:i:s' representation the
+     * query binding used, so a score with no created_at is excluded
+     * exactly as SQL's `NULL <= x` excluded it.
+     *
+     * @return array<int, array{score: AssessmentScore, assessment: Assessment}>
+     */
+    public function scoredItems(Student $student, Subject $subject, Section $section, int $gradingPeriod, string $schoolYear, string $componentKey, ?\DateTimeInterface $asOf = null): array
+    {
+        $evidence = $this->evidenceFor($section, $gradingPeriod, $schoolYear);
+        $items = $evidence['by_subject_component'][$subject->id][$componentKey] ?? [];
+        $studentScores = $evidence['scores'][$student->id] ?? [];
+        $cutoff = $asOf?->format('Y-m-d H:i:s');
+
+        $rows = [];
+        foreach ($items as $assessmentId => $item) {
+            $score = $studentScores[$assessmentId] ?? null;
+            if ($score === null) {
+                continue;
+            }
+            if ($cutoff !== null && ($score->created_at === null || $score->created_at->format('Y-m-d H:i:s') > $cutoff)) {
+                continue;
+            }
+            $rows[] = ['score' => $score, 'assessment' => $item];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Loads (once per section/term/year per instance) every assessment
+     * item in scope and every score against those items. Two queries,
+     * regardless of how many students or subjects are then computed.
+     *
+     * @return array{generation: int, by_subject_component: array, scores: array}
+     */
+    private function evidenceFor(Section $section, int $gradingPeriod, string $schoolYear): array
+    {
+        $key = $section->id . '|' . $gradingPeriod . '|' . $schoolYear;
+
+        if (isset($this->evidence[$key]) && $this->evidence[$key]['generation'] === self::$generation) {
+            return $this->evidence[$key];
+        }
+
+        $generation = self::$generation;
+
+        $items = Assessment::where('section_id', $section->id)
+            ->where('grading_period', $gradingPeriod)
+            ->where('school_year', $schoolYear)
+            ->orderBy('id')
+            ->get();
+
+        $bySubjectComponent = [];
+        $max = [];
+        $roles = [];
+        foreach ($items as $item) {
+            $bySubjectComponent[$item->subject_id][$item->component][$item->id] = $item;
+            $max[$item->id] = (float) $item->max_score;
+            $roles[$item->id] = $item->exam_role;
+        }
+
+        $scores = [];
+        $values = [];
+        if ($items->isNotEmpty()) {
+            // No ORDER BY on purpose: every read below iterates the ITEMS
+            // (loaded in id order) and looks scores up by key, so row order
+            // here is irrelevant — and without it MySQL uses the
+            // (assessment_id, student_id) unique index instead of walking
+            // the primary key.
+            $rows = AssessmentScore::whereIn('assessment_id', $items->pluck('id'))
+                ->get();
+            foreach ($rows as $row) {
+                $scores[$row->student_id][$row->assessment_id] = $row;
+                $values[$row->student_id][$row->assessment_id] = (float) $row->score;
+            }
+        }
+
+        return $this->evidence[$key] = [
+            'generation'           => $generation,
+            'by_subject_component' => $bySubjectComponent,
+            'max'                  => $max,
+            'roles'                => $roles,
+            'scores'               => $scores,
+            'values'               => $values,
+        ];
+    }
+
+    /** Generation-checked per-instance memo for reference rows that never change within a request. */
+    private function memo(string $key, callable $load): mixed
+    {
+        if ($this->referenceGeneration !== self::$generation) {
+            $this->referenceMemo = [];
+            $this->referenceGeneration = self::$generation;
+        }
+
+        if (!array_key_exists($key, $this->referenceMemo)) {
+            $this->referenceMemo[$key] = $load();
+        }
+
+        return $this->referenceMemo[$key];
     }
 
     /**
@@ -95,21 +296,11 @@ class GradingEngine
         // (every subject that predates this, or one genuinely outside the
         // Strengthened SHS catalog — see CLAUDE.md's "rule on conflicting
         // evidence") sees no behavior change at all.
-        $catalog = $subject->catalog_id ? DepedSubjectCatalog::find($subject->catalog_id) : null;
-
-        if ($catalog) {
-            $wwWeight = (float) $catalog->ww_weight;
-            $ptWeight = (float) $catalog->pt_weight;
-            $exWeight = $catalog->ex_weight !== null ? (float) $catalog->ex_weight : null;
-        } else {
-            $groupKey = $scheme === 'do8_2015'
-                ? $this->resolveDo8GroupKey($section, $subject)
-                : $subject->subject_group;
-            $weights = SubjectGroupWeight::resolve($scheme, $groupKey);
-            $wwWeight = (float) $weights->ww_weight;
-            $ptWeight = (float) $weights->pt_weight;
-            $exWeight = $weights->ex_weight !== null ? (float) $weights->ex_weight : null;
-        }
+        $profile  = $this->resolveWeightProfile($section, $subject, $scheme);
+        $catalog  = $profile['catalog'];
+        $wwWeight = $profile['ww_weight'];
+        $ptWeight = $profile['pt_weight'];
+        $exWeight = $profile['ex_weight'];
 
         $componentPercentages = [
             'written_work'     => $this->componentPercentage($student, $subject, $section, $gradingPeriod, $schoolYear, 'written_work'),
@@ -195,28 +386,34 @@ class GradingEngine
         string $schoolYear,
         string $componentKey
     ): ?float {
-        $assessmentIds = Assessment::where('subject_id', $subject->id)
-            ->where('section_id', $section->id)
-            ->where('grading_period', $gradingPeriod)
-            ->where('school_year', $schoolYear)
-            ->where('component', $componentKey)
-            ->pluck('id');
+        // Same predicates as the per-call query this replaced (subject,
+        // section, period, year, component) — read from the evidence
+        // loaded once for this section/term, see evidenceFor().
+        $evidence = $this->evidenceFor($section, $gradingPeriod, $schoolYear);
+        $items = $evidence['by_subject_component'][$subject->id][$componentKey] ?? [];
 
-        if ($assessmentIds->isEmpty()) {
+        if ($items === []) {
             return null;
         }
 
-        $scores = AssessmentScore::where('student_id', $student->id)
-            ->whereIn('assessment_id', $assessmentIds)
-            ->with('assessment')
-            ->get();
+        $studentValues = $evidence['values'][$student->id] ?? [];
+        $maxByItem = $evidence['max'];
 
-        if ($scores->isEmpty()) {
-            return null;
+        $earned = 0.0;
+        $max    = 0.0;
+        $any    = false;
+        foreach ($items as $assessmentId => $item) {
+            if (!isset($studentValues[$assessmentId])) {
+                continue;
+            }
+            $any = true;
+            $earned += $studentValues[$assessmentId];
+            $max    += $maxByItem[$assessmentId];
         }
 
-        $earned = $scores->sum(fn($s) => (float) $s->score);
-        $max    = $scores->sum(fn($s) => (float) $s->assessment->max_score);
+        if (!$any) {
+            return null;
+        }
 
         if ($max <= 0) {
             return null;
@@ -263,37 +460,50 @@ class GradingEngine
         string $scheme,
         ?DepedSubjectCatalog $catalog = null
     ): ?float {
-        $items = Assessment::where('subject_id', $subject->id)
-            ->where('section_id', $section->id)
-            ->where('grading_period', $gradingPeriod)
-            ->where('school_year', $schoolYear)
-            ->where('component', 'examination')
-            ->get(['id', 'exam_role', 'max_score']);
+        $evidence = $this->evidenceFor($section, $gradingPeriod, $schoolYear);
+        // Item ids in id order; the student's pre-cast score per item id.
+        $itemIds = array_keys($evidence['by_subject_component'][$subject->id]['examination'] ?? []);
 
-        if ($items->isEmpty()) {
+        if ($itemIds === []) {
             return null;
         }
 
-        $scores = AssessmentScore::where('student_id', $student->id)
-            ->whereIn('assessment_id', $items->pluck('id'))
-            ->get();
+        $studentValues = $evidence['values'][$student->id] ?? [];
+        $maxByItem = $evidence['max'];
+        $roleByItem = $evidence['roles'];
 
-        if ($scores->isEmpty()) {
+        $scoredItemIds = array_values(array_filter($itemIds, fn($id) => isset($studentValues[$id])));
+
+        if ($scoredItemIds === []) {
             return null;
         }
 
-        $hasAnyRole = $items->contains(fn($item) => $item->exam_role !== null);
+        $hasAnyRole = false;
+        foreach ($itemIds as $id) {
+            if ($roleByItem[$id] !== null) {
+                $hasAnyRole = true;
+                break;
+            }
+        }
 
         if (!$hasAnyRole) {
-            $itemsById = $items->keyBy('id');
-            $earned = $scores->sum(fn($s) => (float) $s->score);
-            $max    = $scores->sum(fn($s) => (float) $itemsById[$s->assessment_id]->max_score);
+            $earned = 0.0;
+            $max    = 0.0;
+            foreach ($scoredItemIds as $id) {
+                $earned += $studentValues[$id];
+                $max    += $maxByItem[$id];
+            }
 
             return $max > 0 ? round(($earned / $max) * 100, 2) : null;
         }
 
-        $itemsByRole = $items->filter(fn($item) => $item->exam_role !== null)->groupBy('exam_role');
-        $scoresByAssessmentId = $scores->keyBy('assessment_id');
+        // role => [item ids], items with no role excluded, id order kept.
+        $itemIdsByRole = [];
+        foreach ($itemIds as $id) {
+            if ($roleByItem[$id] !== null) {
+                $itemIdsByRole[$roleByItem[$id]][] = $id;
+            }
+        }
 
         // "ECR alignment" work order, PART 2c — a linked catalog row's own
         // st1/st2/te shares win when it has any (including a TE-only row,
@@ -304,25 +514,21 @@ class GradingEngine
         $catalogShares = $catalog?->examRoleShares() ?? [];
         $shareRows = !empty($catalogShares)
             ? $catalogShares
-            : ExamRoleShare::where('scheme', $scheme)->pluck('share', 'exam_role');
+            : $this->memo('exam_role_shares|' . $scheme, fn() => ExamRoleShare::where('scheme', $scheme)->pluck('share', 'exam_role'));
 
-        $presentRoles = array_values(array_intersect(self::EXAM_ROLES, $itemsByRole->keys()->all()));
+        $presentRoles = array_values(array_intersect(self::EXAM_ROLES, array_keys($itemIdsByRole)));
         $equalShare = 100 / count($presentRoles);
 
         $weightedSum = 0.0;
         $totalShare = 0.0;
 
         foreach ($presentRoles as $role) {
-            $roleItemIds = $itemsByRole[$role]->pluck('id');
-            $roleItemsById = $itemsByRole[$role]->keyBy('id');
-
             $earned = 0.0;
             $max = 0.0;
-            foreach ($roleItemIds as $itemId) {
-                $score = $scoresByAssessmentId->get($itemId);
-                if ($score) {
-                    $earned += (float) $score->score;
-                    $max += (float) $roleItemsById[$itemId]->max_score;
+            foreach ($itemIdsByRole[$role] as $itemId) {
+                if (isset($studentValues[$itemId])) {
+                    $earned += $studentValues[$itemId];
+                    $max += $maxByItem[$itemId];
                 }
             }
 
@@ -374,6 +580,154 @@ class GradingEngine
      * blocked on the school's answer to Q2) — it is deliberately built to
      * look like a stopgap rather than a silent decision.
      */
+    /**
+     * The weight profile computeGrade() grades a (section, subject) pair
+     * under — extracted so Admin > Sections > Subjects can DISPLAY the
+     * resolved profile on the assignment form without duplicating the
+     * resolution order (catalog row first, then subject_group_weights —
+     * see computeGrade()). Display only: nothing an Admin types can
+     * change these figures, which is the whole point of showing them
+     * read-only ("Student identity and term-specific subject offerings"
+     * pass, STEP F).
+     *
+     * @return array{
+     *     scheme: string,
+     *     source: string,
+     *     source_label: string,
+     *     group_key: ?string,
+     *     ww_weight: float,
+     *     pt_weight: float,
+     *     ex_weight: ?float,
+     *     catalog: ?DepedSubjectCatalog,
+     * }
+     */
+    public function resolveWeightProfile(Section $section, Subject $subject, ?string $scheme = null): array
+    {
+        $scheme ??= $this->transmutation->schemeFor($section->grade_level, $section->school_year, $section->curriculum);
+
+        $catalog = $subject->catalog_id
+            ? $this->memo('catalog|' . $subject->catalog_id, fn() => DepedSubjectCatalog::find($subject->catalog_id))
+            : null;
+
+        if ($catalog) {
+            return [
+                'scheme'       => $scheme,
+                'source'       => 'catalog',
+                'source_label' => 'DepEd SSHS subject catalog (' . $catalog->cluster . ')',
+                'group_key'    => null,
+                'ww_weight'    => (float) $catalog->ww_weight,
+                'pt_weight'    => (float) $catalog->pt_weight,
+                'ex_weight'    => $catalog->ex_weight !== null ? (float) $catalog->ex_weight : null,
+                'catalog'      => $catalog,
+            ];
+        }
+
+        $groupKey = $scheme === 'do8_2015'
+            ? $this->resolveDo8GroupKey($section, $subject)
+            : $subject->subject_group;
+        // A missing row throws (see SubjectGroupWeight::resolve()); only a
+        // found row is memoised, so the exception behaviour is unchanged.
+        $weights = $this->memo('weights|' . $scheme . '|' . ($groupKey ?? ''), fn() => SubjectGroupWeight::resolve($scheme, $groupKey));
+
+        return [
+            'scheme'       => $scheme,
+            'source'       => 'subject_group',
+            'source_label' => ($scheme === 'do8_2015' ? 'DO 8, s. 2015 — ' : 'DO 015, s. 2026 — ') . $weights->subject_group,
+            'group_key'    => $weights->subject_group,
+            'ww_weight'    => (float) $weights->ww_weight,
+            'pt_weight'    => (float) $weights->pt_weight,
+            'ex_weight'    => $weights->ex_weight !== null ? (float) $weights->ex_weight : null,
+            'catalog'      => null,
+        ];
+    }
+
+    /**
+     * The profile a SUBJECT grades under, asked without a section — for
+     * Admin > Subjects, which lists subjects, not (section, subject) pairs
+     * ("Grading policy display" pass, 2026-09-20).
+     *
+     * This is NOT a second resolver. It calls resolveWeightProfile() — the
+     * one computeGrade() uses — once per section context the subject could
+     * be graded in, and reports whether every context agrees:
+     *
+     *  - The scheme comes from the section's curriculum (explicit, or the
+     *    school-year inference in TransmutationService::schemeFor()); the
+     *    curricula in use at this grade level are each a context.
+     *  - DO 015 never reads the section beyond its scheme: one context.
+     *  - DO 8 (an explicit k12_2013 section) reads the SECTION's track
+     *    (resolveDo8GroupKey()).
+     *    An elective carries its own track_id and only ever applies to
+     *    sections of that track (SubjectApplicabilityService's strand
+     *    mechanism), so that track is the only context. A core subject has
+     *    no track, so every track in the system is a context; if they all
+     *    resolve to the same figures the answer is settled, otherwise the
+     *    honest answer is "resolved by section context" and the caller
+     *    shows the per-track variants rather than picking one.
+     *
+     * The pseudo-sections are never saved. The scheme is inferred exactly
+     * as it is for a real section with no explicit curriculum
+     * (TransmutationService::schemeFor()).
+     *
+     * @return array{
+     *     resolved: bool,
+     *     profile: ?array,
+     *     variants: array<int, array{track: ?string, curriculum: ?string, profile: array}>,
+     * }
+     */
+    public function resolveSubjectProfile(Subject $subject, ?string $schoolYear = null): array
+    {
+        $schoolYear ??= Section::activeSchoolYear();
+
+        $tracks = $subject->track_id
+            ? collect([$subject->track ?? Track::find($subject->track_id)])->filter()
+            : Track::orderBy('code')->get();
+
+        // Curriculum contexts: the DISTINCT curricula of the sections that
+        // actually exist at this grade level in this school year (null =
+        // "inferred by TransmutationService::schemeFor()"), or just the
+        // inferred one when no section exists yet. A legacy k12_2013 section
+        // therefore surfaces as a second variant only when one is real.
+        $curricula = Section::where('grade_level', (int) $subject->grade_level)
+            ->where('school_year', $schoolYear)
+            ->pluck('curriculum')->map(fn($c) => $c ?: null)->unique()->values();
+        if ($curricula->isEmpty()) {
+            $curricula = collect([null]);
+        }
+
+        $trackContexts = $tracks->isEmpty() ? collect([null]) : $tracks;
+
+        $variants = collect();
+        foreach ($curricula as $curriculum) {
+            foreach ($trackContexts as $track) {
+                $section = new Section([
+                    'grade_level' => (int) $subject->grade_level,
+                    'school_year' => $schoolYear,
+                    'track_id'    => $track?->id,
+                    'curriculum'  => $curriculum,
+                ]);
+                if ($track) {
+                    $section->setRelation('track', $track);
+                }
+
+                $variants->push([
+                    'track'      => $track?->code,
+                    'curriculum' => $curriculum,
+                    'profile'    => $this->resolveWeightProfile($section, $subject),
+                ]);
+            }
+        }
+        $variants = $variants->values();
+
+        $signature = fn(array $p) => $p['ww_weight'] . '|' . $p['pt_weight'] . '|' . ($p['ex_weight'] ?? 'null') . '|' . ($p['group_key'] ?? '');
+        $agree = $variants->map(fn($v) => $signature($v['profile']))->unique()->count() === 1;
+
+        return [
+            'resolved' => $agree,
+            'profile'  => $agree ? $variants->first()['profile'] : null,
+            'variants' => $variants->all(),
+        ];
+    }
+
     public function resolveDo8GroupKey(Section $section, Subject $subject): string
     {
         $trackCode = $section->track?->code;

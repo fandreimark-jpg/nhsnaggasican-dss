@@ -1,25 +1,15 @@
 @extends('layouts.app')
 
 @section('title', 'Subjects')
-@section('subtitle', 'Manage SHS subjects')
+@section('subtitle', 'Configure each subject — what it is, which grade and track it belongs to, and the terms it is taught in')
 
 @section('content')
 
 @php
-    // DO 015, s. 2026's subject group names — purely a display label for
-    // the slug stored in subject_group_weights/subjects.subject_group,
-    // never a weight or share itself. A group not in this map (a future
-    // scheme's addition) still renders a readable fallback.
-    $subjectGroupLabels = [
-        'core_academic'        => 'Core Academic',
-        'academic_other'       => 'Academic Elective',
-        'field_exposure'       => 'Field Exposure',
-        'arts_sports_wellness' => 'Arts, Sports & Wellness',
-        'research_innovation'  => 'Research/Innovation',
-        'techpro'              => 'Tech-Pro',
-        'work_immersion'       => 'Work Immersion',
-    ];
-    $subjectGroupLabel = fn($group) => $subjectGroupLabels[$group] ?? ucwords(str_replace('_', ' ', $group ?? ''));
+    // DO 015, s. 2026's subject group names — the one label map lives on
+    // SubjectGroupWeight::LABELS so Admin > Sections > Subjects reads the
+    // same words. Purely a display label, never a weight or share itself.
+    $subjectGroupLabel = fn($group) => \App\Models\SubjectGroupWeight::labelFor($group);
 
     // "ECR alignment" work order, PART 4c — what each group actually
     // COVERS, not just its slug. core_academic is genuinely three
@@ -56,7 +46,23 @@
     $subjectGroupCoverText = fn($group) => $subjectGroupCovers[$group] ?? null;
 @endphp
 
-@include('partials.import-result')
+{{-- Every validation error the Subject form can raise (name, type, grade
+     level, subject_group, track, specialization, terms) — a hand-picked
+     key list used to swallow a subject_group rejection silently. The
+     'deletion' key is rendered by the layout itself, so it is left out. --}}
+@php $formErrors = collect($errors->getMessages())->except('deletion')->flatten(); @endphp
+@if($formErrors->isNotEmpty())
+    <div class="alert alert-danger mb-4" role="alert">
+        <ul class="list-disc list-inside">
+            @foreach($formErrors as $message)<li>{{ $message }}</li>@endforeach
+        </ul>
+    </div>
+@endif
+
+{{-- "Subject applicability" refactor (2026-09-20) — this page is THE
+     configuration point for where and when a subject applies. Every
+     section resolves its subject list from what is set here
+     (SubjectApplicabilityService); nothing is assigned section by section. --}}
 
 <div class="card mb-0">
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 px-5 py-4 border-b border-line">
@@ -79,10 +85,6 @@
                     class="form-input !w-56 pl-9">
                 <i class="bi bi-search absolute left-3 top-2.5 text-gray-400 text-sm"></i>
             </div>
-            <button type="button" onclick="openImportSubjectsModal()"
-                class="bg-white border border-brand-700 text-brand-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-brand-50 whitespace-nowrap">
-                <i class="bi bi-upload"></i> Import Subjects
-            </button>
             <button type="button" onclick="openAddSubjectModal()"
                 class="btn btn-primary whitespace-nowrap">
                 <i class="bi bi-plus-lg"></i> Add Subject
@@ -99,6 +101,7 @@
                 <th scope="col">Category</th>
                 <th scope="col">Grading Profile / Weights</th>
                 <th scope="col">Track / Specialization</th>
+                <th scope="col">Terms Taught</th>
                 <th scope="col" class="text-right">Actions</th>
             </tr>
         </thead>
@@ -112,33 +115,43 @@
                         <span class="bg-green-100 text-green-700 text-xs font-semibold px-2 py-1 rounded">Core</span>
                     @else
                         <span class="badge badge-warning">Elective</span>
-                        @if($subject->subject_group)
-                            <span class="block text-xs text-muted mt-0.5">{{ $subjectGroupLabel($subject->subject_group) }}</span>
-                        @endif
+                    @endif
+                    {{-- Subject Group, Grade 11 and Grade 12 alike. A row with none
+                         (only possible for data created before the group became
+                         required) is a configuration-needed state, never guessed. --}}
+                    @if($subject->subject_group)
+                        <span class="block text-xs text-muted mt-0.5" data-subject-group="{{ $subject->subject_group }}">{{ $subjectGroupLabel($subject->subject_group) }}</span>
+                    @else
+                        <span class="block mt-0.5"><span class="badge badge-warning" title="No Subject Group is set — open Edit and choose the group this subject belongs to.">Subject Group needed</span></span>
                     @endif
                 </td>
                 <td class="text-xs">
-                    @php $w = $subject->grading_weights_display; @endphp
-                    @if(($w['source'] ?? null) === 'do8_by_track')
-                        <span class="text-gray-400" title="DO 8, s. 2015 — this section's track decides the split; see Sections.">DO 8, s. 2015 — by section track</span>
+                    {{-- Grading Profile — system-resolved by GradingEngine
+                         (resolveSubjectProfile -> resolveWeightProfile, the
+                         same path computeGrade() takes), read-only, Grade 11
+                         and Grade 12 alike. Never an editable field. --}}
+                    @php
+                        $w = $subject->grading_weights_display;
+                        $pct = fn($v) => $v !== null ? rtrim(rtrim(number_format($v, 2), '0'), '.') . '%' : 'none';
+                    @endphp
+                    @if(($w['source'] ?? null) === 'section_context')
+                        @php
+                            $variantText = collect($w['variants'])->map(fn($v) => "{$v['track']} section: WW {$pct($v['ww'])} / PT {$pct($v['pt'])} / Exam {$pct($v['ex'])} ({$v['label']})")->implode('; ');
+                        @endphp
+                        <span class="text-gray-500 cursor-help" data-grading-source="section_context" title="The section's track decides the split under DO 8, s. 2015, and the tracks in the system resolve differently: {{ $variantText }}">Resolved by section context</span>
+                        <span class="block text-[10px] text-muted mt-0.5">{{ $variantText }}</span>
                     @elseif($w)
                         @php
-                            $wwStr = rtrim(rtrim(number_format($w['ww'], 2), '0'), '.');
-                            $ptStr = rtrim(rtrim(number_format($w['pt'], 2), '0'), '.');
-                            $exStr = $w['ex'] !== null ? rtrim(rtrim(number_format($w['ex'], 2), '0'), '.') . '%' : 'none';
-                            $sourceLabel = $w['source'] === 'catalog'
-                                ? 'Source: DepEd Strengthened SHS catalog (exact subject match)'
-                                : 'Profile: ' . $subjectGroupLabel($subject->subject_group) . ' — Source: configured grading policy';
-                            $tooltip = "WW {$wwStr}% / PT {$ptStr}% / Exam {$exStr}. {$sourceLabel}. Effective: DO 015, s. 2026 (Grade 11).";
+                            $sourceNote = $w['source'] === 'catalog' ? 'From DepEd catalog match' : (($w['scheme'] ?? null) === 'do8_2015' ? 'Resolved from track and subject type' : 'Assigned by grading group');
+                            $tooltip = "WW {$pct($w['ww'])} / PT {$pct($w['pt'])} / Exam {$pct($w['ex'])}. Source: {$w['label']}. Grade {$subject->grade_level}.";
                         @endphp
-                        {{-- Grading Profile — system-resolved, read-only: never an editable field. --}}
-                        <div class="inline-grid grid-cols-[auto_auto] gap-x-3 gap-y-0.5 text-[11px] leading-tight cursor-help" title="{{ $tooltip }}">
-                            <span class="text-muted">Written Work</span><span class="font-semibold text-ink tabular-nums text-right">{{ $wwStr }}%</span>
-                            <span class="text-muted">Performance Task</span><span class="font-semibold text-ink tabular-nums text-right">{{ $ptStr }}%</span>
-                            <span class="text-muted">Examination</span><span class="font-semibold text-ink tabular-nums text-right">{{ $w['ex'] !== null ? rtrim(rtrim(number_format($w['ex'], 2), '0'), '.') . '%' : 'none' }}</span>
+                        <div class="inline-grid grid-cols-[auto_auto] gap-x-3 gap-y-0.5 text-[11px] leading-tight cursor-help" title="{{ $tooltip }}" data-grading-source="{{ $w['source'] }}" data-grading-key="{{ $w['group_key'] ?? 'catalog' }}">
+                            <span class="text-muted">Written Work</span><span class="font-semibold text-ink tabular-nums text-right">{{ $pct($w['ww']) }}</span>
+                            <span class="text-muted">Performance Task</span><span class="font-semibold text-ink tabular-nums text-right">{{ $pct($w['pt']) }}</span>
+                            <span class="text-muted">Examination</span><span class="font-semibold text-ink tabular-nums text-right">{{ $pct($w['ex']) }}</span>
                         </div>
                         <span class="block text-[10px] text-muted mt-0.5">
-                            {{ $w['source'] === 'catalog' ? 'From DepEd catalog match' : 'Assigned by grading group' }}
+                            {{ $sourceNote }} — {{ $w['label'] }}
                             <i class="bi bi-info-circle text-gray-300" title="{{ $tooltip }}" aria-hidden="true"></i>
                         </span>
                     @else
@@ -146,10 +159,22 @@
                     @endif
                 </td>
                 <td class="text-xs">{{ trim(($subject->track->name ?? '') . ($subject->specialization ? ' / ' . $subject->specialization->name : ''), ' /') ?: '—' }}</td>
+                <td>
+                    @php $taught = $subject->termNumbers(); @endphp
+                    @if($taught === [])
+                        <span class="badge badge-warning" title="No term is set — this subject does not apply to any section until Terms Taught is configured.">No term set</span>
+                    @else
+                        <span class="inline-flex gap-1" title="Taught in {{ implode(', ', array_map(fn($t) => 'Term ' . $t, $taught)) }}">
+                            @foreach($termNumbers as $t)
+                                <span class="badge {{ in_array($t, $taught, true) ? 'badge-brand' : 'badge-outline text-gray-300' }}">T{{ $t }}</span>
+                            @endforeach
+                        </span>
+                    @endif
+                </td>
                 <td class="text-right">
                     <div class="flex items-center justify-end gap-2">
                         <button type="button"
-                            onclick='openEditSubjectModal(@json($subject))'
+                            onclick='openEditSubjectModal(@json($subject), @json($subject->termNumbers()))'
                             class="inline-flex items-center gap-1 btn btn-xs btn-secondary whitespace-nowrap">
                             <i class="bi bi-pencil-square"></i> Edit
                         </button>
@@ -169,9 +194,9 @@
             </tr>
             @empty
             <tr>
-                <td colspan="6">
+                <td colspan="7">
                     <x-empty-state message="No subjects yet." icon="bi-book"
-                        hint='Use "Add Subject" or "Import Subjects" above to get started.' />
+                        hint='Use "Add Subject" above to get started.' />
                 </td>
             </tr>
             @endforelse
@@ -221,7 +246,8 @@
                 </div>
                 <div>
                     <label class="form-label">Grade Level</label>
-                    <select name="grade_level" id="subjectGrade" required onchange="refreshSubjectGroupField()"
+                    {{-- Grade Level has no effect on the Subject Group control. --}}
+                    <select name="grade_level" id="subjectGrade" required
                             class="form-input">
                         <option value="">— Select Grade —</option>
                         <option value="11">Grade 11</option>
@@ -230,12 +256,15 @@
                 </div>
             </div>
 
+            {{-- Subject Group — the subject's classification, required for
+                 Grade 11 and Grade 12 alike ("Subject Group for both grade
+                 levels" pass). The option list is the one authoritative
+                 source (SubjectGroupWeight::allGroups()); modal.js only
+                 narrows it to the selected Type (core_academic is Core-only).
+                 Grade level never hides, disables or clears this control. --}}
             <div id="subjectGroupWrapper">
-                <label class="form-label">
-                    Subject Group
-                    <span class="text-gray-400 text-xs">(DO 015, s. 2026 grading weight group — Grade 11 only; Grade 12 weighs by section track instead)</span>
-                </label>
-                <select name="subject_group" id="subjectGroupField"
+                <label class="form-label" for="subjectGroupField">Subject Group</label>
+                <select name="subject_group" id="subjectGroupField" required
                         class="form-input">
                     <option value="">— Select Subject Group —</option>
                     @foreach($subjectGroups as $group)
@@ -258,16 +287,32 @@
                     </select>
                 </div>
                 <div>
-                    <label class="form-label">
-                        Specialization
-                        <span class="text-gray-400 text-xs">(optional)</span>
-                    </label>
+                    {{-- Still nullable: "— All specializations in track —" is a
+                         valid choice (the elective applies to the whole track). --}}
+                    <label class="form-label" for="subjectSpec">Specialization</label>
                     <select name="specialization_id" id="subjectSpec"
                             class="form-input">
                         <option value="">— All specializations in track —</option>
                     </select>
                 </div>
             </div>
+
+            <fieldset id="termsTaughtFieldset">
+                <legend class="form-label">
+                    Terms Taught
+                    <span class="text-gray-400 text-xs">(select every academic term this subject is taught in)</span>
+                </legend>
+                <div class="flex flex-wrap gap-4 mt-1">
+                    @foreach($termNumbers as $t)
+                        <label class="inline-flex items-center gap-2 text-sm text-ink cursor-pointer">
+                            <input type="checkbox" name="terms[]" value="{{ $t }}" data-term-checkbox
+                                   class="rounded border-gray-300 text-brand-700 focus:ring-brand-400">
+                            Term {{ $t }}
+                        </label>
+                    @endforeach
+                </div>
+                <p class="form-help">Sections resolve this subject automatically in these terms only. Whether a term is <em>open</em> for encoding is set separately under Academic Terms.</p>
+            </fieldset>
 
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="closeSubjectModal()"
@@ -281,79 +326,6 @@
     </div>
 </div>
 {{-- Modal logic now lives in resources/js/modal.js. --}}
-
-{{-- IMPORT SUBJECTS MODAL --}}
-<div id="importSubjectsModal"
-     class="{{ $errors->import->any() ? 'opacity-100' : 'hidden opacity-0' }} fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
-    <div class="modal-box {{ $errors->import->any() ? 'scale-100 opacity-100' : 'scale-95 opacity-0' }} bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200">
-
-        <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-ink">Import Subjects</h3>
-            <button type="button" onclick="closeImportSubjectsModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
-        </div>
-
-        @if($errors->import->any())
-            <div class="alert alert-danger mb-4">
-                <ul class="list-disc list-inside">
-                    @foreach($errors->import->all() as $error)
-                        <li>{{ $error }}</li>
-                    @endforeach
-                </ul>
-            </div>
-        @endif
-
-        <p class="text-sm text-muted mb-4">
-            Upload an Excel (.xlsx) or CSV file. Required columns:
-            <strong>name, type, grade_level</strong>. Never include WW/PT/Exam
-            percentage columns — grading weights are always resolved
-            automatically, from the DepEd catalog (by exact subject name) or
-            from Subject Group, never typed into a file.
-            <strong>subject_group</strong> is <strong>required for every Grade
-            11</strong> row (core or elective — there is no safe default; an
-            unclassified subject is rejected, never silently made Core) and
-            must be <strong>left blank for Grade 12</strong> rows (DO 8, s. 2015
-            weighs by section track, not subject group). It must also match
-            the row's type — <strong>core_academic</strong> is for
-            <strong>core</strong> rows only; an elective must use one of the
-            other groups listed in the Subject Group column above.
-            <strong>track, specialization</strong> (by name or code) are also
-            required for elective subjects. Type must be <strong>core</strong>
-            or <strong>elective</strong>; grade_level must be
-            <strong>11</strong> or <strong>12</strong>.
-        </p>
-
-        <form method="POST" action="{{ route('admin.subjects.import') }}"
-              enctype="multipart/form-data" class="space-y-4" data-loading="Importing subjects...">
-            @csrf
-
-            <div>
-                <label class="form-label">Grade Level being uploaded</label>
-                <select name="grade_level" required
-                        class="form-input">
-                    <option value="">— Select Grade Level —</option>
-                    <option value="11">Grade 11</option>
-                    <option value="12">Grade 12</option>
-                </select>
-                <p class="text-xs text-muted mt-1">
-                    Every row in the file must match this grade level — a row for
-                    the other grade is rejected, not silently imported.
-                </p>
-            </div>
-
-            <input type="file" name="file" accept=".xlsx,.xls,.csv" required
-                   class="w-full border rounded-lg px-3 py-2 text-sm">
-
-            <div class="flex justify-end gap-3 pt-2">
-                <button type="button" onclick="closeImportSubjectsModal()"
-                        class="px-4 py-2 text-sm text-muted">Cancel</button>
-                <button type="submit"
-                        class="btn btn-primary">
-                    Upload & Import
-                </button>
-            </div>
-        </form>
-    </div>
-</div>
 
 @push('scripts')
 <script>

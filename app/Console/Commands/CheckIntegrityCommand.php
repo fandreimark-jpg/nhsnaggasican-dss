@@ -129,6 +129,65 @@ class CheckIntegrityCommand extends Command
             ];
         }
 
+        // 7. Section elective choices (section_subjects) — a row's
+        //    school_year must agree with both its section's and its academic
+        //    term's (SubjectOfferingService::chooseElective() writes all
+        //    three from the section, so a disagreement can only come from a
+        //    hand edit); and every (section, subject, term) that holds
+        //    academic records must still be resolved by the subject
+        //    configuration — otherwise that history is invisible to the
+        //    Adviser and Principal screens.
+        $mismatchedOfferings = \App\Models\SectionSubject::query()
+            ->join('sections', 'sections.id', '=', 'section_subjects.section_id')
+            ->join('academic_terms', 'academic_terms.id', '=', 'section_subjects.academic_term_id')
+            ->where(function ($q) {
+                $q->whereColumn('section_subjects.school_year', '!=', 'sections.school_year')
+                  ->orWhereColumn('section_subjects.school_year', '!=', 'academic_terms.school_year');
+            })
+            ->count();
+        if ($mismatchedOfferings > 0) {
+            $findings[] = [
+                'Subject offerings whose school year disagrees with their section or term',
+                "{$mismatchedOfferings} row(s)",
+                'Correct section_subjects.school_year by hand to match the section — every consumer reads it as a join key.',
+            ];
+        }
+
+        // "Subject applicability" refactor — academic records that sit on a
+        // (section, subject, term) the CURRENT subject configuration no
+        // longer resolves (a term removed from Terms Taught, a subject
+        // moved to another grade/track, an elective choice removed). The
+        // Admin form refuses such an edit while records exist, so this
+        // only fires for rows written some other way; it never deletes.
+        $unresolvedHistory = 0;
+        $sectionsById = \App\Models\Section::all()->keyBy('id');
+        foreach ($sectionsById as $section) {
+            $resolvedByTerm = [];
+            foreach (\App\Models\AcademicTerm::termNumbers() as $term) {
+                $resolvedByTerm[$term] = \App\Models\Subject::forSection($section, $term)->pluck('id')->flip();
+            }
+            foreach (['grades', 'assessments', 'assessment_uploads'] as $table) {
+                $pairs = \Illuminate\Support\Facades\DB::table($table)
+                    ->where('section_id', $section->id)
+                    ->where('school_year', $section->school_year)
+                    ->select('subject_id', 'grading_period')
+                    ->distinct()
+                    ->get();
+                foreach ($pairs as $pair) {
+                    if (!isset($resolvedByTerm[(int) $pair->grading_period]) || !$resolvedByTerm[(int) $pair->grading_period]->has((int) $pair->subject_id)) {
+                        $unresolvedHistory++;
+                    }
+                }
+            }
+        }
+        if ($unresolvedHistory > 0) {
+            $findings[] = [
+                'Academic records on a (section, subject, term) the subject configuration no longer resolves',
+                "{$unresolvedHistory} pair(s) across grades/assessments/uploads",
+                "Restore the subject's Terms Taught / grade level / track (Admin > Subjects) or the section's elective choice (Sections > Subjects) so the history is visible again. Records are never deleted.",
+            ];
+        }
+
         $exitCode = self::SUCCESS;
 
         if (empty($findings)) {

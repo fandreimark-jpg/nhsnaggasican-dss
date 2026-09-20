@@ -18,6 +18,10 @@ use Tests\TestCase;
  * students in one batch must write N separate activity_logs rows, never
  * one row summarizing the whole batch.
  */
+// NOTE ('SSHS ECR grading correction', 2026-09-20): these Grade 12
+// sections carry an EXPLICIT k12_2013 curriculum because this file's
+// intent is the DO 8, s. 2015 (legacy) path. An unset curriculum in
+// SY 2026-2027 now resolves to DO 015 for both grade levels.
 class VerifyAllLogsPerStudentTest extends TestCase
 {
     use RefreshDatabase;
@@ -31,7 +35,7 @@ class VerifyAllLogsPerStudentTest extends TestCase
     public function test_verifying_several_students_produces_one_log_entry_each_not_one_for_the_batch(): void
     {
         $adviser = User::factory()->create();
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
+        $section = Section::factory()->create(['curriculum' => 'k12_2013', 'adviser_id' => $adviser->id, 'school_year' => '2026-2027', 'grade_level' => 12]);
         $subject = Subject::factory()->create(['grade_level' => 12, 'type' => 'core']);
         AcademicTerm::ensureExistFor('2026-2027');
 

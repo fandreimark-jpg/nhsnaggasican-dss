@@ -537,6 +537,17 @@ checked is worse than a simple one whose limits are written down.
 in preference to training, so changes to `train_model()` otherwise never take
 effect — the model silently stays the old one.
 
+> **SUPERSEDED, 2026-09-19 (ML architecture correction pass).** The three
+> paragraphs above describe an arrangement that no longer exists, and the
+> advice in the last one is now actively wrong — **do not delete
+> `model_cache.pkl`**. `classify.py` no longer trains anything, so there is
+> nothing for deleting it to unblock; deleting it would simply take the DSS
+> down. `train_model()` and `train_from_real_data()` are gone from
+> `classify.py`; `analytics/train_model.py` is the one training pipeline, and
+> retraining means training a candidate there and promoting it with
+> `model_registry.py promote`, which switches production over without
+> touching `model_cache.pkl` at all. See `analytics/README.md`.
+
 **STOP POINT 6.** Report the dashboard numbers before and after, what was
 deleted, and what is awaiting a decision.
 

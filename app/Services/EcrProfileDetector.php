@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Reader\IReadFilter;
 
 /**
  * "ECR alignment" work order, PART 5a — recognises the official DepEd
@@ -34,8 +35,48 @@ class EcrProfileDetector
     private const HELPER_MARKER_VALUE = 'ECRSHS2026';
     private const VERSION_TAG_CELL = 'T64';
 
+    /**
+     * "Performance audit" pass — detection results, keyed by the file's
+     * CONTENT (md5) rather than its path, so the three services that each
+     * ask this question about the same upload in one request (the term
+     * resolver, the upload service, EcrReaderService::describe()) share one
+     * answer. Content-addressed so a temp path reused for a different
+     * workbook can never return the previous file's verdict. md5 of the
+     * 434KB instrument costs ~2ms; the load it replaces costs ~400ms.
+     *
+     * @var array<string, ?string>
+     */
+    private static array $verdictByContent = [];
+
+    /** Test hook: forget every memoised verdict. */
+    public static function flushMemo(): void
+    {
+        self::$verdictByContent = [];
+    }
+
     /** Null means "not this profile" (or unreadable) — never throws for that case. */
     public function detect(string $filePath): ?string
+    {
+        $contentKey = @md5_file($filePath);
+        if ($contentKey !== false && array_key_exists($contentKey, self::$verdictByContent)) {
+            return self::$verdictByContent[$contentKey];
+        }
+
+        $verdict = $this->detectUncached($filePath);
+
+        if ($contentKey !== false) {
+            // Bounded: a long-running process (the test suite) must not
+            // accumulate one entry per fixture ever seen.
+            if (count(self::$verdictByContent) >= 16) {
+                array_shift(self::$verdictByContent);
+            }
+            self::$verdictByContent[$contentKey] = $verdict;
+        }
+
+        return $verdict;
+    }
+
+    private function detectUncached(string $filePath): ?string
     {
         try {
             $reader = IOFactory::createReaderForFile($filePath);
@@ -53,6 +94,17 @@ class EcrProfileDetector
         try {
             $reader->setLoadSheetsOnly(['HELPER', 'INPUT DATA']);
             $reader->setReadDataOnly(true);
+            // Only the two cells this method reads are materialised — the
+            // HELPER catalog (141 rows of formulas) is otherwise the single
+            // most expensive sheet in the workbook to load, and nothing
+            // else on it is read here. The values read are unchanged.
+            $reader->setReadFilter(new class implements IReadFilter {
+                public function readCell($columnAddress, $row, $worksheetName = ''): bool
+                {
+                    return ($worksheetName === 'HELPER' && $columnAddress === 'B' && $row === 4)
+                        || ($worksheetName === 'INPUT DATA' && $columnAddress === 'T' && $row === 64);
+                }
+            });
             $spreadsheet = $reader->load($filePath);
         } catch (\Throwable $e) {
             return null;

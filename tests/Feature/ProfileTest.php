@@ -53,7 +53,7 @@ class ProfileTest extends TestCase
                 // no current_password supplied
             ]);
 
-        $response->assertSessionHasErrors('current_password');
+        $response->assertSessionHasErrorsIn('profile', ['current_password']);
         $this->assertSame($user->email, $user->fresh()->email);
     }
 
@@ -102,6 +102,49 @@ class ProfileTest extends TestCase
                 'password_confirmation' => 'new-password',
             ]);
 
-        $response->assertSessionHasErrors('current_password');
+        $response->assertSessionHasErrorsIn('profilePassword', ['current_password']);
+    }
+
+    /**
+     * Final pre-demo audit (2026-09-20). profile/_modal.blade.php is
+     * included on EVERY page. It used to open on any default-bag error
+     * and call $errors->only() — which MessageBag does not have — so a
+     * rejected Admin > Users or Admin > Students form (keys email /
+     * first_name / last_name) rendered a 500 instead of its own message.
+     * 64 such errors sat in laravel.log before this was caught.
+     */
+    public function test_another_pages_validation_error_on_a_shared_key_neither_opens_the_profile_modal_nor_crashes_the_page(): void
+    {
+        $admin = User::factory()->admin()->create();
+
+        $post = $this->actingAs($admin)->from('/admin/users')->post('/admin/users', [
+            'last_name' => '', 'first_name' => 'X', 'username' => 'x', 'role' => 'adviser', 'password' => 'short',
+        ]);
+        $post->assertRedirect('/admin/users');
+        $post->assertSessionHasErrors(['last_name']);
+
+        $page = $this->actingAs($admin)->get('/admin/users');
+        $page->assertOk();
+        $page->assertSee('The last name field is required.');
+        // The profile modal stays hidden — the error belongs to the Users form.
+        $page->assertSee('id="profileModal"', false);
+        $page->assertDontSee('data-profile-errors', false);
+        $page->assertSee('id="profileModal"' . "
+     class=\"hidden opacity-0", false);
+    }
+
+    public function test_the_profile_modal_opens_with_its_own_errors_and_shows_them(): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user)->from('/dashboard')->put('/profile', [
+            'last_name' => '', 'first_name' => $user->first_name, 'email' => $user->email,
+        ])->assertSessionHasErrorsIn('profile', ['last_name']);
+
+        $page = $this->actingAs($user)->get('/adviser/dashboard');
+        $page->assertOk();
+        $page->assertSee('data-profile-errors', false);
+        $page->assertSee('The last name field is required.');
     }
 }
+

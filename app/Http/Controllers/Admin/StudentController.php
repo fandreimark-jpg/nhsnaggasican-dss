@@ -121,13 +121,12 @@ class StudentController extends Controller
             'first_name'  => 'required|string|max:255',
             'middle_name' => 'nullable|string|max:255',
             'gender'      => 'required|in:male,female',
-            'birthdate'   => 'nullable|date',
             'section_id'  => 'required|exists:sections,id',
         ]);
 
         $student = Student::create($request->only([
             'lrn', 'last_name', 'first_name',
-            'middle_name', 'gender', 'birthdate', 'section_id',
+            'middle_name', 'gender', 'section_id',
         ]));
 
         LogActivity::log(
@@ -226,13 +225,12 @@ class StudentController extends Controller
             'first_name'  => 'required|string|max:255',
             'middle_name' => 'nullable|string|max:255',
             'gender'      => 'required|in:male,female',
-            'birthdate'   => 'nullable|date',
             'section_id'  => 'required|exists:sections,id',
         ]);
 
         $student->update($request->only([
             'lrn', 'last_name', 'first_name',
-            'middle_name', 'gender', 'birthdate', 'section_id'
+            'middle_name', 'gender', 'section_id'
         ]));
 
         return redirect()->route('admin.students')
@@ -337,7 +335,7 @@ class StudentController extends Controller
 
     /**
      * Streams a CSV of just the rows rejected by the last import(), in the
-     * same lrn/last_name/first_name/middle_name/gender/birthdate shape the
+     * same lrn/last_name/first_name/middle_name/gender shape the
      * upload expects -- so correcting what was wrong means re-uploading
      * those rows only, not the whole original file (which would bounce
      * every already-imported row off the LRN unique constraint again).
@@ -358,7 +356,7 @@ class StudentController extends Controller
     /** @param array<int, array<string, mixed>> $rows */
     private function studentRowsCsvResponse(array $rows, string $downloadName): Response
     {
-        $csv = "lrn,last_name,first_name,middle_name,gender,birthdate\n";
+        $csv = "lrn,last_name,first_name,middle_name,gender\n";
         foreach ($rows as $row) {
             $csv .= implode(',', array_map(function ($value) {
                 $value = (string) $value;
@@ -367,7 +365,7 @@ class StudentController extends Controller
                     : $value;
             }, [
                 $row['lrn'] ?? '', $row['last_name'] ?? '', $row['first_name'] ?? '',
-                $row['middle_name'] ?? '', $row['gender'] ?? '', $row['birthdate'] ?? '',
+                $row['middle_name'] ?? '', $row['gender'] ?? '',
             ])) . "\n";
         }
 
@@ -492,7 +490,7 @@ class StudentController extends Controller
         ];
     }
 
-    /** @return array<int, array{status: string, lrn: string, last_name: string, first_name: string, middle_name: string, gender: string, birthdate: string, reason: ?string}> */
+    /** @return array<int, array{status: string, lrn: string, last_name: string, first_name: string, middle_name: string, gender: string, reason: ?string}> */
     private function classifySshsRows(array $draftRows, Section $section): array
     {
         $classified = [];
@@ -529,14 +527,14 @@ class StudentController extends Controller
                 return [
                     'status' => 'existing', 'lrn' => $entry['student']->lrn,
                     'last_name' => $entry['student']->last_name, 'first_name' => $entry['student']->first_name,
-                    'middle_name' => '', 'gender' => '', 'birthdate' => '',
+                    'middle_name' => '', 'gender' => '',
                     'reason' => 'Matched to an existing student in this section.',
                 ];
             }
 
             return [
                 'status' => 'rejected', 'lrn' => '', 'last_name' => $last, 'first_name' => $first,
-                'middle_name' => '', 'gender' => '', 'birthdate' => '',
+                'middle_name' => '', 'gender' => '',
                 'reason' => 'No confident match to an existing student in this section — never invented.',
             ];
         }, $matches);
@@ -567,7 +565,6 @@ class StudentController extends Controller
                     'first_name'  => $row['first_name'],
                     'middle_name' => $row['middle_name'] ?: null,
                     'gender'      => $row['gender'],
-                    'birthdate'   => $row['birthdate'] ?: null,
                     'section_id'  => $pending['section_id'],
                 ]);
                 $inserted++;

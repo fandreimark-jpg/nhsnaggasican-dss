@@ -30,7 +30,10 @@ trait BuildsEcrFixture
         array $roster = [],
         array $scores = [],
         array $maxScores = [],
-        int $gradingPeriod = 1
+        int $gradingPeriod = 1,
+        ?string $schoolYearStart = null,
+        ?string $termBlockLabel = null,
+        ?int $otherElectiveTermsTaught = null
     ): string {
         $sourcePath = base_path('tests/Fixtures/SSHS-E-Class-Record-SY-2026-2027.xlsx');
 
@@ -48,6 +51,27 @@ trait BuildsEcrFixture
         $inputData->setCellValue('F28', $subjectCategory);
         $inputData->setCellValue('F29', $cluster);
         $inputData->setCellValue('F30', $courseTitle);
+
+        // SCHOOL YEAR is the START year only (F16); the "2026-2027" shown
+        // beside it is a formula. Left alone when the caller passes null,
+        // so a fixture can deliberately exercise the "workbook does not
+        // state a school year" path.
+        if ($schoolYearStart !== null) {
+            $inputData->setCellValue('F16', $schoolYearStart);
+        }
+
+        // TERMS AND UNITS. H33 is the teacher-typed Term Block dropdown
+        // for a catalogued subject ("FIRST TERM"/"SECOND TERM"/"THIRD
+        // TERM", verbatim from the workbook's own data validation). An
+        // OTHER ELECTIVE uses the parallel block at F51/H51 instead,
+        // where the teacher also types the number of terms.
+        if ($termBlockLabel !== null) {
+            $inputData->setCellValue($otherElectiveTermsTaught !== null ? 'H51' : 'H33', $termBlockLabel);
+        }
+
+        if ($otherElectiveTermsTaught !== null) {
+            $inputData->setCellValue('F51', $otherElectiveTermsTaught);
+        }
 
         $maleIndex = 0;
         $femaleIndex = 0;

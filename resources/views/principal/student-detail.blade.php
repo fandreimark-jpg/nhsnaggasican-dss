@@ -148,6 +148,61 @@
     @endforelse
 </div>
 
+{{-- "Student identity and term-specific subject offerings" pass, STEP K —
+     Term-over-Term, said carefully. The OVERALL trend compares term
+     averages from the submitted term reports; the SAME-SUBJECT trend
+     compares only a subject graded in both terms. When the subject mix
+     changed between the two terms, the overall figure is still shown but
+     labelled as comparing different mixes — never as "the same subjects
+     got better/worse". --}}
+@if(($termTrend['composition'] ?? null) !== null)
+<div class="card p-5 mb-4">
+    <h3 class="card-title mb-1">Term-over-Term — School Year {{ $schoolYear }}</h3>
+    <p class="text-xs text-muted mb-3">
+        Term {{ $termTrend['composition']['previous_term'] }} vs Term {{ $termTrend['composition']['current_term'] }}, from the submitted term reports.
+    </p>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+        <div>
+            <p class="text-xs text-gray-500">Overall term trend <span class="text-gray-400">(average of all graded subjects each term)</span></p>
+            <p class="mt-1 font-medium">
+                @if($termTrend['overall'] === 'improving')<span class="text-green-600">&uarr; Improving</span>
+                @elseif($termTrend['overall'] === 'declining')<span class="text-red-600">&darr; Declining</span>
+                @elseif($termTrend['overall'] === 'stable')<span class="text-gray-600">&rarr; Stable</span>
+                @else<span class="text-gray-400">—</span>@endif
+            </p>
+            @if($termTrend['composition']['changed'])
+                <p class="text-xs text-amber-700 mt-1">
+                    <i class="bi bi-info-circle"></i> The subject mix differs between the two terms, so this compares different sets of subjects — not the same subjects twice.
+                    @if(!empty($termTrend['composition']['only_previous']))<span class="block">Term {{ $termTrend['composition']['previous_term'] }} only: {{ implode(', ', $termTrend['composition']['only_previous']) }}.</span>@endif
+                    @if(!empty($termTrend['composition']['only_current']))<span class="block">Term {{ $termTrend['composition']['current_term'] }} only: {{ implode(', ', $termTrend['composition']['only_current']) }}.</span>@endif
+                </p>
+            @else
+                <p class="text-xs text-muted mt-1">Same subjects graded in both terms.</p>
+            @endif
+        </div>
+        <div>
+            <p class="text-xs text-gray-500">Same-subject trend <span class="text-gray-400">(only subjects graded in both terms)</span></p>
+            @if(empty($termTrend['same_subject']))
+                <p class="text-xs text-muted mt-1">No subject was graded in both terms, so no subject-level comparison is possible.</p>
+            @else
+                <ul class="mt-1 space-y-0.5">
+                    @foreach($termTrend['same_subject'] as $row)
+                        <li class="flex items-center justify-between gap-3">
+                            <span>{{ $row['subject'] }}</span>
+                            <span class="tabular-nums text-xs">
+                                {{ number_format($row['from'], 2) }} &rarr; {{ number_format($row['to'], 2) }}
+                                <span class="font-medium {{ $row['diff'] > 0 ? 'text-green-600' : ($row['diff'] < 0 ? 'text-red-600' : 'text-gray-500') }}">({{ $row['diff'] > 0 ? '+' : '' }}{{ number_format($row['diff'], 2) }})</span>
+                            </span>
+                        </li>
+                    @endforeach
+                </ul>
+            @endif
+        </div>
+    </div>
+</div>
+@endif
+
 {{-- PART 11 — every risk classification the learner has received,
      labelled with the school year, term, and section it was made under. --}}
 <div class="card p-5 mb-4">

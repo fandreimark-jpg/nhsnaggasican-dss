@@ -24,6 +24,7 @@ use App\Http\Controllers\Admin\TrackController;
 use App\Http\Controllers\Admin\SpecializationController;
 use App\Http\Controllers\Admin\SubjectController;
 use App\Http\Controllers\Admin\SectionController;
+use App\Http\Controllers\Admin\SectionSubjectController;
 use App\Http\Controllers\Admin\StudentController;
 use App\Http\Controllers\Admin\ReportController;
 use App\Http\Controllers\Admin\AcademicTermController;
@@ -147,17 +148,24 @@ Route::middleware(['auth', 'role:admin'])
         Route::post('/users/{id}/activate', [UserController::class, 'activate'])->name('users.activate');
         Route::delete('/users/{id}',    [UserController::class, 'destroy'])->name('users.destroy');
 
+        // Master data — Tracks, Specializations, Subjects, Sections — is
+        // managed by hand (Add / Edit). The bulk spreadsheet imports that
+        // used to sit beside them were removed ("Subject applicability"
+        // refactor, 2026-09-20): no official or client-provided file format
+        // exists for any of them, and this project does not invent one
+        // (CLAUDE.md, "No custom Subject Offerings spreadsheet"). The
+        // learner roster (students.import / import-from-ecr) and the
+        // prescribed E-Class Record are the only uploads that remain.
+
         // Tracks Management
         Route::get('/tracks',           [TrackController::class, 'index'])->name('tracks');
         Route::post('/tracks',          [TrackController::class, 'store'])->name('tracks.store');
-        Route::post('/tracks/import',   [TrackController::class, 'import'])->name('tracks.import');
         Route::put('/tracks/{id}',      [TrackController::class, 'update'])->name('tracks.update');
         Route::delete('/tracks/{id}',   [TrackController::class, 'destroy'])->name('tracks.destroy');
 
         // Specializations Management
         Route::get('/specializations',          [SpecializationController::class, 'index'])->name('specializations');
         Route::post('/specializations',         [SpecializationController::class, 'store'])->name('specializations.store');
-        Route::post('/specializations/import',  [SpecializationController::class, 'import'])->name('specializations.import');
         Route::put('/specializations/{id}',     [SpecializationController::class, 'update'])->name('specializations.update');
         Route::delete('/specializations/{id}',  [SpecializationController::class, 'destroy'])->name('specializations.destroy');
 
@@ -167,16 +175,22 @@ Route::middleware(['auth', 'role:admin'])
         // Subjects Management
         Route::get('/subjects',         [SubjectController::class, 'index'])->name('subjects');
         Route::post('/subjects',        [SubjectController::class, 'store'])->name('subjects.store');
-        Route::post('/subjects/import', [SubjectController::class, 'import'])->name('subjects.import');
         Route::put('/subjects/{id}',    [SubjectController::class, 'update'])->name('subjects.update');
         Route::delete('/subjects/{id}', [SubjectController::class, 'destroy'])->name('subjects.destroy');
 
         // Sections Management
         Route::get('/sections',         [SectionController::class, 'index'])->name('sections');
         Route::post('/sections',        [SectionController::class, 'store'])->name('sections.store');
-        Route::post('/sections/import', [SectionController::class, 'import'])->name('sections.import');
         Route::put('/sections/{id}',    [SectionController::class, 'update'])->name('sections.update');
         Route::delete('/sections/{id}', [SectionController::class, 'destroy'])->name('sections.destroy');
+        // Section subjects — the RESOLVED list a section takes per term
+        // (SubjectApplicabilityService, from Admin > Subjects' configuration),
+        // plus the one per-section decision left: choosing an elective for
+        // a section the curriculum cannot match one to. Nothing here is
+        // written by an upload; the prescribed ECR only validates against it.
+        Route::get('/sections/{section}/subjects',                 [SectionSubjectController::class, 'index'])->name('sections.subjects');
+        Route::post('/sections/{section}/subjects',                [SectionSubjectController::class, 'store'])->name('sections.subjects.store');
+        Route::delete('/sections/{section}/subjects/{subject}',    [SectionSubjectController::class, 'destroy'])->name('sections.subjects.destroy');
 
         //Academic Term
         Route::get('/academic-terms',               [AcademicTermController::class, 'index'])->name('academic-terms');

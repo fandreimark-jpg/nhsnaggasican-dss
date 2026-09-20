@@ -53,9 +53,13 @@ occur only after runtime variables are available. No startup migrations occur.
 
 ## Required existing model
 
-`analytics/classify.py:get_model()` requires `analytics/model_cache.pkl` and
-explicitly refuses automatic training. The existing local artifact is a
-200-tree, one-feature RandomForestClassifier. Its SHA-256 is:
+`analytics/classify.py:load_model()` (renamed from `get_model()` by the
+2026-09-19 ML architecture pass) loads the model registry's ACTIVE model if
+one has been promoted, and otherwise `analytics/model_cache.pkl`. It
+explicitly refuses automatic training and raises a controlled error if
+neither exists, so the image MUST still ship `model_cache.pkl`. The existing
+local artifact is a 200-tree, one-feature RandomForestClassifier — the legacy
+synthetic prototype, see `analytics/README.md`. Its SHA-256 is:
 
 `14b01918f3b210777bf3013d1f56bba79062b20f3b13e2fd05ff8314027807cd`
 

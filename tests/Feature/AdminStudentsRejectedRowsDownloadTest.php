@@ -43,10 +43,10 @@ class AdminStudentsRejectedRowsDownloadTest extends TestCase
         $admin   = User::factory()->admin()->create();
         $section = Section::factory()->create();
 
-        $csv  = "lrn,last_name,first_name,middle_name,gender,birthdate\n";
-        $csv .= "100000000301,Valid,One,,male,2008-05-01\n";
-        $csv .= ",Delos Santos,Maria,,female,2008-05-01\n"; // blank LRN
-        $csv .= "100000000302,Valid,Two,,female,2008-05-01\n";
+        $csv  = "lrn,last_name,first_name,middle_name,gender\n";
+        $csv .= "100000000301,Valid,One,,male\n";
+        $csv .= ",Delos Santos,Maria,,female\n"; // blank LRN
+        $csv .= "100000000302,Valid,Two,,female\n";
 
         $response = $this->importFile($admin, $section, $csv);
 
@@ -70,8 +70,8 @@ class AdminStudentsRejectedRowsDownloadTest extends TestCase
         // as if a prior partial-failure import had happened in this session.
         session(['rejected_students' => ['rows' => [['lrn' => '1']], 'source_filename' => 'old.csv']]);
 
-        $csv  = "lrn,last_name,first_name,middle_name,gender,birthdate\n";
-        $csv .= "100000000303,Valid,Three,,male,2008-05-01\n";
+        $csv  = "lrn,last_name,first_name,middle_name,gender\n";
+        $csv .= "100000000303,Valid,Three,,male\n";
 
         $response = $this->importFile($admin, $section, $csv);
 
@@ -84,10 +84,10 @@ class AdminStudentsRejectedRowsDownloadTest extends TestCase
         $admin   = User::factory()->admin()->create();
         $section = Section::factory()->create();
 
-        $csv  = "lrn,last_name,first_name,middle_name,gender,birthdate\n";
-        $csv .= "100000000304,Valid,Four,,male,2008-05-01\n";
-        $csv .= ",Delos Santos,Maria,Reyes,female,2008-06-01\n"; // blank LRN
-        $csv .= ",Bautista,Jose,,male,2008-07-01\n";             // blank LRN
+        $csv  = "lrn,last_name,first_name,middle_name,gender\n";
+        $csv .= "100000000304,Valid,Four,,male\n";
+        $csv .= ",Delos Santos,Maria,Reyes,female\n"; // blank LRN
+        $csv .= ",Bautista,Jose,,male\n";             // blank LRN
 
         $this->importFile($admin, $section, $csv);
 
@@ -97,9 +97,9 @@ class AdminStudentsRejectedRowsDownloadTest extends TestCase
         $download->assertHeader('Content-Type', 'text/csv; charset=UTF-8');
 
         $content = $download->getContent();
-        $this->assertStringContainsString("lrn,last_name,first_name,middle_name,gender,birthdate\n", $content);
-        $this->assertStringContainsString(',Delos Santos,Maria,Reyes,female,2008-06-01', $content);
-        $this->assertStringContainsString(',Bautista,Jose,,male,2008-07-01', $content);
+        $this->assertStringContainsString("lrn,last_name,first_name,middle_name,gender\n", $content);
+        $this->assertStringContainsString(',Delos Santos,Maria,Reyes,female', $content);
+        $this->assertStringContainsString(',Bautista,Jose,,male', $content);
         // The one row that imported successfully must NOT be in the
         // download -- only the two rejected rows belong in it.
         $this->assertStringNotContainsString('100000000304', $content);
@@ -123,8 +123,8 @@ class AdminStudentsRejectedRowsDownloadTest extends TestCase
 
         $this->actingAs($admin)->get('/admin/students')->assertDontSee('Download rejected rows');
 
-        $csv  = "lrn,last_name,first_name,middle_name,gender,birthdate\n";
-        $csv .= ",Delos Santos,Maria,,female,2008-05-01\n"; // blank LRN
+        $csv  = "lrn,last_name,first_name,middle_name,gender\n";
+        $csv .= ",Delos Santos,Maria,,female\n"; // blank LRN
 
         $this->importFile($admin, $section, $csv);
 
