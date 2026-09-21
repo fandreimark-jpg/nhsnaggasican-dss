@@ -237,7 +237,7 @@ Nothing was deleted from the repository.
 
 ## AB. Git changes / commits
 
-Working-tree changes made by this audit (committed as one audit commit — see the chat summary for the hash):
+Working-tree changes made by this audit (committed as `ddf6944` on `main`):
 
 - `bootstrap/app.php` — `Env::disablePutenv()` with the reasoning (11 lines).
 - `tests/Feature/EnvPutenvDisabledTest.php` — new, 3 tests.
