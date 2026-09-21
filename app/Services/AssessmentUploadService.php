@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\AssessmentMetadataConflictException;
 use App\Models\Assessment;
 use App\Models\AssessmentScore;
 use App\Models\AssessmentUpload;
@@ -74,7 +75,8 @@ class AssessmentUploadService
         private EcrProfileDetector $ecrProfile = new EcrProfileDetector(),
         private EcrReaderService $ecrReader = new EcrReaderService(),
         private Grade12EcrProfileDetector $grade12Profile = new Grade12EcrProfileDetector(),
-        private Grade12EcrReaderService $grade12Reader = new Grade12EcrReaderService()
+        private Grade12EcrReaderService $grade12Reader = new Grade12EcrReaderService(),
+        private AssessmentItemConflictDetector $conflicts = new AssessmentItemConflictDetector()
     ) {
     }
 
@@ -464,6 +466,7 @@ class AssessmentUploadService
     /**
      * @param array<string, array{component: string, max_score: float, exam_role?: ?string, is_additional_support?: bool}> $columnMapping keyed by column name
      * @return array{imported: int, errors: array<int, string>, ecr_profile_version: ?string}
+     * @throws AssessmentMetadataConflictException when an existing item matched by name carries different protected metadata — nothing is written
      */
     public function import(
         string $filePath,
@@ -496,11 +499,30 @@ class AssessmentUploadService
         // deadlock, disk full) rolls back to "nothing imported" rather
         // than leaving half a class's scores in the database with the
         // upload record still reading pending_review.
-        return DB::transaction(function () use ($columnIndexMap, $dataRows, $studentsByLrn, $rowOffset, $subject, $section, $gradingPeriod, $schoolYear, $uploaderId, $upload, &$errors) {
+        return DB::transaction(function () use ($columnIndexMap, $columnMapping, $dataRows, $studentsByLrn, $rowOffset, $subject, $section, $gradingPeriod, $schoolYear, $uploaderId, $upload, &$errors) {
             $importedCount = 0;
+
+            // Pre-demo hardening, Phase 2 (2026-09-21) — DEFENSE IN DEPTH.
+            // The controller already refused this mapping at Verify/Preview
+            // and again before calling here, but preview and import are
+            // separate POSTs against stored state that can change between
+            // them, and a crafted request can skip Preview entirely. So the
+            // comparison is re-run HERE, inside the transaction and before
+            // the first updateOrCreate() below, against what the database
+            // holds at this instant. A conflict throws; the transaction
+            // rolls back; no item metadata and no score row is touched.
+            $conflicts = $this->conflicts->detect($section, $subject, $gradingPeriod, $schoolYear, $columnMapping);
+            if (!empty($conflicts)) {
+                throw new AssessmentMetadataConflictException($conflicts);
+            }
 
             // One Assessment item per confirmed column, created/updated once
             // up front — not per row — since it's the same item for every student.
+            // An EXISTING item reaches this updateOrCreate() only with
+            // identical protected metadata (checked just above), so the
+            // update array can never change its component, exam role,
+            // additional-support flag or max score — only the audit
+            // columns (import_batch_id, uploaded_by) move to this upload.
             $assessmentsByColumnIndex = [];
             foreach ($columnIndexMap as $index => $col) {
                 $assessment = Assessment::updateOrCreate(

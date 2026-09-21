@@ -87,6 +87,39 @@
 </div>
 @endif
 
+{{-- Pre-demo hardening, Phase 2 (2026-09-21) — a BLOCK, not a notice, and
+     deliberately not dismissible: the classification the adviser just
+     confirmed contradicts an item already recorded for this subject and
+     term. Importing would rewrite that item's stored classification and
+     re-weight every score under it. The selections below are the ones
+     they submitted; the conflicting rows are highlighted. See
+     AssessmentController::verifyScreenWithConflicts() and
+     AssessmentItemConflictDetector. --}}
+@if(!empty($metadataConflicts ?? []))
+<div class="bg-red-50 border border-red-300 text-red-800 text-sm p-4 rounded-lg mb-4" data-metadata-conflict-notice role="alert">
+    <p class="font-medium">
+        <i class="bi bi-x-octagon-fill"></i>
+        This upload cannot be imported as classified — {{ count($metadataConflicts) }} {{ count($metadataConflicts) === 1 ? 'conflict' : 'conflicts' }} with items already recorded for {{ $subject->name }}, Term {{ $gradingPeriod }}
+    </p>
+    <ul class="mt-2 space-y-1">
+        @foreach($metadataConflicts as $conflict)
+        <li class="flex flex-wrap items-center gap-2" data-metadata-conflict="{{ $conflict['field'] }}">
+            <span class="font-medium">{{ $conflict['item'] }}</span>
+            <span class="badge badge-danger">{{ $conflict['field_label'] }} conflict</span>
+            <span>Stored: <strong>{{ $conflict['stored_label'] }}</strong></span>
+            <span aria-hidden="true">&middot;</span>
+            <span>Upload: <strong>{{ $conflict['incoming_label'] }}</strong></span>
+        </li>
+        @endforeach
+    </ul>
+    <p class="mt-2">
+        Nothing was changed. Correct the highlighted classifications below to match what is recorded and press Preview again —
+        or, if the recorded item itself is wrong, cancel and use <strong>Edit</strong> on that item first.
+        The file's classification is never applied over a recorded item automatically.
+    </p>
+</div>
+@endif
+
 <div class="card p-6">
     <p class="text-sm text-muted mb-1">
         Found <strong>{{ count($columns) }}</strong> assessment column{{ count($columns) === 1 ? '' : 's' }}
@@ -129,7 +162,7 @@
             </thead>
             <tbody>
                 @foreach($columns as $i => $col)
-                <tr>
+                <tr @if(!empty($col['has_conflict'])) class="bg-red-50" data-conflict-row @endif>
                     <td class="font-medium text-ink">
                         {{ $col['name'] }}
                         <input type="hidden" name="columns[{{ $i }}][name]" value="{{ $col['name'] }}">
@@ -169,7 +202,7 @@
                                placeholder="e.g. 20"
                                value="{{ $col['file_max_score'] ?? '' }}"
                                class="w-24 border rounded-lg px-3 py-1.5 text-sm">
-                        @if($col['file_max_score'] !== null)
+                        @if($col['file_max_score'] !== null && ($col['max_score_from_file'] ?? true))
                             <span class="block text-xs text-muted mt-0.5">from file</span>
                         @endif
                     </td>
@@ -179,6 +212,7 @@
                              Defaults unchecked; the Adviser decides. --}}
                         <label class="inline-flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
                             <input type="checkbox" name="columns[{{ $i }}][is_additional_support]" value="1"
+                                   {{ !empty($col['is_additional_support']) ? 'checked' : '' }}
                                    class="rounded border-gray-300 text-brand-700 focus:ring-brand-400">
                             Additional support
                         </label>

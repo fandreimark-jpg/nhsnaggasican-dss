@@ -14,6 +14,8 @@ use App\Models\Grade;
 use App\Models\Student;
 use App\Helpers\LogActivity;
 use App\Http\Controllers\Concerns\ValidatesSpreadsheetUpload;
+use App\Exceptions\AssessmentMetadataConflictException;
+use App\Services\AssessmentItemConflictDetector;
 use App\Services\AssessmentUploadService;
 use App\Services\EcrSubjectTermResolver;
 use App\Services\TempUploadPruner;
@@ -63,7 +65,8 @@ class AssessmentController extends Controller
         private AssessmentUploadService $uploads = new AssessmentUploadService(),
         private PerformanceAnalysisService $analysis = new PerformanceAnalysisService(),
         private InTermStatusService $inTermStatus = new InTermStatusService(),
-        private EcrSubjectTermResolver $ecrTerms = new EcrSubjectTermResolver()
+        private EcrSubjectTermResolver $ecrTerms = new EcrSubjectTermResolver(),
+        private AssessmentItemConflictDetector $conflicts = new AssessmentItemConflictDetector()
     ) {
     }
 
@@ -460,24 +463,28 @@ class AssessmentController extends Controller
         // are three separate POSTs — a crafted request can start here. The
         // check is re-run against the stored file so the refusal cannot be
         // skipped by replaying a later step.
-        if ($blocked = $this->ecrTerms->blockingMessage(
-            $this->ecrTerms->validate(Storage::disk('local')->path($relativePath), $section, $subject, $gradingPeriod)
-        )) {
+        $ecrTermResult = $this->ecrTerms->validate(Storage::disk('local')->path($relativePath), $section, $subject, $gradingPeriod);
+        if ($blocked = $this->ecrTerms->blockingMessage($ecrTermResult)) {
             return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
                 ->with('error', $blocked);
         }
 
-        $columnMapping = [];
-        foreach ($request->input('columns') as $col) {
-            $columnMapping[$col['name']] = [
-                'component' => $col['component'],
-                // Only meaningful for Examination columns — see
-                // GradingEngine::examinationPercentage(). Optional: an
-                // adviser who leaves it unset falls back to equal
-                // weighting within the component.
-                'exam_role' => $col['component'] === 'examination' ? ($col['exam_role'] ?? null) : null,
-                'max_score' => (float) $col['max_score'],
-            ];
+        $columnMapping = $this->columnMappingFromRequest($request);
+
+        // Pre-demo hardening, Phase 2 (2026-09-21) — a REPEAT upload whose
+        // confirmed classification CONTRADICTS an item already recorded
+        // under this subject/section/term/year (component, exam role,
+        // additional-support flag or max score) is refused here, before
+        // the dry run, and the adviser is returned to the Verify screen
+        // with their choices intact and every conflict named. Nothing is
+        // written by preview() anyway; what this prevents is reaching the
+        // Confirm button with a mapping that import() would otherwise
+        // have used to rewrite the stored item. See
+        // AssessmentItemConflictDetector for the rule, and import() below
+        // for the same check re-run at write time.
+        $metadataConflicts = $this->conflicts->detect($section, $subject, $gradingPeriod, $section->school_year, $columnMapping);
+        if (!empty($metadataConflicts)) {
+            return $this->verifyScreenWithConflicts($request, $section, $subject, $gradingPeriod, $relativePath, $ecrTermResult, $metadataConflicts);
         }
 
         $preview = $this->uploads->previewRows(
@@ -574,53 +581,75 @@ class AssessmentController extends Controller
                 ->with('error', $blocked);
         }
 
-        $columnMapping = [];
-        foreach ($request->input('columns') as $col) {
-            $columnMapping[$col['name']] = [
-                'component' => $col['component'],
-                'exam_role' => $col['component'] === 'examination' ? ($col['exam_role'] ?? null) : null,
-                // "Workflow completion pass" TASK 3b — set explicitly by
-                // the Adviser on the Verify screen, never inferred from
-                // the column's name (e.g. never a "%remedial%" match).
-                'is_additional_support' => filter_var($col['is_additional_support'] ?? false, FILTER_VALIDATE_BOOLEAN),
-                'max_score' => (float) $col['max_score'],
-            ];
+        $columnMapping = $this->columnMappingFromRequest($request);
+
+        // Pre-demo hardening, Phase 2 (2026-09-21) — BACKEND ENFORCEMENT,
+        // NOT UI HIDING. preview() refused this mapping if it contradicted
+        // an existing item's protected metadata, but a request can reach
+        // import() without ever having been previewed, or with a preview
+        // that is stale. Checked again here, before the upload record is
+        // even created, and a third time inside the service's transaction
+        // (AssessmentUploadService::import()) against the database as it
+        // is at the moment of writing.
+        $metadataConflicts = $this->conflicts->detect($section, $subject, $gradingPeriod, $section->school_year, $columnMapping);
+        if (!empty($metadataConflicts)) {
+            return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
+                ->with('error', $this->metadataConflictRefusal($metadataConflicts));
         }
 
-        $upload = AssessmentUpload::create([
-            'section_id'        => $section->id,
-            'subject_id'        => $subject->id,
-            'uploaded_by'       => auth()->id(),
-            'grading_period'    => $gradingPeriod,
-            'school_year'       => $section->school_year,
-            'original_filename' => $request->input('original_filename', $request->input('stored_filename')),
-            'column_mapping'    => array_map(fn($c) => $c['component'], $columnMapping),
-            'status'            => 'pending_review',
-        ]);
-
         $absolutePath = Storage::disk('local')->path($relativePath);
-        $result = $this->uploads->import(
-            $absolutePath,
-            $columnMapping,
-            $section,
-            $subject,
-            $gradingPeriod,
-            $section->school_year,
-            auth()->id(),
-            $upload
-        );
 
-        // 'imported' regardless of whether some individual rows had
-        // errors — error_count already captures that; status here is
-        // about whether the upload as a whole was processed at all.
-        $upload->update([
-            'status'               => 'imported',
-            'imported_count'       => $result['imported'],
-            'error_count'          => count($result['errors']),
-            // "ECR alignment" work order, PART 5a — null for every upload
-            // read through the existing flat path, unchanged.
-            'ecr_profile_version'  => $result['ecr_profile_version'] ?? null,
-        ]);
+        try {
+            // The upload record, the item/score writes and the record's
+            // final status are ONE transaction: a conflict the service
+            // detects at write time rolls all three back, so a refused
+            // import leaves no pending_review upload row behind either.
+            // The service's own DB::transaction() nests inside this one
+            // as a savepoint.
+            [$upload, $result] = DB::transaction(function () use ($request, $section, $subject, $gradingPeriod, $columnMapping, $absolutePath) {
+                $upload = AssessmentUpload::create([
+                    'section_id'        => $section->id,
+                    'subject_id'        => $subject->id,
+                    'uploaded_by'       => auth()->id(),
+                    'grading_period'    => $gradingPeriod,
+                    'school_year'       => $section->school_year,
+                    'original_filename' => $request->input('original_filename', $request->input('stored_filename')),
+                    'column_mapping'    => array_map(fn($c) => $c['component'], $columnMapping),
+                    'status'            => 'pending_review',
+                ]);
+
+                $result = $this->uploads->import(
+                    $absolutePath,
+                    $columnMapping,
+                    $section,
+                    $subject,
+                    $gradingPeriod,
+                    $section->school_year,
+                    auth()->id(),
+                    $upload
+                );
+
+                // 'imported' regardless of whether some individual rows had
+                // errors — error_count already captures that; status here is
+                // about whether the upload as a whole was processed at all.
+                $upload->update([
+                    'status'               => 'imported',
+                    'imported_count'       => $result['imported'],
+                    'error_count'          => count($result['errors']),
+                    // "ECR alignment" work order, PART 5a — null for every upload
+                    // read through the existing flat path, unchanged.
+                    'ecr_profile_version'  => $result['ecr_profile_version'] ?? null,
+                ]);
+
+                return [$upload, $result];
+            });
+        } catch (AssessmentMetadataConflictException $e) {
+            // Controlled refusal: nothing was written (the transaction
+            // above rolled back), the temp file stays so the adviser can
+            // correct the classification and retry from Verify.
+            return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
+                ->with('error', $this->metadataConflictRefusal($e->conflicts()));
+        }
 
         // "Do not import formula results blindly" — after the raw scores
         // are actually in the database, compare the Grade 12 workbook's
@@ -962,6 +991,118 @@ class AssessmentController extends Controller
      * notOfferedMessage() says why in the one wording
      * SubjectOfferingService owns.
      */
+    /**
+     * The confirmed column mapping, built ONE way for preview() and
+     * import() so the dry run, the conflict check and the write can never
+     * disagree about what the adviser confirmed. Keyed by column name.
+     *
+     * @return array<string, array{component: string, exam_role: ?string, is_additional_support: bool, max_score: float}>
+     */
+    private function columnMappingFromRequest(Request $request): array
+    {
+        $columnMapping = [];
+        foreach ($request->input('columns') as $col) {
+            $columnMapping[$col['name']] = [
+                'component' => $col['component'],
+                // Only meaningful for Examination columns — see
+                // GradingEngine::examinationPercentage(). Optional: an
+                // adviser who leaves it unset falls back to equal
+                // weighting within the component.
+                'exam_role' => $col['component'] === 'examination' ? ($col['exam_role'] ?? null) : null,
+                // "Workflow completion pass" TASK 3b — set explicitly by
+                // the Adviser on the Verify screen, never inferred from
+                // the column's name (e.g. never a "%remedial%" match).
+                'is_additional_support' => filter_var($col['is_additional_support'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                'max_score' => (float) $col['max_score'],
+            ];
+        }
+
+        return $columnMapping;
+    }
+
+    /**
+     * Pre-demo hardening, Phase 2 — preview() found that the confirmed
+     * classification contradicts one or more items already recorded.
+     * Rather than bounce the adviser to the upload page (losing every
+     * choice they just made), the Verify screen is rendered again from
+     * the SAME stored file, with each column's select/max/checkbox set to
+     * what they submitted and the conflicts listed above the table. The
+     * stored file is untouched, so correcting and pressing Preview again
+     * is the whole retry.
+     *
+     * @param list<array{item: string, field: string, field_label: string, stored_label: string, incoming_label: string, message: string}> $conflicts
+     */
+    private function verifyScreenWithConflicts(
+        Request $request,
+        Section $section,
+        Subject $subject,
+        int $gradingPeriod,
+        string $relativePath,
+        ?array $ecrTermResult,
+        array $conflicts
+    ) {
+        $absolutePath = Storage::disk('local')->path($relativePath);
+        $detected     = $this->uploads->detectColumns($absolutePath, $gradingPeriod, $section);
+        // Read immediately after detectColumns(), exactly as detect() does.
+        $detectedFormat = $this->uploads->lastDetectedFormat();
+        $unresolved     = $this->uploads->lastUnresolvedLearnerNames();
+        $originalName = $request->input('original_filename', $request->input('stored_filename'));
+
+        $submitted = collect($request->input('columns'))->keyBy('name');
+        $conflictedItems = array_flip(array_map(
+            fn($c) => AssessmentItemConflictDetector::normalizeName($c['item']),
+            $conflicts
+        ));
+
+        $columns = [];
+        foreach ($detected['columns'] as $col) {
+            $chosen = $submitted->get($col['name']);
+            if ($chosen) {
+                $chosenMax = (float) $chosen['max_score'];
+                $col['guessed_component']  = $chosen['component'];
+                $col['guessed_exam_role']  = $chosen['component'] === 'examination' ? ($chosen['exam_role'] ?: null) : null;
+                // Keep the "from file" caption only when the value on
+                // screen really is the file's MAX-row value.
+                $col['max_score_from_file'] = $col['file_max_score'] !== null && abs((float) $col['file_max_score'] - $chosenMax) < 0.005;
+                $col['file_max_score']      = $chosenMax;
+                $col['is_additional_support'] = filter_var($chosen['is_additional_support'] ?? false, FILTER_VALIDATE_BOOLEAN);
+            }
+            $col['has_conflict'] = isset($conflictedItems[AssessmentItemConflictDetector::normalizeName($col['name'])]);
+            $columns[] = $col;
+        }
+
+        return view('adviser.assessments-verify', [
+            'section'          => $section,
+            'subject'          => $subject,
+            'gradingPeriod'    => $gradingPeriod,
+            'storedFilename'   => $request->input('stored_filename'),
+            'columns'          => $columns,
+            'rowCount'         => $detected['row_count'],
+            'maxRowPresent'    => $detected['max_row_present'],
+            'originalName'     => $originalName,
+            'filenameMismatch' => $this->uploads->detectFilenameSubjectMismatch($originalName, $subject, Subject::forSection($section, $gradingPeriod)->get()),
+            'weightMismatch'   => $this->uploads->checkEcrWeightMismatch($absolutePath, $subject, $gradingPeriod, $section),
+            'metadataMismatch' => $this->ecrTerms->advisoryMessage($ecrTermResult),
+            'detectedFormat'   => $detectedFormat,
+            'unresolvedLearnerNames' => $unresolved,
+            'metadataConflicts' => $conflicts,
+        ]);
+    }
+
+    /**
+     * The one wording of the import-time refusal (the crafted-request and
+     * stale-preview paths), in the same words the Verify screen uses.
+     *
+     * @param list<array{message: string}> $conflicts
+     */
+    private function metadataConflictRefusal(array $conflicts): string
+    {
+        return 'This upload was not imported because it would change how '
+            . count($conflicts) . ' recorded assessment item' . (count($conflicts) === 1 ? ' is' : 's are')
+            . ' classified. ' . implode(' ', array_column($conflicts, 'message'))
+            . ' Correct the classification on the Verify screen, or edit the existing item first, then upload again.';
+    }
+
     private function offeredSubjectOrNull(Section $section, int $gradingPeriod, int $subjectId): ?Subject
     {
         return Subject::forSection($section, $gradingPeriod)->where('id', $subjectId)->first();

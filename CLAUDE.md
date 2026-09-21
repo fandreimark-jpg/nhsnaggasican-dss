@@ -1387,7 +1387,9 @@ information. A twelfth is not.
 If a fix would require changing something these instructions forbid, stop and
 ask. Do not route around the constraint.
 
-The suite baseline is 1,071 passing, 0 skipped where Python is present
+The suite baseline is 1,081 passing, 0 skipped where Python is present
+(as of "Pre-demo hardening, Phase 2", 2026-09-21 — 1,071 before it, plus
+the 10 tests in `RepeatUploadMetadataConflictTest`). Before that: 1,071
 (as of the "Final pre-demo audit" evening pass, 2026-09-20 — 1,063 before
 it: +2 `ProfileTest`, +2 `AssessmentPerformancePageTest`, +2
 `XssEscapingAcrossRolePagesTest` (new file), +1 `PreDemoAuditRegressionsTest`,
@@ -2951,6 +2953,64 @@ touched no database row, no model artifact and no seeder.
 - `.gitignore` now excludes root-level `*.csv`: the intervention/remedial
   mapping export carries LRNs and names and must never be committed.
   Fixture CSVs live under `database/seeders/` and `tests/Fixtures/`.
+
+## Pre-demo hardening, Phase 2 (2026-09-21) — a repeat upload can no longer rewrite an item's classification silently
+
+**Root cause.** `AssessmentUploadService::import()` matches an item by
+(subject, section, grading period, school year, name) and
+`updateOrCreate()`s it with the confirmed mapping — and `component`,
+`exam_role`, `is_additional_support` and `max_score` were all in the
+UPDATE array. That is what makes a corrected E-Class Record re-uploadable
+(scores replaced in place, no duplicate items), but it also meant a
+second upload that classified "Summative Test 1" as ST2, or moved an item
+from Written Work to Performance Task, or changed its max, rewrote the
+stored item with nothing on screen saying so — every recorded score under
+it silently re-weighted. The Preview named which items already existed;
+it never compared what they were. (`storeItem()`, the manual path, was
+never affected: it refuses any same-name item outright.)
+
+**The rule now — `App\Services\AssessmentItemConflictDetector`.** One
+place. For each column in the confirmed mapping whose name matches an
+existing item in the SAME scope (name compared case-insensitively — the
+live MySQL collation is case-insensitive, so that IS the identity rule
+`updateOrCreate()` resolves to), the four PROTECTED fields are normalised
+(trimmed lower-case strings; a real boolean; max score rounded to the two
+decimals the column stores; a non-Examination column carries no role)
+and compared. Any difference is a conflict, reported with the item name,
+the field, and BOTH values in words (`Written Work`, `Summative Test 1`,
+`Term Exam`, `Yes`/`No`, `50.00`) — never a raw enum. Identical metadata
+is not a conflict; a new item is not a conflict; an identically named
+item under another subject/section/term/year is never loaded. A
+component conflict is reported once — the exam-role difference it implies
+is not a second finding. Nobody's side wins automatically: not the stored
+item, not the file.
+
+**Enforced three times, on purpose.** (1) `preview()` refuses the mapping
+and re-renders the VERIFY screen (`verifyScreenWithConflicts()`) from the
+same stored file with the adviser's own selections restored — component,
+role, max, checkbox — the conflicting rows highlighted and a red,
+non-dismissible notice listing every conflict; correcting and pressing
+Preview again is the whole retry. (2) `import()` re-runs the check before
+`AssessmentUpload::create()` and flashes the same wording
+(`metadataConflictRefusal()`) — the crafted-request / stale-preview
+path. (3) `AssessmentUploadService::import()` re-runs it INSIDE its
+transaction, before the first `updateOrCreate()`, and throws
+`App\Exceptions\AssessmentMetadataConflictException`; the controller now
+wraps upload-record creation + import + status update in ONE outer
+transaction (the service's nests as a savepoint), so a refused import
+leaves no item, no score and no `pending_review` upload row behind.
+`columnMappingFromRequest()` is the one builder both `preview()` and
+`import()` use — `preview()` used to build its mapping without
+`is_additional_support`, so the dry run and the write could disagree.
+
+**What did not change.** Grading, `GradingEngine`, the ML payload, the
+score-replacement semantics of a legitimate re-upload (identical metadata
+→ scores replaced, blank cells keep the old score, `import_batch_id`/
+`uploaded_by` move to the new upload), and every existing safeguard
+around it. `RepeatUploadMetadataConflictTest` is the test of record (10
+tests: the allowed cases, each protected field, the un-previewed import,
+the service-level throw with no partial writes, scope isolation, the
+detector's normalisation and wording). Suite: 1,081 (1,071 + 10).
 
 ## Performance audit (2026-09-19) — standing conventions it added
 
