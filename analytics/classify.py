@@ -49,6 +49,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import traceback
 
 ANALYTICS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ANALYTICS_DIR)
@@ -406,9 +407,16 @@ def main(argv=None) -> int:
         return _fail(output_file, str(e), e.code)
     except Exception as e:  # noqa: BLE001 — deliberately broad; see below
         # An unexpected failure must still not leak a traceback into a file
-        # Laravel reads and an adviser could see. The type and message go to
-        # stderr (captured in the Laravel log), the output file gets a
-        # structured error.
+        # Laravel reads and an adviser could see: the output file gets only
+        # the structured, message-free error below. The exception's own
+        # message and traceback go to STDERR, which reaches nothing but the
+        # Laravel log (Adviser\ReportController::runAnalytics() captures
+        # it, truncated). Before 2026-09-21 the message was dropped here
+        # too, so a transient "unexpected OSError during classification"
+        # on a live Term 1 submission could not be diagnosed after the
+        # fact — the errno was gone the moment the process exited.
+        print(f'unexpected_error detail: {type(e).__name__}: {e}', file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         return _fail(output_file, f'unexpected {type(e).__name__} during classification', 'unexpected_error')
 
     return 0 if _write_json(output_file, results) else 1

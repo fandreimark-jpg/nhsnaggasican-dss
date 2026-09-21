@@ -449,6 +449,38 @@ class TestLegacyPrototypeRemainsUsable(unittest.TestCase):
             with open(out_path, encoding='utf-8') as f:
                 self.assertEqual(json.load(f), [])
 
+    def test_an_unexpected_exception_reports_its_detail_on_stderr_but_never_in_the_output_file(self):
+        # 2026-09-21: a live Term 1 submission failed with
+        # "unexpected OSError during classification" and nothing else —
+        # main()'s catch-all dropped str(e) and the traceback, so the errno
+        # could not be recovered from any log afterwards. The output file
+        # (which Laravel reads and an adviser could see) must stay
+        # message-free; stderr (Laravel log only) must carry the detail.
+        import io
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            in_path, out_path = os.path.join(tmp, 'in.json'), os.path.join(tmp, 'out.json')
+            with open(in_path, 'w', encoding='utf-8') as f:
+                json.dump([{'student_id': 1, 'average_grade': 80.0}], f)
+
+            simulated = OSError(1455, 'The paging file is too small for this operation to complete')
+            captured = io.StringIO()
+            with mock.patch.object(classify, 'classify_students', side_effect=simulated),                     mock.patch.object(sys, 'stderr', captured):
+                self.assertEqual(classify.main([in_path, out_path]), 1)
+
+            stderr = captured.getvalue()
+            self.assertIn('unexpected_error detail: OSError: [Errno 1455]', stderr)
+            self.assertIn('paging file is too small', stderr)
+            self.assertIn('Traceback (most recent call last)', stderr)
+
+            with open(out_path, encoding='utf-8') as f:
+                written = json.load(f)
+            self.assertEqual(written['error']['code'], 'unexpected_error')
+            self.assertEqual(written['error']['message'], 'unexpected OSError during classification')
+            self.assertNotIn('1455', json.dumps(written))
+            self.assertNotIn('Traceback', json.dumps(written))
+
 
 class TestRuntimeVersionCompatibility(unittest.TestCase):
     def test_a_major_version_difference_is_reported(self):

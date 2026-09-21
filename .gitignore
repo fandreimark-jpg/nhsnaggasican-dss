@@ -59,3 +59,10 @@ __pycache__/
 /storage/app/temp_*.json
 /storage/app/private/
 /analytics/datasets/
+
+# Learner-identifying mapping/analysis exports generated at the project
+# root (e.g. term1_intervention_remedial_mapping.csv, 2026-09-21: LRNs,
+# names, intervention ids). Never source; never committed. Real CSV
+# inputs live under database/seeders/ and tests/Fixtures/, not here.
+/*.csv
+/term1_intervention_remedial_mapping.csv
