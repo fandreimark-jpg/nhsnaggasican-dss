@@ -2911,6 +2911,47 @@ These are the rules that stay true afterwards.
   Grade 11 electives exist, and `usesTrackElectives()` only matters for
   electives) but it should be cleared or the curriculum set explicitly.
 
+## Pre-demo hardening, Phase 1 (2026-09-21) — the local Apache serves ONLY `public/`
+
+The Term 1 experiment is frozen (authoritative backup
+`C:\newxampp\db_backups\naggasican_dss_FINAL_TERM1_FROZEN_PASS_20260921_143408.sql`,
+outside the web tree; the copy in `backups/` is byte-identical). This pass
+touched no database row, no model artifact and no seeder.
+
+- **Before:** XAMPP's `DocumentRoot` is `C:/newxampp/htdocs` with `Options
+  Indexes` and `AllowOverride All`, no vhost, no project-root `.htaccess`.
+  Verified with curl against the running server: `/naggasican-dss/.env`
+  (the whole file), `storage/logs/laravel.log` (17.7 MB), every
+  `backups/*.sql` including the frozen dump, the learner mapping CSV,
+  `.git/config`, `analytics/model_cache.pkl`, and directory listings of
+  every folder all answered **200** — on localhost, on the LAN address
+  and over HTTPS (443 is also listening).
+- **After:** `C:\newxampp\apache\conf\extra\httpd-naggasican-dss.conf`,
+  included from `httpd.conf` (three added lines, right after the
+  `httpd-xampp.conf` include; the prior file is
+  `httpd.conf.bak_20260921_pre_dss_hardening`). It denies the whole
+  project directory at the Apache level (`Require all denied`,
+  `AllowOverride None`, `-Indexes`) and re-grants only
+  `naggasican-dss/public` (`AllowOverride All` so Laravel's own
+  `public/.htaccess` rewrite still works). `/naggasican-dss/` 302s to
+  `/naggasican-dss/public/`. It also denies `.zip/.rar/.7z/.sql/.bak/.env`
+  anywhere under htdocs, because eleven `naggasican-dss*.zip` archives of
+  earlier project copies — each holding a `.env` and up to ~40 SQL dumps —
+  sit beside the project and were downloadable. Every sensitive path
+  above now answers **403**; the app, its built assets and the XAMPP
+  dashboard are unaffected.
+- **This is the demo box's configuration, not the repository's.** It is
+  lost if XAMPP is reinstalled or `httpd.conf` is replaced. Re-check with
+  `curl -sI http://localhost/naggasican-dss/.env` (expect 403) before any
+  demo. The Docker/Railway deployment already serves `public/` as its root
+  and needs none of this.
+- Apache here runs as a console process (no `Apache2.4` service), so
+  `httpd -k restart` does nothing; a graceful restart is the XAMPP control
+  panel, or signalling the parent's `ap<pid>_restart` event.
+- `.gitignore` now excludes root-level `*.csv`: the intervention/remedial
+  mapping export carries LRNs and names and must never be committed.
+  Fixture CSVs live under `database/seeders/` and `tests/Fixtures/`.
+
 ## Performance audit (2026-09-19) — standing conventions it added
 
 Measured first (an in-process HTTP harness over a throwaway copy of the
