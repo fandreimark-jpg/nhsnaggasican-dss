@@ -3267,3 +3267,24 @@ the rules that stay true afterwards.
   disabled button. The fix is `DB::transaction()` + `lockForUpdate()` —
   a behaviour change on the frozen table, so it waits.
 
+## MySQL / shared-network hardening (2026-09-21, evening) — machine configuration, not repository code
+
+`C:
+ewxampp\mysqlin\my.ini` (backup `my.ini.bak_20260921_180744_pre_
+network_hardening`) had carried `skip-grant-tables` since 2026-06-24 —
+authentication OFF for every client on every interface, with the listener
+on `0.0.0.0:3306` and a Public-profile firewall allow. Now: `skip-grant-
+tables` removed (grant tables verified healthy first; `root@localhost`
+blank password still works for Laravel and phpMyAdmin), `bind-address=
+127.0.0.1`, and — after nine identical InnoDB "Failing assertion: slot"
+crashes in 30 days plus a shutdown hang on a lost async checkpoint write —
+`innodb_use_native_aio=0`, `innodb_buffer_pool_load_at_startup=0`,
+`innodb_buffer_pool_dump_at_shutdown=0`. A clean stop now takes ~3 s.
+Details and evidence: `FINAL_PRE_DEMO_AUDIT.md`, Addendum. This is lost on
+a XAMPP reinstall, like the Apache hardening; before a demo check
+`mysql -uroot -h127.0.0.1 -e "select @@bind_address, @@innodb_use_native_aio"`
+(expect `127.0.0.1`, `0`). MariaDB is not a Windows service here: start it
+from the XAMPP Control Panel; a process started from a tool shell can die
+with that shell, and a hung one must be force-stopped (InnoDB is
+crash-safe; redo is flushed at commit).
+

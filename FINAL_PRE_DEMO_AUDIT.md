@@ -290,3 +290,23 @@ Evidence: all critical demo workflows render and behave correctly for all three 
 | O1 | INFO | ML | Null average → forest returns `moderate` @ 62.5 % | Scratch run | Unreachable in the real flow | No | — | No |
 | W2 | INFO | Audit trail | 3 probe rows + 21 logins in `activity_logs` | ids > 1963 | Visible on Activity Logs | Rows restored; log kept | Yes | No |
 | X1 | INFO | Files | Root mapping CSV, sqlite artifact, 17.8 MB log | git-ignored, 403 | None | No | — | No |
+
+---
+
+## Addendum — MySQL / shared-network hardening (2026-09-21, 18:00–18:40)
+
+Follow-up pass on issue S1. Application code untouched; the frozen dataset and `model_cache.pkl` re-verified identical after every restart.
+
+**What was actually exposed (worse than the audit's S1):** `C:\newxampp\mysql\bin\my.ini` had carried `skip-grant-tables` under `[mysqld]` since 2026-06-24. That does not merely leave `root` without a password — it turns authentication OFF for every client: any username, any password, from any host, full privileges. A connection to the LAN interface (172.16.0.2:3306) succeeded as `current_user() = @` (no account row at all). The listener was `0.0.0.0:3306` and the Windows firewall allows `mysqld` inbound on the Public profile. phpMyAdmin's `Require local` was not the issue — MariaDB itself was.
+
+**Hardening performed** (my.ini backup: `my.ini.bak_20260921_180744_pre_network_hardening`; DB dump: `db_backups\naggasican_dss_before_mysql_hardening_20260921_180744.sql`):
+
+1. `skip-grant-tables` removed. Grant tables were checked first (`CHECK TABLE` OK; `root@localhost/127.0.0.1/::1` hold full privileges with no password; `pma@localhost` has none), so Laravel (`root`, blank) and phpMyAdmin (config-auth `root`, blank) keep working locally.
+2. `bind-address=127.0.0.1` — TCP listener is loopback-only.
+3. **A second, pre-existing defect found while restarting:** MariaDB had crashed **nine times in 30 days** (Windows Application Error 1000, exception 0x80000003, identical fault offset — the InnoDB `os0file.cc:6132 "Failing assertion: slot"` in the Windows async-I/O completion handler; 09-12 ×2, 09-14, 09-19 ×3, 09-21 08:11, 18:09, 18:12), every one within ~90 s of a server start, and the instance started at 18:16 lost the completion of a checkpoint write and then hung on shutdown for 10 minutes holding the redo-log latch (`Log flushed up to` == LSN, so nothing was lost; force-stopped with the owner's approval; recovery replayed exactly to that LSN). With the owner's approval: `innodb_buffer_pool_load_at_startup=0`, `innodb_buffer_pool_dump_at_shutdown=0`, `innodb_use_native_aio=0` (InnoDB simulated I/O threads — verified in effect: I/O threads report "waiting for i/o request", not "native aio handle"; checkpoint advances; a clean stop now takes 3 s and the following start needs no recovery).
+
+**Exposure after:** listener `127.0.0.1:3306` only; LAN interface → connection refused (10061); bogus local user → `Access denied`; local `root` → `root@localhost` matched from the grant table. Root still has a blank password — reachable from this machine only.
+
+**Verified after the final restart:** Laravel connects (`naggasican_dss` as `root@localhost`); Admin/Adviser/Principal login 302 → dashboard 200; seven further pages 200; phpMyAdmin 5.2.1 connects and lists the database; `dss:check-integrity` clean; 70 migrations / 0 pending; frozen counts 2,268 + 246, 252, 84 (36/32/16), 2, 82; the three checksums and all nine content MD5s identical to the pre-audit baseline; `model_cache.pkl` SHA-256 unchanged; `/.env`, `/.git/HEAD`, `/storage/logs/laravel.log`, `/backups/`, `/term1_intervention_remedial_mapping.csv`, `/analytics/model_cache.pkl` → 403.
+
+**Still the operator's call:** setting a root password (would need `DB_PASSWORD` in `.env` and phpMyAdmin's `config.inc.php`); the `mysqld` firewall rule (now moot with a loopback bind, but tidy); the five default account passwords (S2). **Before the demo restart MariaDB from the XAMPP Control Panel** so it runs under the panel as usual (the instance left running was started via WMI for verification), then re-run: `mysql -uroot -h127.0.0.1 -e "select @@bind_address, @@innodb_use_native_aio"` (expect `127.0.0.1`, `0`) and log in once per role.
