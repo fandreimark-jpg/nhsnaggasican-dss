@@ -1387,9 +1387,11 @@ information. A twelfth is not.
 If a fix would require changing something these instructions forbid, stop and
 ask. Do not route around the constraint.
 
-The suite baseline is 1,081 passing, 0 skipped where Python is present
-(as of "Pre-demo hardening, Phase 2", 2026-09-21 — 1,071 before it, plus
-the 10 tests in `RepeatUploadMetadataConflictTest`). Before that: 1,071
+The suite baseline is 1,084 passing, 0 skipped where Python is present
+(as of the "Final pre-demo full-system audit", 2026-09-21 evening —
+1,081 before it, plus the 3 tests in `EnvPutenvDisabledTest`). Before
+that: 1,081 (as of "Pre-demo hardening, Phase 2", 2026-09-21 — 1,071
+before it, plus the 10 tests in `RepeatUploadMetadataConflictTest`). Before that: 1,071
 (as of the "Final pre-demo audit" evening pass, 2026-09-20 — 1,063 before
 it: +2 `ProfileTest`, +2 `AssessmentPerformancePageTest`, +2
 `XssEscapingAcrossRolePagesTest` (new file), +1 `PreDemoAuditRegressionsTest`,
@@ -3212,3 +3214,56 @@ all core and all three-term, so the live database's resolution is
 unchanged by this refactor — `dss:check-integrity` was clean before and
 after, and the new "records the configuration no longer resolves" check
 it gained reports zero.
+
+## Final pre-demo full-system audit (2026-09-21, evening) — standing conventions it added
+
+Full findings and evidence are in `FINAL_PRE_DEMO_AUDIT.md`; these are
+the rules that stay true afterwards.
+
+- **`bootstrap/app.php` calls `Env::disablePutenv()` before
+  `Application::configure()`, and must keep doing so.** The demo box
+  serves this app as a PHP ZTS module under Apache's threaded MPM.
+  Laravel's default `Env` repository reads and writes `.env` values
+  through `putenv()`, and PHP unsets a request's `putenv()` variables
+  PROCESS-WIDE at that request's shutdown — so two overlapping requests
+  raced and one booted with no `.env` at all (`production.ERROR: No
+  application encryption key has been specified`, HTTP 500, and a fall
+  through to `config/database.php`'s sqlite/`laravel` defaults).
+  Reproduced at 28 failures in ~300 requests with three concurrent
+  clients; 0 in ~1,200 after the change. `$_ENV`/`$_SERVER` are
+  per-request, and `variables_order = GPCS` puts a container's process
+  environment into `$_SERVER`, so Docker/Railway are unaffected. Nothing
+  in `app/`, `config/`, `routes/` or the seeders reads `getenv()`
+  directly — do not start. `EnvPutenvDisabledTest` pins the behaviour
+  and fails against the unfixed bootstrap.
+- **Live authorization probes must never carry the matching role's
+  session.** A wrong-role request is refused by `RoleMiddleware` before
+  any controller runs, so that half of the matrix is safe to send at
+  the live database; a correct-role POST to an action route (`users/{id}/
+  disable`, `academic-terms/{id}/close`) IS the action. This audit sent
+  one such batch by mistake, disabled the adviser account and cycled
+  Term 1 closed→open; both rows were restored to their exact prior
+  values from the pre-audit dump. Correct-role write behaviour belongs
+  in the isolated suite (`RoleAccessMatrixTest`, `CrossSectionAccessTest`).
+- **Phone-width toolbars wrap: `flex-wrap md:flex-nowrap`.** The
+  `flex items-center gap-3` search-plus-button rows (Admin > Sections,
+  Adviser > Assessments' subject/upload row and term tabs) clipped their
+  right-most button inside the `h-screen overflow-hidden` shell at
+  ≤390 px. The `md:` scope keeps the ≥768 px layout byte-identical (the
+  1366×768 screenshot hash matched before and after). A new toolbar
+  should carry the same pair. `md:flex-nowrap` is a new utility, so the
+  change needs `npm run build`; `public/build` is git-ignored.
+- **Environmental exposures recorded, deliberately not changed here**:
+  MySQL `root` has no password, listens on `0.0.0.0:3306`, and the
+  Windows firewall allows `mysqld` inbound on the Public profile; all
+  five live accounts still use `DatabaseSeeder::PASSWORD`. Both are the
+  operator's to fix (`.env` secret + `my.ini` + a MySQL restart by hand;
+  Admin > Users). See the audit report, Section AD.
+- **Recorded, not fixed (P3, code inspection):** `Principal  InterventionController::store()`/`storeBulk()` check for an open
+  duplicate and then insert with no transaction or lock, and MySQL
+  cannot index the status-dependent rule; a double-fire within the same
+  few milliseconds could record two open interventions for one
+  learner/subject/term. Reversible; single Principal user; client-side
+  disabled button. The fix is `DB::transaction()` + `lockForUpdate()` —
+  a behaviour change on the frozen table, so it waits.
+

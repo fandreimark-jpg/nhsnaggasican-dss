@@ -103,7 +103,7 @@
          border once they sit side by side) instead of the two groups
          reading as one run-on row. --}}
     <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 px-5 py-4 border-b border-line">
-        <div class="flex items-center gap-3 pb-3 border-b border-line md:pb-0 md:border-b-0 md:border-r md:pr-5 md:mr-1">
+        <div class="flex items-center gap-3 flex-wrap md:flex-nowrap pb-3 border-b border-line md:pb-0 md:border-b-0 md:border-r md:pr-5 md:mr-1">
             <span class="text-sm font-semibold text-gray-700">Term:</span>
             <div class="flex gap-2.5">
                 @foreach([1, 2, 3] as $t)
@@ -121,7 +121,7 @@
             </div>
         </div>
 
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3 flex-wrap md:flex-nowrap">
             <form method="GET" action="{{ route('adviser.assessments') }}" id="assessmentsFilterForm" class="flex items-center gap-2">
                 <input type="hidden" name="period" value="{{ $selectedPeriod }}">
                 <label class="text-sm text-muted">Subject:</label>

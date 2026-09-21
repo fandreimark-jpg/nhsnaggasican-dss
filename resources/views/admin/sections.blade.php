@@ -12,7 +12,7 @@
             <h2 class="card-title">All Sections</h2>
             <p class="text-xs text-muted"><x-count-label :count="$sections->count()" noun="section" total /></p>
         </div>
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3 flex-wrap md:flex-nowrap">
             <div class="relative">
                 <input type="text" id="sectionSearch"
                     placeholder="Search sections..."
