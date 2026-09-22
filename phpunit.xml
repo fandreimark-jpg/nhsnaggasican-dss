@@ -19,6 +19,14 @@
     </source>
     <php>
         <env name="APP_ENV" value="testing"/>
+        <!-- Pinned: the checkout's .env may carry the XAMPP sub-directory URL
+             (http://localhost/naggasican-dss/public), and MakesHttpRequests
+             prepends APP_URL's path to every test URI, turning every route
+             into a 404. Tests must not depend on the developer's .env. -->
+        <env name="APP_URL" value="http://localhost"/>
+        <env name="TRUSTED_PROXIES" value=""/>
+        <env name="RAILWAY_ENVIRONMENT_NAME" value=""/>
+        <env name="RAILWAY_PUBLIC_DOMAIN" value=""/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>
