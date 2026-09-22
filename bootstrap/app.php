@@ -21,12 +21,21 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
-   ->withMiddleware(function (Middleware $middleware) {
+    ->withMiddleware(function (Middleware $middleware) {
+        // WHICH proxies are trusted comes from config/trustedproxy.php
+        // (TRUSTED_PROXIES, or the Railway platform variables) — never a
+        // hard-coded '*' here, which would also trust every LAN client of
+        // the local XAMPP box (X-Forwarded-For feeds the login throttle
+        // key). X-Forwarded-Host is deliberately NOT trusted: the ingress
+        // preserves the Host header, and trusting the forwarded one would
+        // let a client choose the host in password-reset links and
+        // redirects. DeploymentProxyTest pins both rules.
         $middleware->trustProxies(headers:
             \Illuminate\Http\Request::HEADER_X_FORWARDED_FOR |
             \Illuminate\Http\Request::HEADER_X_FORWARDED_PROTO |
             \Illuminate\Http\Request::HEADER_X_FORWARDED_PORT
         );
+
         $middleware->alias([
             'role' => \App\Http\Middleware\RoleMiddleware::class,
         ]);
