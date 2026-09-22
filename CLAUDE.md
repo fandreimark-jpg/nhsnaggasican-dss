@@ -1387,8 +1387,10 @@ information. A twelfth is not.
 If a fix would require changing something these instructions forbid, stop and
 ask. Do not route around the constraint.
 
-The suite baseline is 1,084 passing, 0 skipped where Python is present
-(as of the "Final pre-demo full-system audit", 2026-09-21 evening —
+The suite baseline is 1,090 passing, 0 skipped where Python is present
+(as of the "Railway readiness and test-environment isolation" pass,
+2026-09-22 — 1,084 before it, plus the 6 tests in `TrustedProxyConfigTest`).
+Before that: 1,084 (as of the "Final pre-demo full-system audit", 2026-09-21 evening —
 1,081 before it, plus the 3 tests in `EnvPutenvDisabledTest`). Before
 that: 1,081 (as of "Pre-demo hardening, Phase 2", 2026-09-21 — 1,071
 before it, plus the 10 tests in `RepeatUploadMetadataConflictTest`). Before that: 1,071
@@ -1425,7 +1427,7 @@ term-managed offerings workflow they tested: `SubjectsImportTest` (21),
 the feature is the one legitimate way the count goes down; the
 replacement coverage is named above). The Python suites are counted separately and run on their own:
 `python analytics/test_classify.py` (6), `test_training_pipeline.py` (62),
-and `test_inference_contract.py` (33) — 101 total, all passing, none wired
+and `test_inference_contract.py` (34) — 102 total, all passing, none wired
 into `php artisan test`.
 
 One conditional skip exists and is deliberate: `MlArchitectureBoundaryTest`'s
@@ -3266,6 +3268,45 @@ the rules that stay true afterwards.
   learner/subject/term. Reversible; single Principal user; client-side
   disabled button. The fix is `DB::transaction()` + `lockForUpdate()` —
   a behaviour change on the frozen table, so it waits.
+
+## Railway readiness and test-environment isolation (2026-09-22) — standing conventions it added
+
+A "many failures across unrelated modules" report had ONE cause, found by
+reading the first 404 rather than the count: the checkout's `.env` carried
+`APP_URL=http://localhost/naggasican-dss/public`, and Laravel's
+`MakesHttpRequests` prepends `APP_URL`'s path to every test URI, so the
+router saw `/naggasican-dss/public/login` and answered 404 for every route.
+
+- **`phpunit.xml` pins `APP_URL=http://localhost`, `TRUSTED_PROXIES=` and the
+  two `RAILWAY_*` variables.** The suite must not depend on the developer's
+  `.env`; the sub-directory `APP_URL` is harmless for the running app (the
+  URL generator reads the request root) and only the tests were affected.
+  A test that starts failing with a 404 on every route is this, not the app.
+- **Proxy trust is env/platform-driven; the headers are fixed.**
+  `bootstrap/app.php` trusts `X-Forwarded-For/-Proto/-Port` and NEVER
+  `X-Forwarded-Host`; `config/trustedproxy.php` decides WHICH proxies: an
+  explicit `TRUSTED_PROXIES` wins (`*` or a list), else a service carrying
+  Railway's own `RAILWAY_ENVIRONMENT_NAME`/`RAILWAY_PUBLIC_DOMAIN` trusts its
+  ingress, else nothing (local XAMPP). An uncommitted `trustProxies(at: '*',
+  headers: ...HOST...)` was reverted: on the LAN box it let any client
+  spoof the IP the login throttle keys on and choose the host in
+  password-reset links. `DeploymentProxyTest` + `TrustedProxyConfigTest`
+  are the tests of record. The unstyled-login symptom on Railway is this
+  rule unmet: with no trusted proxy, `asset()` emits `http://` URLs on an
+  `https://` page and the browser blocks them as mixed content.
+- **Railway builds from `Dockerfile.vercel` via `railway.json`.** Railpack's
+  PHP auto-builder installs Node and runs the Vite build but NO Python, so
+  `classify.py` could never run there. The Dockerfile installs the pinned
+  `analytics/requirements.txt` and refuses to build if `model_cache.pkl`
+  cannot be loaded. The entrypoint recreates the `storage/` tree on every
+  start because an attached volume mounts EMPTY over it ("View path not
+  found"; www-data unable to write sessions/logs/uploads). Neither file
+  affects XAMPP or the test suite. Railway service variables still needed by
+  hand: `APP_KEY`, `APP_URL=https://<public domain>`, the `DB_*` set,
+  `SESSION_SECURE_COOKIE=true`. Sessions and cache live in MySQL
+  (`SESSION_DRIVER=database`) and survive a redeploy; `storage/app/private`
+  uploads and `storage/logs` do not unless a volume is attached at
+  `/var/www/html/storage`.
 
 ## MySQL / shared-network hardening (2026-09-21, evening) — machine configuration, not repository code
 
