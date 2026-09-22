@@ -103,9 +103,10 @@
                class="w-64 bg-brand-900 text-white flex flex-col fixed md:static inset-y-0 left-0 z-40 -translate-x-full md:translate-x-0 transition-transform duration-200 ease-in-out overflow-y-auto md:h-screen md:shrink-0">
             <div class="px-5 pt-5 pb-4 border-b border-white/10 flex items-start justify-between gap-3">
                 <div class="flex items-center gap-3 min-w-0">
-                    <div class="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center shrink-0 ring-1 ring-white/15">
-                        <img src="{{ asset('images/nagga-logo.png') }}" alt="" class="w-8 h-8 object-contain" onerror="this.remove()">
-                    </div>
+                    {{-- The seal sits directly on the sidebar green: no box,
+                         border, ring or shadow behind it. Sized on the <img>
+                         itself so the aspect ratio is the image's own. --}}
+                    <img src="{{ asset('images/nagga-logo.png') }}" alt="" class="w-[52px] h-[52px] object-contain shrink-0" onerror="this.remove()">
                     <div class="min-w-0">
                         <h1 class="text-[15px] font-bold leading-tight tracking-tight truncate">Naggasican NHS</h1>
                         <p class="text-[11px] text-brand-200/80 mt-0.5 leading-tight">Decision Support System</p>
