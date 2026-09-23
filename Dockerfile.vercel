@@ -19,6 +19,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && docker-php-source delete \
     && a2enmod rewrite \
     && rm -rf /var/lib/apt/lists/*
+    # Apache must load exactly one MPM; mod_php uses prefork.
+    RUN a2dismod mpm_event mpm_worker 2>/dev/null || true \
+        && a2enmod mpm_prefork
+
+    # Validate Apache configuration during the image build.
+    RUN apache2ctl -t
+    
 COPY --from=python /usr/local/ /usr/local/
 RUN ldconfig
 WORKDIR /var/www/html
