@@ -47,7 +47,7 @@ COPY deploy/vercel/php.ini /usr/local/etc/php/conf.d/production.ini
 COPY deploy/vercel/entrypoint.sh /usr/local/bin/vercel-entrypoint
 # Fail at build time if the approved artifact was omitted or is incompatible.
 # Loading/predicting never trains or replaces it.
-RUN python3 -c "import sys; sys.path.insert(0, 'analytics'); from classify import get_model; get_model().predict([[85.0]])" \
+RUN python3 -c "import sys; sys.path.insert(0, 'analytics'); from classify import load_model, classify_students; m, meta = load_model(); print(classify_students([{'student_id': 1, 'average_grade': 85.0}], m, meta))" \
     && mkdir -p storage/app/private storage/app/public storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs bootstrap/cache \
     && chown -R www-data:www-data storage bootstrap/cache \
     && chmod -R u=rwX,g=rX,o= storage bootstrap/cache \
