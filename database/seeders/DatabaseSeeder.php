@@ -83,7 +83,10 @@ class DatabaseSeeder extends Seeder
         foreach (['General Mathematics', 'Oral Communication'] as $name) {
             $subject = Subject::firstOrCreate(
                 ['name' => $name, 'grade_level' => 11],
-                ['type' => 'core']
+                [
+                    'type' => 'core',
+                    'subject_group' => 'core_academic',
+                ]
             );
             // Terms Taught: every term, the same default the subject_terms
             // migration backfilled — narrowed by the Admin, never guessed.
