@@ -20,5 +20,16 @@ cd /var/www/html
 mkdir -p storage/app/private storage/app/public storage/framework/cache/data \
     storage/framework/sessions storage/framework/views storage/logs bootstrap/cache
 chown -R www-data:www-data storage/framework storage/logs storage/app bootstrap/cache
+
+# Ensure Apache starts with exactly one MPM.
+a2dismod mpm_event mpm_worker >/dev/null 2>&1 || true
+a2enmod mpm_prefork >/dev/null 2>&1 || true
+
+# Show active MPM modules for Railway diagnostics.
+ls -la /etc/apache2/mods-enabled/*mpm* 2>/dev/null || true
+
+# Verify Apache configuration before starting.
+apache2ctl -t
+
 # No migrations, training, or environment-dependent build caches at startup.
 exec docker-php-entrypoint "$@"
