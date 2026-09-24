@@ -20,12 +20,20 @@ use Illuminate\Support\Carbon;
  * displays its output must never say the intervention "caused",
  * "resulted in", or "fixed" anything. Just the numbers.
  *
- * "Before" is the weakest component's percentage at the grading period
- * that triggered the intervention (via its linked RiskResult); "after"
- * is the same component in the very next grading period, if that term's
+ * "Before" is the FOCUS component's percentage at the grading period that
+ * triggered the intervention (via its linked RiskResult); "after" is the
+ * same component in the very next grading period, if that term's
  * assessment evidence exists yet. Comparing the SAME component across
  * terms is deliberate — comparing to a DIFFERENT component wouldn't be
  * a comparison of anything real.
+ *
+ * The component is $intervention->focus_component, frozen on the row at
+ * creation — the same value compareWithinTerm() reads, so both progress
+ * columns on a row always name the same component. It is only re-derived
+ * from the baseline term's weakest component as a FALLBACK, for a row
+ * created before that column existed. (Before the 2026-09-24 audit,
+ * compare() always re-derived it, which is how the two columns came to
+ * disagree on 56 of the 82 live Term 1 interventions.)
  */
 class ProgressMonitoringService
 {
@@ -100,13 +108,38 @@ class ProgressMonitoringService
         }
 
         $before = $this->performanceAnalysis->analyzeStudent($student, $subject, $section, $beforeTerm, $schoolYear);
-        $componentKey = $before['weakest_component'];
+
+        // The component is the one the Principal actually acted on, frozen
+        // on the row at creation — the same value compareWithinTerm() reads
+        // and the same "captured once, never recomputed" rule focus_component
+        // exists to enforce. Re-deriving the weakest component here read the
+        // evidence AS IT IS NOW, so additional-support items entered after
+        // delivery could move the weakest elsewhere and this column would
+        // then report a component the intervention was never about — while
+        // the same row's Type & Reason and Within-Term Progress cells still
+        // named the original one. Measured on the live Term 1 data: 56 of 82
+        // interventions disagreed that way.
+        //
+        // The recomputed value stays as the FALLBACK, unchanged, for a row
+        // created before focus_component existed and never backfilled —
+        // dropping those to 'unavailable' would remove a comparison that is
+        // currently shown and is not wrong, merely unfrozen.
+        $componentKey = $intervention->focus_component ?: $before['weakest_component'];
 
         if (!$componentKey) {
             return $this->statusOnly('unavailable');
         }
 
-        $beforePercentage = $before['components'][$componentKey]['percentage'];
+        // A frozen component can name one this subject's grading profile has
+        // no evidence for at all (a DO 015 subject with no Examination
+        // component, for instance). The recomputed weakest could never do
+        // that, so this guard only becomes reachable now.
+        $beforePercentage = $before['components'][$componentKey]['percentage'] ?? null;
+
+        if ($beforePercentage === null) {
+            return $this->statusOnly('unavailable');
+        }
+
         $afterTerm = $beforeTerm + 1;
 
         if ($afterTerm > self::LAST_TERM) {

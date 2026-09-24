@@ -578,9 +578,18 @@ class StudentController extends Controller
         $conflictCount = count(array_filter($pending['rows'], fn($r) => $r['status'] === 'conflict'));
         $rejectedCount = count(array_filter($pending['rows'], fn($r) => $r['status'] === 'rejected'));
 
+        // Read defensively: by the time this line runs the transaction has
+        // COMMITTED, the temp file is deleted and the session is cleared, so
+        // an undefined key here throws a 500 on a request that actually
+        // succeeded and cannot be retried. importFromEcrPreview() always
+        // writes both keys; a pending session carried across a deploy that
+        // changed this payload's shape would not.
+        $sourceFilename = $pending['source_filename'] ?? 'unknown file';
+        $format         = $pending['format'] ?? 'unknown format';
+
         LogActivity::log(
             action:      'import_learners_from_ecr',
-            description: "Imported learners from ECR \"{$pending['source_filename']}\" ({$pending['format']}): {$inserted} inserted, {$existingCount} already existing, {$conflictCount} conflicts skipped, {$rejectedCount} rejected",
+            description: "Imported learners from ECR \"{$sourceFilename}\" ({$format}): {$inserted} inserted, {$existingCount} already existing, {$conflictCount} conflicts skipped, {$rejectedCount} rejected",
             tableName:   'students',
             recordId:    null
         );

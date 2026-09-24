@@ -169,4 +169,84 @@ class ProgressMonitoringServiceTest extends TestCase
         $this->assertSame('available', $result['status']);
         $this->assertEquals(18.0, $result['change']);
     }
+
+    /**
+     * Final pre-deployment audit (2026-09-24). compare() used to re-derive
+     * the weakest component from the baseline term's evidence AS IT IS NOW,
+     * so additional-support items entered after delivery could move the
+     * weakest elsewhere and the Principal's Term-over-Term Progress column
+     * would report a component the intervention was never about — while the
+     * same row's Type & Reason and Within-Term Progress cells still named
+     * the original one. 56 of the 82 live Term 1 interventions disagreed
+     * that way. The component is frozen on the row at creation and must be
+     * read from there, the same value compareWithinTerm() has always used.
+     *
+     * Every other test in this file leaves focus_component null (the factory
+     * does not set it), so they exercise the FALLBACK path only — which is
+     * exactly why none of them caught this.
+     */
+    public function test_compare_reports_the_frozen_focus_component_not_todays_weakest(): void
+    {
+        // Baseline term: Written Work is, today, the weakest component.
+        $this->score(1, 'written_work', 50);
+        $this->score(1, 'performance_task', 60);
+        $this->score(1, 'examination', 90);
+        $this->score(2, 'written_work', 55);
+        $this->score(2, 'performance_task', 78);
+        $this->score(2, 'examination', 90);
+
+        // But the Principal acted on Performance Task — that is what the
+        // row records and what the column must report.
+        $intervention = $this->makeIntervention(riskTerm: 1);
+        $intervention->update(['focus_component' => 'performance_task']);
+
+        $result = $this->service->compare($intervention->fresh());
+
+        $this->assertSame('performance_task', $result['component']);
+        $this->assertEquals(60.0, $result['before_percentage']);
+        $this->assertEquals(78.0, $result['after_percentage']);
+        $this->assertEquals(18.0, $result['change']);
+    }
+
+    /**
+     * The fallback is deliberately kept: a row created before
+     * focus_component existed still gets a comparison rather than being
+     * dropped to 'unavailable'.
+     */
+    public function test_compare_falls_back_to_the_weakest_component_when_none_was_frozen(): void
+    {
+        $this->score(1, 'written_work', 90);
+        $this->score(1, 'performance_task', 60);
+        $this->score(1, 'examination', 90);
+        $this->score(2, 'performance_task', 78);
+
+        $intervention = $this->makeIntervention(riskTerm: 1);
+        $this->assertNull($intervention->focus_component);
+
+        $result = $this->service->compare($intervention);
+
+        $this->assertSame('performance_task', $result['component']);
+        $this->assertEquals(18.0, $result['change']);
+    }
+
+    /**
+     * A frozen component can name one this subject has no evidence for at
+     * all — the re-derived weakest could never do that, so this guard only
+     * became reachable with the fix above. It must read 'unavailable'
+     * rather than throw on a missing array key.
+     */
+    public function test_a_frozen_component_with_no_baseline_evidence_is_unavailable(): void
+    {
+        $this->score(1, 'written_work', 90);
+        $this->score(1, 'performance_task', 60);
+        // No examination evidence in the baseline term at all.
+
+        $intervention = $this->makeIntervention(riskTerm: 1);
+        $intervention->update(['focus_component' => 'examination']);
+
+        $result = $this->service->compare($intervention->fresh());
+
+        $this->assertSame('unavailable', $result['status']);
+        $this->assertNull($result['component']);
+    }
 }

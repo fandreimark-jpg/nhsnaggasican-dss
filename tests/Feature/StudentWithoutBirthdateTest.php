@@ -112,7 +112,12 @@ class StudentWithoutBirthdateTest extends TestCase
                 ['status' => 'insert', 'lrn' => '100000000305', 'last_name' => 'Bautista', 'first_name' => 'Ana', 'middle_name' => 'Lopez', 'gender' => 'female', 'reason' => null],
                 ['status' => 'existing', 'lrn' => '100000000306', 'last_name' => 'X', 'first_name' => 'Y', 'middle_name' => '', 'gender' => 'male', 'reason' => 'Already enrolled'],
             ],
-        ]])->actingAs($admin)->post('/admin/students/import-from-ecr/confirm')->assertSessionHasNoErrors();
+        ]])->actingAs($admin)->post('/admin/students/import-from-ecr/confirm')
+            ->assertSessionHasNoErrors()
+            // Pins the STATUS too: this assertion set used to pass while the
+            // request 500'd, because the import had already committed before
+            // the activity-log line read a key this payload does not carry.
+            ->assertRedirect(route('admin.students'));
 
         $this->assertDatabaseHas('students', ['lrn' => '100000000305', 'section_id' => $section->id, 'gender' => 'female']);
         $this->assertDatabaseMissing('students', ['lrn' => '100000000306']);
