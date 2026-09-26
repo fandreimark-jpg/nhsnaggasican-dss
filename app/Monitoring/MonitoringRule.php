@@ -3,6 +3,7 @@
 namespace App\Monitoring;
 
 use App\Models\AcademicConcern;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
  * A deterministic, school-approved academic monitoring rule.
@@ -34,6 +35,16 @@ interface MonitoringRule
      * @return iterable<ConcernFinding>
      */
     public function findings(EvaluationScope $scope): iterable;
+
+    /**
+     * Narrows the open concerns this rule reconciles against to exactly
+     * the scope findings() looked at. The service has already applied the
+     * rule key, school year, term and sections; a rule adds whatever else
+     * its scope narrowing means (e.g. only the changed assessment items).
+     * Without this, a narrow evaluation would resolve concerns it never
+     * looked at.
+     */
+    public function constrainOpenConcerns(Builder $query, EvaluationScope $scope): void;
 
     /**
      * Why an open concern of this rule no longer applies, stated from the

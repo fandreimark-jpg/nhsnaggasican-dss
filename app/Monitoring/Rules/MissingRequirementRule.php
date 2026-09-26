@@ -10,6 +10,7 @@ use App\Monitoring\ConcernFinding;
 use App\Monitoring\EvaluationScope;
 use App\Monitoring\MonitoringRule;
 use App\Services\AssessmentStatusService;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
  * EXPLICIT_MISSING_REQUIREMENT
@@ -67,7 +68,8 @@ class MissingRequirementRule implements MonitoringRule
                 ->select('id')
                 ->whereIn('section_id', $scope->sectionIds)
                 ->where('grading_period', $scope->gradingPeriod)
-                ->where('school_year', $scope->schoolYear))
+                ->where('school_year', $scope->schoolYear)
+                ->when($scope->assessmentIds !== null, fn($q) => $q->whereIn('id', $scope->assessmentIds)))
             // A score wins: a learner with a recorded score is Completed.
             ->whereNotExists(function ($q) {
                 $q->selectRaw('1')->from('assessment_scores')
@@ -88,7 +90,7 @@ class MissingRequirementRule implements MonitoringRule
                 sectionId: $item->section_id,
                 schoolYear: $item->school_year,
                 gradingPeriod: (int) $item->grading_period,
-                contextKey: 'assessment:' . $item->id,
+                contextKey: self::contextKeyFor($item->id),
                 evidence: [
                     'rule'       => self::KEY,
                     'concern'    => $this->label(),
@@ -121,6 +123,19 @@ class MissingRequirementRule implements MonitoringRule
                     self::COMPONENT_LABELS[$item->component] ?? $item->component),
             );
         }
+    }
+
+    public function constrainOpenConcerns(Builder $query, EvaluationScope $scope): void
+    {
+        if ($scope->assessmentIds !== null) {
+            $query->whereIn('context_key', array_map(fn($id) => self::contextKeyFor((int) $id), $scope->assessmentIds));
+        }
+    }
+
+    /** The one spelling of this rule's context — the item a concern is about. */
+    public static function contextKeyFor(int $assessmentId): string
+    {
+        return 'assessment:' . $assessmentId;
     }
 
     public function resolutionReason(AcademicConcern $concern): string

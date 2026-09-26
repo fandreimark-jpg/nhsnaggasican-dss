@@ -17,6 +17,7 @@ use App\Http\Controllers\Concerns\ValidatesSpreadsheetUpload;
 use App\Exceptions\AssessmentMetadataConflictException;
 use App\Services\AssessmentItemConflictDetector;
 use App\Services\AssessmentStatusService;
+use App\Services\AcademicMonitoringService;
 use App\Exceptions\AssessmentStatusConflictException;
 use App\Services\AssessmentUploadService;
 use App\Services\EcrSubjectTermResolver;
@@ -69,7 +70,8 @@ class AssessmentController extends Controller
         private InTermStatusService $inTermStatus = new InTermStatusService(),
         private EcrSubjectTermResolver $ecrTerms = new EcrSubjectTermResolver(),
         private AssessmentItemConflictDetector $conflicts = new AssessmentItemConflictDetector(),
-        private AssessmentStatusService $statuses = new AssessmentStatusService()
+        private AssessmentStatusService $statuses = new AssessmentStatusService(),
+        private AcademicMonitoringService $monitoring = new AcademicMonitoringService()
     ) {
     }
 
@@ -676,6 +678,15 @@ class AssessmentController extends Controller
             }
         }
 
+        // Phase 2C — the items this upload wrote (import() stamps each with
+        // this upload's id), synchronized after the import committed. A
+        // real score for a learner marked Missing has already cleared the
+        // marker (AssessmentScore's saved hook); this resolves the concern.
+        // A blank cell wrote nothing and changes nothing here.
+        $this->synchronizeMonitoring(
+            Assessment::where('import_batch_id', (string) $upload->id)->pluck('id')
+        );
+
         Storage::disk('local')->delete($relativePath);
 
         LogActivity::log(
@@ -870,6 +881,9 @@ class AssessmentController extends Controller
             $assessment->id
         );
 
+        // Phase 2C — after the item and its evidence committed above.
+        $this->synchronizeMonitoring([$assessment->id]);
+
         $redirect = redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id]);
 
         if ($suspicious) {
@@ -1041,6 +1055,9 @@ class AssessmentController extends Controller
             'assessments',
             $assessment->id
         );
+
+        // Phase 2C — after the edit's transaction committed above.
+        $this->synchronizeMonitoring([$assessment->id]);
 
         return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
             ->with('success', 'Updated "' . $assessment->name . '".')
@@ -1220,6 +1237,31 @@ class AssessmentController extends Controller
         }
 
         return $names;
+    }
+
+    /**
+     * Phase 2C — brings Academic Concerns in line with evidence that has
+     * ALREADY been committed. Deliberately outside the evidence
+     * transaction: a monitoring defect must not undo a valid, saved score
+     * or Missing marker, and a concern is always re-derivable from that
+     * evidence (dss:evaluate-concerns; dss:check-integrity reports the
+     * gap). A failure is not swallowed: it is reported with its full
+     * exception (report()) and the adviser is told in words that the save
+     * succeeded but monitoring did not update.
+     *
+     * @param iterable<int> $assessmentIds
+     */
+    private function synchronizeMonitoring(iterable $assessmentIds): void
+    {
+        try {
+            $this->monitoring->synchronizeAssessments($assessmentIds);
+        } catch (\Throwable $e) {
+            report($e);
+            session()->flash('monitoring_warning',
+                'Your changes were saved, but Academic Monitoring could not update its concerns for this assessment, '
+                . 'so do not rely on the concern status shown for it until this is fixed. '
+                . 'The recorded scores and Missing markers are correct. Please tell the administrator so the concerns can be re-evaluated.');
+        }
     }
 
     private function scoreAndMissingMessage(array $names): string

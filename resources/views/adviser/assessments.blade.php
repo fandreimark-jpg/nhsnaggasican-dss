@@ -34,6 +34,13 @@
 <div class="alert alert-success mb-4">{{ session('success') }}</div>
 @endif
 
+{{-- Phase 2C — the save succeeded but Academic Monitoring did not update
+     (AssessmentController::synchronizeMonitoring()). Shown on its own so a
+     success message above it is never read as "everything updated". --}}
+@if(session('monitoring_warning'))
+<div class="alert alert-warning mb-4" data-monitoring-warning>{{ session('monitoring_warning') }}</div>
+@endif
+
 @include('partials.import-result')
 
 {{-- "Do not import formula results blindly" -- the Grade 12 workbook's OWN
