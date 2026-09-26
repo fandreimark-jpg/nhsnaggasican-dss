@@ -56,6 +56,10 @@ class DashboardController extends Controller
                 // SubjectAnalysisService the Subject Analysis page uses. A
                 // presentation summary of existing figures, not a new metric.
                 'componentPerformance' => $this->componentPerformance(),
+                // Phase 2D — open academic concerns for the same school year
+                // the rest of this page shows (academic_concerns, not risk_results).
+                'academicMonitoringOpen' => (new \App\Services\AcademicMonitoringOverviewService())
+                    ->openCountForYear($this->analytics->selectedSchoolYear()),
                 // Compact "pending interventions" list for Zone 2 — the five
                 // most recent rows the same Intervention::scopeUndecided()
                 // rule counts on the Awaiting Your Decision card (CLAUDE.md

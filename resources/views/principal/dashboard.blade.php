@@ -88,6 +88,15 @@
     </x-stat-card>
 </div>
 
+{{-- Phase 2D — Academic Monitoring: open academic concerns (academic_concerns),
+     never risk_results. A count of learners' concerns For Review, linking to
+     the evidence; it predicts nothing and creates no intervention. --}}
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4 max-w-3xl" data-academic-monitoring-card>
+    <x-stat-card label="For Review" :value="$academicMonitoringOpen" accent="count-4" icon="flag"
+        :href="route('principal.academic-monitoring', ['school_year' => $schoolYear, 'term' => ''])"
+        :note="'Open academic concerns, School Year '.$schoolYear.' — Academic Monitoring'" />
+</div>
+
 {{-- TASK 3 of "close the intervention loop": populated the instant
      assessment evidence exists, unlike the Risk cards below — see
      DashboardAnalyticsService::getInTermStatusSummary(). Deliberately its

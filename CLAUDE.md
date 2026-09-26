@@ -1387,8 +1387,20 @@ information. A twelfth is not.
 If a fix would require changing something these instructions forbid, stop and
 ask. Do not route around the constraint.
 
-The suite baseline is 1,090 passing, 0 skipped where Python is present
-(as of the "Railway readiness and test-environment isolation" pass,
+The suite baseline is 1,191 passing, 0 skipped where Python is present
+(as of "Rule-based academic monitoring" Phase 2D, 2026-09-26 — see the
+section of that name at the end of this file). The chain: 1,093 at
+`39d9afe` → 1,124 (Phase 2A, +31 `AssessmentLearnerStatusTest`) → 1,146
+(Phase 2B, +21 `AcademicConcernTest`, +1 `MigrationTimestampPortabilityTest`)
+→ 1,169 (Phase 2C, +20 `AcademicMonitoringTriggerTest`, +3 in
+`EditFormActionsAreRouteDerivedTest`) → 1,191 (Phase 2D, +22
+`PrincipalAcademicMonitoringTest`). On this machine the full suite is run
+as two sequential foreground chunks (`tests/Unit` + `tests/Feature/[A-L]*`,
+then `tests/Feature/Auth` + `tests/Feature/[M-Z]*`, via
+`vendor/bin/phpunit -c phpunit.xml`, `MSYS_NO_PATHCONV=1` under Git Bash)
+because a single ~9-minute background run was reaped under memory
+pressure; check `--list-tests` counts add up to the whole list first.
+Before that: 1,090 (as of the "Railway readiness and test-environment isolation" pass,
 2026-09-22 — 1,084 before it, plus the 6 tests in `TrustedProxyConfigTest`).
 Before that: 1,084 (as of the "Final pre-demo full-system audit", 2026-09-21 evening —
 1,081 before it, plus the 3 tests in `EnvPutenvDisabledTest`). Before
@@ -3329,3 +3341,61 @@ from the XAMPP Control Panel; a process started from a tool shell can die
 with that shell, and a hung one must be force-stopped (InnoDB is
 crash-safe; redo is flushed at commit).
 
+
+## Rule-based academic monitoring (2026-09-26, Phases 2A-2D) — the replacement for ML risk, being built alongside it
+
+Branch `rule-based-academic-monitoring`. The DSS is moving from the ML
+risk classifier to rule-based ongoing academic monitoring: it surfaces
+observable concerns in recorded evidence and predicts nothing. The ML
+path (`risk_results`, `classify.py`, Submit Report's analytics) still
+runs untouched until its readers are migrated; do not remove it yet.
+
+- **Assessment learner status (2A).** Per learner per item: a score row →
+  **Completed** (a recorded 0 is Completed); else an adviser's explicit
+  marker in `assessment_learner_statuses` (`status = missing`) →
+  **Missing**; else → **Not Yet Given / No Evidence Yet**. Completed is
+  never stored. Blank is never zero and never Missing: an ECR blank or a
+  blank form field writes nothing. A score and a marker never coexist
+  (`AssessmentStatusService`, both models' hooks, `dss:check-integrity`
+  4b). `GradingEngine` never reads markers — Missing is still "no
+  evidence", never a 0. Unchanged on purpose: a repeat-ECR blank keeps an
+  existing score; a blank on manual Edit clears it.
+- **Academic concerns (2B).** `academic_concerns`, written only by
+  `AcademicMonitoringService`. One concern per learner per rule context
+  (for the Missing rule, per assessment item); `open_key` + a unique index
+  allow one OPEN concern per context and any number of resolved ones.
+  Concerns are never deleted: when the evidence no longer meets the rule
+  they are **resolved** with `resolved_at` and a `resolution_reason`, and a
+  recurrence opens a new row. Lifecycle timestamps are DATETIME, not
+  TIMESTAMP — MariaDB 10.4 with `explicit_defaults_for_timestamp = OFF`
+  rejects a second NOT NULL TIMESTAMP (error 1067);
+  `MigrationTimestampPortabilityTest` guards every migration.
+- **The only enabled rule** is `config('dss.monitoring_rules')` =
+  `MissingRequirementRule` (EXPLICIT_MISSING_REQUIREMENT: an adviser
+  marked a required item Missing → For Review). No component, count,
+  decline or attendance threshold exists; one must be approved by the
+  school before it is added there. A concern never creates, approves or
+  links an intervention.
+- **Automatic synchronization (2C).** Adviser Add item, Edit item and
+  ECR/file import call `AcademicMonitoringService::synchronizeAssessments()`
+  AFTER their evidence transaction commits, for exactly the items they
+  changed (`MonitoringRule::constrainOpenConcerns()` keeps a narrow
+  evaluation from resolving anything outside its items). A failure never
+  undoes saved evidence: it is `report()`ed, the adviser is told the
+  concern status may not be current, and `dss:check-integrity` 4c lists
+  the gap. `dss:evaluate-concerns {year} {term} [--dry-run]` is the manual
+  re-evaluation; its dry run is the proof live sync is complete.
+  Validated live 2026-09-26 (Quiz 1, Agila, Tests A-D).
+- **Principal Academic Monitoring (2D).** `principal.academic-monitoring`
+  (`Principal\AcademicMonitoringController`,
+  `AcademicMonitoringOverviewService`), read-only, Principal-only. Default
+  scope: the active year's open term, status For Review; filters School
+  Year / Term / Grade Level / Section / Subject / Status, each validated
+  against the selected year (a stale id is ignored, never widened). Track
+  and Specialization are shown from the section, never offered as
+  filters. Concerns are grouped by learner + subject for display only.
+  Each concern shows its evidence and the item's CURRENT status (a resolved
+  concern whose item now holds a 0 reads Completed). The dashboard's "For
+  Review" card counts open concerns for its school year. `reviewed_by` /
+  `reviewed_at` exist but nothing writes them: what "Reviewed" means has
+  not been decided — do not invent Dismiss/Confirm semantics.

@@ -16,6 +16,7 @@ use App\Http\Controllers\Principal\InterventionController as PrincipalInterventi
 use App\Http\Controllers\Principal\ReportController as PrincipalReportController;
 use App\Http\Controllers\Principal\StudentController as PrincipalStudentController;
 use App\Http\Controllers\Principal\SubjectAnalysisController as PrincipalSubjectAnalysisController;
+use App\Http\Controllers\Principal\AcademicMonitoringController as PrincipalAcademicMonitoringController;
 
 // Admin controllers
 use App\Http\Controllers\Admin\DashboardController;
@@ -127,6 +128,8 @@ Route::middleware(['auth', 'role:principal'])
         Route::get('/students', [PrincipalStudentController::class, 'index'])->name('students');
         Route::get('/students/{student}', [PrincipalStudentController::class, 'show'])->name('students.show');
         Route::get('/subject-analysis', [PrincipalSubjectAnalysisController::class, 'index'])->name('subject-analysis');
+        // Phase 2D — read-only: academic concerns For Review and their history.
+        Route::get('/academic-monitoring', [PrincipalAcademicMonitoringController::class, 'index'])->name('academic-monitoring');
     });
 
 // =============================================

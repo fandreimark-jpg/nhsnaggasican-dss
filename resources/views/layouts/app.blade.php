@@ -48,6 +48,7 @@
                 ['principal.dashboard', 'principal.dashboard', 'bi-speedometer2', 'Dashboard'],
             ],
             'Monitoring' => [
+                ['principal.academic-monitoring', 'principal.academic-monitoring*', 'bi-flag', 'Academic Monitoring'],
                 ['principal.students', 'principal.students*', 'bi-mortarboard', 'Students'],
                 ['principal.reports', 'principal.reports*', 'bi-file-earmark-text', 'Reports'],
                 ['principal.subject-analysis', 'principal.subject-analysis*', 'bi-bar-chart', 'Subject Analysis'],
