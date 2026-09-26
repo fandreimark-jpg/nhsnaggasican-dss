@@ -776,6 +776,7 @@
 
         <form method="POST" id="editAssessmentItemForm"
               action="{{ $editAssessment ? route('adviser.assessments.item.update', $editAssessment->id) : '#' }}"
+              data-update-url="{{ route('adviser.assessments.item.update', ['assessment' => '__ID__']) }}"
               class="space-y-4">
             @csrf
             @method('PUT')
@@ -901,8 +902,12 @@
     };
 
     window.openEditAssessmentItemModal = function (data) {
-        document.getElementById('editAssessmentItemForm').action = '/adviser/assessments/item/' + data.id;
-        document.getElementById('editAssessmentItemForm').querySelector('[name="assessment_id"]').value = data.id;
+        // Route-derived, never a hard-coded root-relative path: Laravel
+        // renders the base URL (e.g. the XAMPP /naggasican-dss/public/
+        // sub-directory) into data-update-url; modal.js swaps in the id.
+        const editForm = document.getElementById('editAssessmentItemForm');
+        editForm.action = window.updateUrlFor(editForm, data.id);
+        editForm.querySelector('[name="assessment_id"]').value = data.id;
         document.getElementById('eaiItemName').textContent = data.name;
         document.getElementById('eaiTitleSuffix').textContent = '— ' + data.name;
         document.getElementById('eaiComponent').textContent = data.componentLabel;
