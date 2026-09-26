@@ -82,4 +82,10 @@ class Assessment extends Model
     {
         return $this->hasMany(AssessmentScore::class);
     }
+
+    /** Explicit adviser-recorded learner statuses (Missing) — see AssessmentStatusService */
+    public function learnerStatuses()
+    {
+        return $this->hasMany(AssessmentLearnerStatus::class);
+    }
 }

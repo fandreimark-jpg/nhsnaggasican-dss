@@ -27,6 +27,24 @@ class AssessmentScore extends Model
         'score' => 'decimal:2',
     ];
 
+    /**
+     * A recorded score makes the learner Completed, so any Missing marker
+     * on the same item goes (AssessmentStatusService's invariant). Here
+     * rather than at each call site so every write path — the ECR import
+     * included — keeps it. Only a NEWLY created row can have a marker: a
+     * marker is refused while a score exists (AssessmentLearnerStatus).
+     */
+    protected static function booted(): void
+    {
+        static::saved(function (AssessmentScore $score) {
+            if ($score->wasRecentlyCreated) {
+                AssessmentLearnerStatus::where('assessment_id', $score->assessment_id)
+                    ->where('student_id', $score->student_id)
+                    ->delete();
+            }
+        });
+    }
+
     public function assessment()
     {
         return $this->belongsTo(Assessment::class);

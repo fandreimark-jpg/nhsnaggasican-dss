@@ -12,8 +12,11 @@ use App\Models\RiskResult;
 use App\Models\Section;
 use App\Models\Student;
 use App\Models\Subject;
+use App\Services\AcademicMonitoringService;
 use App\Services\GradingEngine;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Reports orphaned/inconsistent state WITHOUT changing anything — see
@@ -81,6 +84,50 @@ class CheckIntegrityCommand extends Command
                 "{$orphanedScores} row(s)",
                 'php artisan dss:truncate --level=assessments',
             ];
+        }
+
+        // 4b. A learner with BOTH a score and a Missing marker on one item.
+        // AssessmentStatusService and both models refuse this; only a raw
+        // write can produce it. The score wins on screen (a score is
+        // Completed), but the stale marker is reported, never auto-removed.
+        $scoredAndMissing = DB::table('assessment_learner_statuses')
+            ->join('assessment_scores', function ($join) {
+                $join->on('assessment_scores.assessment_id', '=', 'assessment_learner_statuses.assessment_id')
+                     ->on('assessment_scores.student_id', '=', 'assessment_learner_statuses.student_id');
+            })
+            ->count();
+        if ($scoredAndMissing > 0) {
+            $findings[] = [
+                'Learners with both a score and a Missing marker on one item',
+                "{$scoredAndMissing} row(s)",
+                'Review in Adviser > Assessments (Edit the item) — no automatic command; the recorded score is kept.',
+            ];
+        }
+
+        // 4c. Academic concerns out of step with the current evidence — a
+        // dry run of the monitoring rules, so nothing is written. Guarded:
+        // this command must keep working on a database where the
+        // academic_concerns migration has not been applied yet.
+        if (Schema::hasTable('academic_concerns')) {
+            $monitoring = app(AcademicMonitoringService::class);
+            $contexts = DB::table('assessment_learner_statuses')
+                ->join('assessments', 'assessments.id', '=', 'assessment_learner_statuses.assessment_id')
+                ->select('assessments.school_year', 'assessments.grading_period')
+                ->union(DB::table('academic_concerns')->where('status', 'open')->select('school_year', 'grading_period'))
+                ->get()
+                ->unique(fn($row) => $row->school_year . '|' . $row->grading_period);
+
+            foreach ($contexts as $row) {
+                $plan = $monitoring->evaluate($row->school_year, (int) $row->grading_period, null, dryRun: true);
+                if ($plan['created'] || $plan['refreshed'] || $plan['resolved']) {
+                    $findings[] = [
+                        'Academic concerns out of date with current evidence',
+                        count($plan['created']) . ' to open, ' . count($plan['refreshed']) . ' to refresh, '
+                            . count($plan['resolved']) . " to resolve — school year {$row->school_year}, Term {$row->grading_period}",
+                        "php artisan dss:evaluate-concerns {$row->school_year} {$row->grading_period} --dry-run, then without --dry-run",
+                    ];
+                }
+            }
         }
 
         // 5. Students whose section no longer exists.

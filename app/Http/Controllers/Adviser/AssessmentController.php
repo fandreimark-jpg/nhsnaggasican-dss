@@ -16,6 +16,8 @@ use App\Helpers\LogActivity;
 use App\Http\Controllers\Concerns\ValidatesSpreadsheetUpload;
 use App\Exceptions\AssessmentMetadataConflictException;
 use App\Services\AssessmentItemConflictDetector;
+use App\Services\AssessmentStatusService;
+use App\Exceptions\AssessmentStatusConflictException;
 use App\Services\AssessmentUploadService;
 use App\Services\EcrSubjectTermResolver;
 use App\Services\TempUploadPruner;
@@ -66,7 +68,8 @@ class AssessmentController extends Controller
         private PerformanceAnalysisService $analysis = new PerformanceAnalysisService(),
         private InTermStatusService $inTermStatus = new InTermStatusService(),
         private EcrSubjectTermResolver $ecrTerms = new EcrSubjectTermResolver(),
-        private AssessmentItemConflictDetector $conflicts = new AssessmentItemConflictDetector()
+        private AssessmentItemConflictDetector $conflicts = new AssessmentItemConflictDetector(),
+        private AssessmentStatusService $statuses = new AssessmentStatusService()
     ) {
     }
 
@@ -81,7 +84,7 @@ class AssessmentController extends Controller
                 'staleRiskTerms' => [], 'sectionStudents' => collect(), 'modalStudents' => collect(),
                 'itemScoresByAssessment' => collect(), 'autoOpenAddItem' => false, 'prefillComponent' => null,
                 'performanceByStudentId' => collect(), 'duplicateExamRoleWarnings' => collect(), 'unroledExamItemNames' => collect(),
-                'statusFilter' => null,
+                'statusFilter' => null, 'missingByAssessment' => collect(),
             ]);
         }
 
@@ -221,6 +224,11 @@ class AssessmentController extends Controller
                 ->groupBy('assessment_id')
                 ->map(fn($rows) => $rows->pluck('score', 'student_id'));
 
+        // Phase 2A — which learners the adviser explicitly marked Missing
+        // on each item, for the item list and the Edit modal. Display only;
+        // GradingEngine never reads it.
+        $missingByAssessment = $this->statuses->missingStudentIdsByAssessment($items->pluck('id'));
+
         $staleRiskTerms = AcademicTerm::staleRiskTerms($section->school_year);
 
         // Keyed once here rather than a firstWhere() per roster row inside
@@ -252,7 +260,7 @@ class AssessmentController extends Controller
             'section', 'subjects', 'selectedSubject', 'selectedPeriod', 'items', 'openTerm', 'performance',
             'staleRiskTerms', 'sectionStudents', 'modalStudents', 'itemScoresByAssessment',
             'autoOpenAddItem', 'prefillComponent', 'performanceByStudentId', 'duplicateExamRoleWarnings', 'unroledExamItemNames',
-            'statusFilter'
+            'statusFilter', 'missingByAssessment'
         ));
     }
 
@@ -715,6 +723,8 @@ class AssessmentController extends Controller
             'is_additional_support' => 'nullable|boolean',
             'max_score'  => 'required|numeric|min:0.01',
             'scores'     => 'nullable|array',
+            'missing'    => 'nullable|array',
+            'missing.*'  => 'nullable|in:0,1',
         ]);
 
         if ($validator->fails()) {
@@ -789,6 +799,14 @@ class AssessmentController extends Controller
             ], 'addItem')->withInput();
         }
 
+        // Phase 2A — explicit Missing markers. Only an adviser's tick makes
+        // a learner Missing; a blank score field stays Not Yet Given.
+        $missingFlags = $this->missingFlagsFromRequest($request, $students);
+        if ($conflicts = $this->scoreAndMissingConflicts($request, $missingFlags, $students)) {
+            return back()->withErrors(['scores' => $this->scoreAndMissingMessage($conflicts)], 'addItem')->withInput();
+        }
+        $markMissingIds = array_keys(array_filter($missingFlags));
+
         // Same amber "declared max looks too high" warning the file
         // upload path shows in Preview — never blocks, see
         // AssessmentUploadService::SUSPICIOUS_MAX_RATIO.
@@ -797,7 +815,7 @@ class AssessmentController extends Controller
             $suspicious = $this->uploads->isSuspiciousMax(count($parsedScores), max($parsedScores), $maxScore);
         }
 
-        $assessment = DB::transaction(function () use ($section, $subject, $gradingPeriod, $itemName, $component, $examRole, $isAdditionalSupport, $maxScore, $parsedScores) {
+        $assessment = DB::transaction(function () use ($section, $subject, $gradingPeriod, $itemName, $component, $examRole, $isAdditionalSupport, $maxScore, $parsedScores, $markMissingIds) {
             $upload = AssessmentUpload::create([
                 'section_id'        => $section->id,
                 'subject_id'        => $subject->id,
@@ -831,20 +849,23 @@ class AssessmentController extends Controller
             );
 
             foreach ($parsedScores as $studentId => $score) {
-                AssessmentScore::updateOrCreate(
-                    ['assessment_id' => $assessment->id, 'student_id' => $studentId],
-                    ['score' => $score]
-                );
+                $this->statuses->recordScore($assessment, $studentId, $score);
+            }
+
+            foreach ($markMissingIds as $studentId) {
+                $this->statuses->markMissing($assessment, $studentId, auth()->id());
             }
 
             return $assessment;
         });
 
+        $missingNote = $markMissingIds ? ', ' . count($markMissingIds) . ' marked Missing' : '';
+
         LogActivity::log(
             'add_assessment_item',
             'Manually added assessment item "' . $itemName . '" (' . self::COMPONENT_LABELS[$component] . ') for '
                 . $subject->name . ' — Term ' . $gradingPeriod . ' — Section ' . $section->name
-                . ' — ' . count($parsedScores) . ' score(s) entered.',
+                . ' — ' . count($parsedScores) . ' score(s) entered' . $missingNote . '.',
             'assessments',
             $assessment->id
         );
@@ -852,12 +873,12 @@ class AssessmentController extends Controller
         $redirect = redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id]);
 
         if ($suspicious) {
-            return $redirect->with('warning', 'Saved "' . $itemName . '" with ' . count($parsedScores) . ' score(s). '
+            return $redirect->with('warning', 'Saved "' . $itemName . '" with ' . count($parsedScores) . ' score(s)' . $missingNote . '. '
                 . 'Note: the highest score entered is well below half of the declared max score ('
                 . number_format($maxScore, 2) . ') — double-check the max score is correct.');
         }
 
-        return $redirect->with('success', 'Added "' . $itemName . '" with ' . count($parsedScores) . ' score(s).');
+        return $redirect->with('success', 'Added "' . $itemName . '" with ' . count($parsedScores) . ' score(s)' . $missingNote . '.');
     }
 
     /**
@@ -884,6 +905,8 @@ class AssessmentController extends Controller
         $validator = Validator::make($request->all(), [
             'max_score' => 'required|numeric|min:0.01',
             'scores'    => 'nullable|array',
+            'missing'   => 'nullable|array',
+            'missing.*' => 'nullable|in:0,1',
         ]);
 
         if ($validator->fails()) {
@@ -923,6 +946,33 @@ class AssessmentController extends Controller
             ], 'editItem')->withInput();
         }
 
+        // Phase 2A — explicit Missing markers. A learner key sent as 1 is
+        // marked Missing, as 0 is un-marked; a learner not sent at all is
+        // left exactly as they were (so a request without `missing` behaves
+        // as before this existed).
+        $missingFlags = $this->missingFlagsFromRequest($request, $students);
+        if ($conflicts = $this->scoreAndMissingConflicts($request, $missingFlags, $students)) {
+            return back()->withErrors(['scores' => $this->scoreAndMissingMessage($conflicts)], 'editItem')->withInput();
+        }
+
+        // Marking Missing never discards a recorded score on its own: the
+        // score must be cleared in the same save (a blank score field,
+        // which clears it exactly as it always has). A Missing tick with
+        // the score simply not sent is refused, naming the learner.
+        $stillScored = [];
+        foreach (array_keys(array_filter($missingFlags)) as $studentId) {
+            $submitted = $request->has('scores.' . $studentId);
+            if (!$submitted && AssessmentScore::where('assessment_id', $assessment->id)->where('student_id', $studentId)->exists()) {
+                $student = $students->get($studentId);
+                $stillScored[] = $student->last_name . ', ' . $student->first_name;
+            }
+        }
+        if ($stillScored) {
+            return back()->withErrors([
+                'scores' => 'Clear the recorded score before marking a learner Missing: ' . implode('; ', $stillScored) . '.',
+            ], 'editItem')->withInput();
+        }
+
         $subject = $assessment->subject;
         $gradingPeriod = $assessment->grading_period;
         $schoolYear = $section->school_year;
@@ -940,24 +990,36 @@ class AssessmentController extends Controller
             return [$student->id => $result['components'][$component]['percentage'] ?? null];
         });
 
-        DB::transaction(function () use ($assessment, $newMaxScore, $parsedScores) {
-            $assessment->update(['max_score' => $newMaxScore]);
+        try {
+            DB::transaction(function () use ($assessment, $newMaxScore, $parsedScores, $missingFlags) {
+                $assessment->update(['max_score' => $newMaxScore]);
 
-            foreach ($parsedScores as $studentId => $value) {
-                if ($value === null) {
-                    AssessmentScore::where('assessment_id', $assessment->id)->where('student_id', $studentId)->delete();
-                    // Query-builder delete fires no model event — tell the
-                    // evidence cache by hand (see GradingEngine::invalidateEvidence()).
-                    \App\Services\GradingEngine::invalidateEvidence();
-                    continue;
+                foreach ($parsedScores as $studentId => $value) {
+                    if ($value === null) {
+                        // Unchanged behaviour: a blank field on Edit clears
+                        // the score (the learner becomes Not Yet Given, or
+                        // Missing if also ticked below) — never a zero.
+                        AssessmentScore::where('assessment_id', $assessment->id)->where('student_id', $studentId)->delete();
+                        // Query-builder delete fires no model event — tell the
+                        // evidence cache by hand (see GradingEngine::invalidateEvidence()).
+                        \App\Services\GradingEngine::invalidateEvidence();
+                        continue;
+                    }
+
+                    $this->statuses->recordScore($assessment, $studentId, $value);
                 }
 
-                AssessmentScore::updateOrCreate(
-                    ['assessment_id' => $assessment->id, 'student_id' => $studentId],
-                    ['score' => $value]
-                );
-            }
-        });
+                // After the score writes, so a score cleared in this same
+                // save is already gone when its Missing marker is recorded.
+                foreach ($missingFlags as $studentId => $isMissing) {
+                    $isMissing
+                        ? $this->statuses->markMissing($assessment, $studentId, auth()->id())
+                        : $this->statuses->clearMissing($assessment->id, $studentId);
+                }
+            });
+        } catch (AssessmentStatusConflictException $e) {
+            return back()->withErrors(['scores' => $e->getMessage()], 'editItem')->withInput();
+        }
 
         $after = $affectedStudents->mapWithKeys(function ($student) use ($subject, $section, $gradingPeriod, $schoolYear, $component) {
             $result = $this->analysis->analyzeStudent($student, $subject, $section, $gradingPeriod, $schoolYear);
@@ -974,7 +1036,8 @@ class AssessmentController extends Controller
             'edit_assessment_item',
             'Edited assessment item "' . $assessment->name . '" (' . self::COMPONENT_LABELS[$component] . ') for '
                 . $subject->name . ' — Term ' . $gradingPeriod . ' — Section ' . $section->name . ' — max score set to '
-                . number_format($newMaxScore, 2) . ', ' . count($summary) . ' student(s) affected.',
+                . number_format($newMaxScore, 2) . ', ' . count($summary) . ' student(s) affected'
+                . (($marked = count(array_filter($missingFlags))) ? ', ' . $marked . ' marked Missing' : '') . '.',
             'assessments',
             $assessment->id
         );
@@ -1114,5 +1177,54 @@ class AssessmentController extends Controller
 
         return (new \App\Services\SubjectOfferingService())
             ->notOfferedMessage($subject?->name ?? 'That subject', $section, $gradingPeriod);
+    }
+
+    /**
+     * Phase 2A — the explicit Missing flags a form sent, keyed by learner,
+     * limited to learners enrolled in the section (a tampered id is
+     * ignored, the same way a tampered score id is). Only keys actually
+     * sent are returned: true = mark Missing, false = un-mark.
+     *
+     * @return array<int, bool>
+     */
+    private function missingFlagsFromRequest(Request $request, $students): array
+    {
+        $flags = [];
+        foreach ((array) $request->input('missing', []) as $studentId => $value) {
+            if (!$students->has((int) $studentId) || $value === null || $value === '') {
+                continue;
+            }
+            $flags[(int) $studentId] = (string) $value === '1';
+        }
+
+        return $flags;
+    }
+
+    /**
+     * Learners ticked Missing who ALSO have a score typed in the same
+     * form. Refused, never resolved by guessing which one the adviser
+     * meant — a learner is Completed or Missing, never both.
+     *
+     * @return list<string> learner names
+     */
+    private function scoreAndMissingConflicts(Request $request, array $missingFlags, $students): array
+    {
+        $names = [];
+        foreach (array_keys(array_filter($missingFlags)) as $studentId) {
+            $raw = $request->input('scores.' . $studentId);
+            $raw = is_string($raw) ? trim($raw) : $raw;
+            if ($raw !== null && $raw !== '') {
+                $student = $students->get($studentId);
+                $names[] = $student->last_name . ', ' . $student->first_name;
+            }
+        }
+
+        return $names;
+    }
+
+    private function scoreAndMissingMessage(array $names): string
+    {
+        return 'A learner can have a score or be marked Missing, not both. Remove the score or untick Missing for: '
+            . implode('; ', $names) . '.';
     }
 }

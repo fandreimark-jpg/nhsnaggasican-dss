@@ -206,6 +206,13 @@
     <p class="text-xs text-gray-500 px-6 pt-3">
         <x-count-label :count="$items->count()" noun="item" />
     </p>
+    {{-- Phase 2A — the three learner states on an item, in words. --}}
+    <p class="text-xs text-muted px-6 pt-1" data-assessment-status-legend>
+        Per learner, each item is <strong>Completed</strong> (a score is entered),
+        <strong>Missing</strong> (you marked it Missing), or
+        <strong>Not Yet Given / No Evidence Yet</strong> (no score and not marked).
+        A blank is never counted as zero, and only a score counts toward the grade.
+    </p>
     <div class="tbl-scroll mt-2">
     <table class="tbl tbl-sticky">
         <thead>
@@ -234,7 +241,13 @@
                     @endif
                 </td>
                 <td class="tbl-num text-gray-600">{{ number_format($item->max_score, 2) }}</td>
-                <td class="tbl-num text-gray-600">{{ $item->scores_count }}</td>
+                <td class="tbl-num text-gray-600">
+                    {{ $item->scores_count }}
+                    @php $missingCount = count($missingByAssessment[$item->id] ?? []); @endphp
+                    @if($missingCount > 0)
+                        <span class="block text-[10px] text-amber-700" data-missing-count>{{ $missingCount }} marked Missing</span>
+                    @endif
+                </td>
                 @if($isTermOpen)
                 <td class="text-center">
                     @php
@@ -244,6 +257,7 @@
                             'componentLabel' => $componentLabels[$item->component] ?? $item->component,
                             'maxScore' => (float) $item->max_score,
                             'scores' => ($itemScoresByAssessment[$item->id] ?? collect())->map(fn($s) => (float) $s),
+                            'missing' => $missingByAssessment[$item->id] ?? [],
                         ];
                     @endphp
                     <button type="button"
@@ -674,7 +688,7 @@
 
             <div>
                 <div class="flex items-center justify-between mb-1">
-                    <label class="block text-sm text-gray-600">Scores <span class="text-gray-400 text-xs">(leave blank if a student did not take this item)</span></label>
+                    <label class="block text-sm text-gray-600">Scores <span class="text-gray-400 text-xs">(a blank score is Not Yet Given, never zero — tick Missing only if the learner was expected to take it and did not)</span></label>
                 </div>
                 <div class="border rounded-lg divide-y max-h-72 overflow-y-auto" id="aaiFullRoster">
                     @foreach($sectionStudents as $student)
@@ -695,9 +709,17 @@
                                 <span class="block text-xs text-gray-300">No data yet</span>
                             @endif
                         </div>
-                        <input type="number" name="scores[{{ $student->id }}]" step="0.01" min="0"
-                               value="{{ old('scores.'.$student->id) }}"
-                               class="w-24 border rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:ring-2 focus:ring-brand-400">
+                        <div class="flex items-center gap-3" data-score-row>
+                            <input type="number" name="scores[{{ $student->id }}]" step="0.01" min="0"
+                                   value="{{ old('scores.'.$student->id) }}" data-score-input
+                                   class="w-24 border rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:ring-2 focus:ring-brand-400">
+                            <label class="inline-flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                                <input type="checkbox" name="missing[{{ $student->id }}]" value="1" data-missing-toggle
+                                       {{ old('missing.'.$student->id) === '1' ? 'checked' : '' }}
+                                       class="rounded border-gray-300 text-amber-600 focus:ring-amber-400">
+                                Missing
+                            </label>
+                        </div>
                     </div>
                     @endforeach
                 </div>
@@ -768,14 +790,25 @@
             </div>
 
             <div>
-                <label class="form-label">Scores <span class="text-gray-400 text-xs">(leave blank to clear — the student is treated as not having taken this item)</span></label>
+                <label class="form-label">Scores <span class="text-gray-400 text-xs">(leave blank to clear — the learner becomes Not Yet Given, never zero; tick Missing to record that the learner did not take it)</span></label>
                 <div class="border rounded-lg divide-y max-h-72 overflow-y-auto" id="eaiRoster">
                     @foreach($sectionStudents as $student)
                     <div class="flex items-center justify-between gap-3 px-3 py-2 text-sm">
                         <span class="text-gray-700">{{ $student->last_name }}, {{ $student->first_name }}</span>
-                        <input type="number" name="scores[{{ $student->id }}]" data-student-score="{{ $student->id }}" step="0.01" min="0"
-                               value="{{ old('scores.'.$student->id) }}"
-                               class="w-24 border rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:ring-2 focus:ring-brand-400">
+                        <div class="flex items-center gap-3" data-score-row>
+                            <input type="number" name="scores[{{ $student->id }}]" data-student-score="{{ $student->id }}" step="0.01" min="0"
+                                   value="{{ old('scores.'.$student->id) }}" data-score-input
+                                   class="w-24 border rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:ring-2 focus:ring-brand-400">
+                            {{-- The hidden 0 un-marks a learner whose box is left
+                                 unticked; the checkbox, sent after it, wins when ticked. --}}
+                            <input type="hidden" name="missing[{{ $student->id }}]" value="0">
+                            <label class="inline-flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                                <input type="checkbox" name="missing[{{ $student->id }}]" value="1" data-student-missing="{{ $student->id }}" data-missing-toggle
+                                       {{ old('missing.'.$student->id) === '1' ? 'checked' : '' }}
+                                       class="rounded border-gray-300 text-amber-600 focus:ring-amber-400">
+                                Missing
+                            </label>
+                        </div>
                     </div>
                     @endforeach
                 </div>
@@ -880,6 +913,11 @@
             input.value = (data.scores && data.scores[studentId] !== undefined) ? data.scores[studentId] : '';
         });
 
+        const missing = (data.missing || []).map(String);
+        document.querySelectorAll('#eaiRoster [data-student-missing]').forEach((box) => {
+            box.checked = missing.includes(box.dataset.studentMissing);
+        });
+
         window.showModal('editAssessmentItemModal');
     };
     window.closeEditAssessmentItemModal = () => window.hideModal('editAssessmentItemModal');
@@ -887,6 +925,17 @@
     document.addEventListener('DOMContentLoaded', function () {
         window.bindModalOverlayClose('addAssessmentItemModal');
         window.bindModalOverlayClose('editAssessmentItemModal');
+
+        // Phase 2A — a learner is Completed OR Missing, never both. Ticking
+        // Missing empties that learner's score field (visibly — on Edit the
+        // blank then clears the recorded score, as a blank always has);
+        // typing a score unticks Missing. The server refuses both anyway.
+        document.querySelectorAll('[data-missing-toggle]').forEach((box) => {
+            const score = box.closest('[data-score-row]')?.querySelector('[data-score-input]');
+            if (!score) return;
+            box.addEventListener('change', () => { if (box.checked) score.value = ''; });
+            score.addEventListener('input', () => { if (score.value !== '') box.checked = false; });
+        });
 
         const aaiComponentSelect = document.getElementById('aaiComponent');
         if (aaiComponentSelect) {

@@ -27,4 +27,25 @@ return [
     */
     'transmutation_fallback_scheme' => env('DSS_TRANSMUTATION_FALLBACK_SCHEME'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Enabled academic monitoring rules
+    |--------------------------------------------------------------------------
+    |
+    | "Rule-based academic monitoring" Phase 2B — the ONLY rules
+    | App\Services\AcademicMonitoringService runs. Each must implement
+    | App\Monitoring\MonitoringRule and must be school-approved.
+    |
+    | EXPLICIT_MISSING_REQUIREMENT is the only approved rule: it needs no
+    | numeric threshold (the adviser explicitly recorded Missing). A rule
+    | that needs a component target, a count of Missing items, a decline or
+    | an attendance figure must not be added here until the school has
+    | approved that figure. Deliberately not an env setting: enabling a
+    | rule is a reviewed code change, not a deployment toggle.
+    |
+    */
+    'monitoring_rules' => [
+        \App\Monitoring\Rules\MissingRequirementRule::class,
+    ],
+
 ];

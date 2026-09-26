@@ -1,0 +1,193 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\AcademicConcern;
+use App\Models\Section;
+use App\Monitoring\ConcernFinding;
+use App\Monitoring\EvaluationScope;
+use App\Monitoring\MonitoringRule;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+
+/**
+ * THE one writer of academic_concerns.
+ *
+ * Runs every ENABLED rule (config('dss.monitoring_rules')) over one school
+ * year and term and reconciles what it observes with the stored concerns:
+ *
+ *   observed, no open concern     -> open a new concern (For Review)
+ *   observed, open concern exists -> refresh its evidence (never a second row)
+ *   open concern, not observed    -> resolve it: status, resolved_at and a
+ *                                    reason from the rule; row and last
+ *                                    evidence kept
+ *
+ * It is idempotent — evaluating the same evidence twice changes nothing but
+ * last_evaluated_at — and it never creates, approves or changes an
+ * intervention. A dry run computes the same plan and writes nothing.
+ */
+class AcademicMonitoringService
+{
+    /** @var list<MonitoringRule> */
+    private array $rules;
+
+    /** @param list<MonitoringRule>|null $rules defaults to the enabled rules in config */
+    public function __construct(?array $rules = null)
+    {
+        $this->rules = $rules ?? array_map(
+            fn(string $class) => app($class),
+            config('dss.monitoring_rules', [])
+        );
+    }
+
+    /** @return list<MonitoringRule> */
+    public function rules(): array
+    {
+        return $this->rules;
+    }
+
+    public function ruleLabel(string $ruleKey): string
+    {
+        foreach ($this->rules as $rule) {
+            if ($rule->key() === $ruleKey) {
+                return $rule->label();
+            }
+        }
+
+        return $ruleKey;
+    }
+
+    /**
+     * @return array{
+     *     dry_run: bool, school_year: string, grading_period: int, section_ids: list<int>,
+     *     created: list<array{rule: string, student_id: int, subject_id: ?int, context_key: string, summary: string}>,
+     *     refreshed: list<array{rule: string, concern_id: int, summary: string}>,
+     *     unchanged: int,
+     *     resolved: list<array{rule: string, concern_id: int, student_id: int, context_key: string, reason: string}>,
+     * }
+     */
+    public function evaluate(string $schoolYear, int $gradingPeriod, ?int $sectionId = null, bool $dryRun = false): array
+    {
+        $sectionIds = Section::where('school_year', $schoolYear)
+            ->when($sectionId, fn($q) => $q->whereKey($sectionId))
+            ->pluck('id')->map(fn($id) => (int) $id)->all();
+
+        $scope = new EvaluationScope($schoolYear, $gradingPeriod, $sectionIds);
+
+        $report = [
+            'dry_run' => $dryRun, 'school_year' => $schoolYear, 'grading_period' => $gradingPeriod,
+            'section_ids' => $sectionIds, 'created' => [], 'refreshed' => [], 'unchanged' => 0, 'resolved' => [],
+        ];
+
+        if ($dryRun) {
+            foreach ($this->rules as $rule) {
+                $this->reconcile($rule, $scope, $report, write: false);
+            }
+
+            return $report;
+        }
+
+        DB::transaction(function () use ($scope, &$report) {
+            foreach ($this->rules as $rule) {
+                $this->reconcile($rule, $scope, $report, write: true);
+            }
+        });
+
+        return $report;
+    }
+
+    private function reconcile(MonitoringRule $rule, EvaluationScope $scope, array &$report, bool $write): void
+    {
+        /** @var Collection<string, ConcernFinding> $findings */
+        $findings = collect($rule->findings($scope))
+            ->keyBy(fn(ConcernFinding $f) => AcademicConcern::openKeyFor($rule->key(), $f->studentId, $f->contextKey));
+
+        $open = $this->openConcerns($rule, $scope, lock: $write);
+        $now = now();
+
+        foreach ($findings as $openKey => $finding) {
+            $concern = $open->get($openKey);
+
+            if (!$concern) {
+                $report['created'][] = [
+                    'rule' => $rule->key(), 'student_id' => $finding->studentId, 'subject_id' => $finding->subjectId,
+                    'context_key' => $finding->contextKey, 'summary' => $finding->summary,
+                ];
+                if ($write) {
+                    AcademicConcern::create([
+                        'student_id'        => $finding->studentId,
+                        'subject_id'        => $finding->subjectId,
+                        'section_id'        => $finding->sectionId,
+                        'school_year'       => $finding->schoolYear,
+                        'grading_period'    => $finding->gradingPeriod,
+                        'rule_key'          => $rule->key(),
+                        'rule_version'      => $rule->version(),
+                        'context_key'       => $finding->contextKey,
+                        'open_key'          => $openKey,
+                        'evidence'          => $finding->evidence,
+                        'status'            => AcademicConcern::STATUS_OPEN,
+                        'first_detected_at' => $now,
+                        'last_evaluated_at' => $now,
+                    ]);
+                }
+                continue;
+            }
+
+            $changed = $concern->evidence != $finding->evidence || $concern->rule_version !== $rule->version();
+            if ($changed) {
+                $report['refreshed'][] = ['rule' => $rule->key(), 'concern_id' => $concern->id, 'summary' => $finding->summary];
+            } else {
+                $report['unchanged']++;
+            }
+
+            if ($write) {
+                $concern->forceFill([
+                    'evidence'          => $finding->evidence,
+                    'rule_version'      => $rule->version(),
+                    'last_evaluated_at' => $now,
+                ])->save();
+            }
+        }
+
+        foreach ($open as $openKey => $concern) {
+            if ($findings->has($openKey)) {
+                continue;
+            }
+
+            $reason = $rule->resolutionReason($concern);
+            $report['resolved'][] = [
+                'rule' => $rule->key(), 'concern_id' => $concern->id, 'student_id' => $concern->student_id,
+                'context_key' => $concern->context_key, 'reason' => $reason,
+            ];
+
+            if ($write) {
+                // The last evidence stays on the row: it records what the
+                // concern was about when it was resolved.
+                $concern->forceFill([
+                    'status'            => AcademicConcern::STATUS_RESOLVED,
+                    'open_key'          => null,
+                    'resolved_at'       => $now,
+                    'resolution_reason' => $reason,
+                    'last_evaluated_at' => $now,
+                ])->save();
+            }
+        }
+    }
+
+    /** @return Collection<string, AcademicConcern> keyed by open_key */
+    private function openConcerns(MonitoringRule $rule, EvaluationScope $scope, bool $lock): Collection
+    {
+        if ($scope->sectionIds === []) {
+            return collect();
+        }
+
+        return AcademicConcern::open()
+            ->forRule($rule->key())
+            ->forSchoolYear($scope->schoolYear)
+            ->forTerm($scope->gradingPeriod)
+            ->whereIn('section_id', $scope->sectionIds)
+            ->when($lock, fn($q) => $q->lockForUpdate())
+            ->get()
+            ->keyBy('open_key');
+    }
+}
