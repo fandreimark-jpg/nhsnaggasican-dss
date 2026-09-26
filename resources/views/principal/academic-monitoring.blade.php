@@ -159,7 +159,19 @@
                                     <x-ui.status-badge tone="success" label="Resolved" />
                                 @endif
                                 <span class="font-medium text-ink ml-1">{{ $concern->concern_label }}</span>
-                                <span class="text-gray-600">· {{ $itemLine }} · {{ $e['status_label'] ?? 'Missing' }}</span>
+                                @if($concern->isOpen())
+                                    <span class="text-gray-600">· {{ $itemLine }} · {{ $e['status_label'] ?? 'Missing' }}</span>
+                                @else
+                                    {{-- A resolved concern's evidence status is history: say "was",
+                                         and state what the item is NOW (a recorded 0 is Completed). --}}
+                                    <span class="text-gray-600" data-status-history>· {{ $itemLine }} · was {{ $e['status_label'] ?? 'Missing' }} · now
+                                        @if($concern->has_newer_open_concern && $concern->current_item_status === \App\Services\AssessmentStatusService::MISSING)
+                                            Missing again
+                                        @else
+                                            {{ $statusLabel($concern->current_item_status) }}
+                                        @endif
+                                    </span>
+                                @endif
                             </div>
                             <div class="text-xs text-muted">
                                 Term {{ $concern->grading_period }} · First detected {{ $fmt($concern->first_detected_at) }}

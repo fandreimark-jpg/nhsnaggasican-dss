@@ -406,6 +406,76 @@ class PrincipalAcademicMonitoringTest extends TestCase
         $this->assertDoesNotMatchRegularExpression('#(href|action)="/principal#', $html);
     }
 
+    // --- Resolved-card wording (Phase 2D live validation, Test C) ---------------------
+
+    /** A concern card's visible summary text — tags stripped, whitespace collapsed. */
+    private function cardText(string $html, int $id): string
+    {
+        $block = $this->concernBlock($html, $id);
+        $summary = substr($block, 0, strpos($block, '<details') ?: strlen($block));
+
+        return trim(preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($summary))));
+    }
+
+    public function test_a_resolved_card_says_was_missing_and_now_completed_never_a_bare_missing(): void
+    {
+        $html = $this->page(['status' => 'all'])->getContent();
+
+        foreach (['FERNANDEZ', 'HILARIO'] as $last) {
+            $card = $this->cardText($html, $this->concernId($last, 'resolved'));
+            $this->assertStringContainsString('Resolved', $card, $last);
+            $this->assertStringContainsString('Quiz 1 — Written Work · was Missing · now Completed', $card, $last);
+            $this->assertStringNotContainsString('Written Work · Missing', $card, "$last: no bare trailing Missing that reads as current");
+            $this->assertStringNotContainsString('For Review', $card, $last);
+        }
+    }
+
+    public function test_hilarios_recorded_zero_is_completed_on_her_resolved_card(): void
+    {
+        $this->assertDatabaseHas('assessment_scores', [
+            'assessment_id' => $this->quiz1->id, 'student_id' => $this->learners['HILARIO']->id, 'score' => 0,
+        ]);
+        $this->assertSame(AssessmentStatusService::COMPLETED, $this->statuses->statusFor($this->quiz1, $this->learners['HILARIO']->id));
+
+        $card = $this->cardText($this->page(['status' => 'resolved'])->getContent(), $this->concernId('HILARIO', 'resolved'));
+
+        $this->assertStringContainsString('now Completed', $card);
+        foreach (['now Missing', 'now Not Yet Given', 'No Evidence Yet'] as $wrong) {
+            $this->assertStringNotContainsString($wrong, $card);
+        }
+    }
+
+    public function test_galangs_historical_card_says_missing_again_and_stays_separate_from_the_open_one(): void
+    {
+        $html = $this->page(['status' => 'all'])->getContent();
+        $historical = $this->concernId('GALANG', 'resolved');
+        $current = $this->concernId('GALANG', 'open');
+
+        $old = $this->cardText($html, $historical);
+        $this->assertStringContainsString('Resolved', $old);
+        $this->assertStringContainsString('was Missing · now Missing again', $old);
+        $this->assertStringContainsString('a newer open concern is listed for this item', $this->concernBlock($html, $historical));
+
+        $new = $this->cardText($html, $current);
+        $this->assertStringContainsString('For Review', $new);
+        $this->assertNotSame($historical, $current);
+        $this->assertSame(AcademicConcern::STATUS_RESOLVED, AcademicConcern::find($historical)->status);
+        $this->assertSame(AcademicConcern::STATUS_OPEN, AcademicConcern::find($current)->status);
+    }
+
+    public function test_open_cards_are_unchanged_and_still_for_review(): void
+    {
+        $html = $this->page()->getContent();
+
+        foreach (['GALANG', 'ILAGAN'] as $last) {
+            $card = $this->cardText($html, $this->concernId($last, 'open'));
+            $this->assertStringContainsString('For Review', $card, $last);
+            $this->assertStringContainsString('Missing Requirement · Quiz 1 — Written Work · Missing', $card, $last);
+            $this->assertStringNotContainsString(' was ', $card, $last);
+            $this->assertStringNotContainsString(' now ', $card, $last);
+        }
+    }
+
     // --- Query safety -------------------------------------------------------------------
 
     public function test_the_query_count_does_not_grow_with_the_number_of_concerns(): void
