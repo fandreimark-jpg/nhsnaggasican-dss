@@ -476,6 +476,170 @@ class PrincipalAcademicMonitoringTest extends TestCase
         }
     }
 
+    // --- Phase 2D live validation E2/E3/E6/E7: the exact browser query strings ------
+
+    /** @return array<string, string> stat-card label => value, as rendered */
+    private function statCards(string $html): array
+    {
+        preg_match_all('/<p class="stat-label">(.*?)<\/p>\s*<p class="stat-value[^"]*">(.*?)<\/p>/s', $html, $m, PREG_SET_ORDER);
+
+        return collect($m)->mapWithKeys(fn($c) => [trim(strip_tags($c[1])) => trim(strip_tags($c[2]))])->all();
+    }
+
+    private function selectedOption(string $html, string $selectId): string
+    {
+        preg_match('/id="' . $selectId . '".*?<\/select>/s', $html, $select);
+        preg_match('/<option[^>]*selected[^>]*>([^<]*)</', $select[0] ?? '', $option);
+        // With no option marked selected, a browser shows the first one.
+        preg_match('/<option[^>]*>([^<]*)</', $select[0] ?? '', $first);
+
+        return trim($option[1] ?? $first[1] ?? '');
+    }
+
+    /** The query string the filter form sends, as the browser sent it on the live run. */
+    private function browserQuery(array $overrides): array
+    {
+        return array_merge(['school_year' => '2026-2027', 'term' => '1', 'grade_level' => '', 'section_id' => '', 'subject_id' => '', 'status' => 'open'], $overrides);
+    }
+
+    private function assertForReviewGalangAndIlagan(string $html): void
+    {
+        $this->assertSame(['For Review' => '2', 'Learners For Review' => '2', 'Resolved' => '3'], $this->statCards($html));
+        $this->assertSame(2, substr_count($html, 'data-concern-id='));
+        $this->assertStringContainsString('data-concern-id="' . $this->concernId('GALANG', 'open') . '"', $html);
+        $this->assertStringContainsString('data-concern-id="' . $this->concernId('ILAGAN', 'open') . '"', $html);
+        $this->assertSame('For Review', $this->selectedOption($html, 'amStatus'));
+    }
+
+    public function test_e2_grade_level_12_in_the_for_review_scope(): void
+    {
+        $html = $this->page($this->browserQuery(['grade_level' => '12']))->assertOk()->getContent();
+
+        $this->assertForReviewGalangAndIlagan($html);
+        $this->assertSame('Grade 12', $this->selectedOption($html, 'amGradeLevel'));
+        $this->assertSame('Term 1 (open)', $this->selectedOption($html, 'amTerm'));
+    }
+
+    public function test_e3_section_agila_in_the_for_review_scope_shows_derived_track_and_specialization(): void
+    {
+        $html = $this->page($this->browserQuery(['section_id' => (string) $this->agila->id]))->assertOk()->getContent();
+
+        $this->assertForReviewGalangAndIlagan($html);
+        $this->assertSame('Agila — Grade 12', $this->selectedOption($html, 'amSection'));
+        $this->assertMatchesRegularExpression(
+            '/data-section-placement><span class="pill-label">Agila<\/span>\s*Academic Track · Humanities and Social Sciences<\/span>/', $html);
+        $this->assertStringNotContainsString('name="track_id"', $html);
+        $this->assertStringNotContainsString('name="specialization_id"', $html);
+    }
+
+    public function test_e6_an_explicit_empty_term_is_all_terms_and_an_absent_term_is_the_open_term(): void
+    {
+        $allTerms = $this->page($this->browserQuery(['term' => '']))->assertOk()->getContent();
+        $this->assertForReviewGalangAndIlagan($allTerms);
+        $this->assertSame('All terms', $this->selectedOption($allTerms, 'amTerm'));
+
+        $default = $this->page(['school_year' => '2026-2027'])->assertOk()->getContent();
+        $this->assertSame('Term 1 (open)', $this->selectedOption($default, 'amTerm'), 'no term parameter = the open term, not All terms');
+    }
+
+    public function test_e7_clear_filters_sends_only_the_school_year_and_restores_the_defaults(): void
+    {
+        $narrowed = $this->page($this->browserQuery([
+            'term' => '', 'grade_level' => '12', 'section_id' => (string) $this->agila->id,
+            'subject_id' => (string) $this->cesc->id, 'status' => 'all',
+        ]))->assertOk()->getContent();
+
+        preg_match('/<a href="([^"]*)" class="btn btn-ghost btn-sm self-center">Clear filters<\/a>/', $narrowed, $clear);
+        $this->assertNotEmpty($clear, 'the Clear filters link is shown on a narrowed view');
+        $clearUrl = html_entity_decode($clear[1]);
+        $this->assertSame(route('principal.academic-monitoring', ['school_year' => '2026-2027']), $clearUrl);
+        foreach (['term=', 'grade_level=', 'section_id=', 'subject_id=', 'status='] as $stale) {
+            $this->assertStringNotContainsString($stale, $clearUrl);
+        }
+
+        $cleared = $this->actingAs($this->principal)->get($clearUrl)->assertOk()->getContent();
+        $this->assertForReviewGalangAndIlagan($cleared);
+        $this->assertSame('Term 1 (open)', $this->selectedOption($cleared, 'amTerm'), 'Clear leaves All terms');
+        foreach (['amGradeLevel' => 'All grade levels', 'amSection' => 'All sections', 'amSubject' => 'All subjects'] as $id => $label) {
+            $this->assertSame($label, $this->selectedOption($cleared, $id));
+        }
+    }
+
+    public function test_every_filter_control_submits_the_academic_monitoring_get_form(): void
+    {
+        $html = $this->page()->assertOk()->getContent();
+
+        // Located by string position, not one page-wide regex: the form tag,
+        // then its body up to the matching </form>.
+        $idAt = strpos($html, 'id="academicMonitoringFilters"');
+        $this->assertNotFalse($idAt, 'the filter form is rendered');
+        $open = strrpos(substr($html, 0, $idAt), '<form');
+        $tagEnd = strpos($html, '>', $idAt);
+        $close = strpos($html, '</form>', $tagEnd);
+        $this->assertNotFalse($open);
+        $this->assertNotFalse($close);
+        $tag = substr($html, $open, $tagEnd - $open + 1);
+        $body = substr($html, $tagEnd + 1, $close - $tagEnd - 1);
+
+        $this->assertStringContainsString('method="GET"', $tag);
+        preg_match('/action="([^"]*)"/', $tag, $action);
+        $this->assertSame(route('principal.academic-monitoring'), html_entity_decode($action[1] ?? ''));
+
+        foreach (['school_year' => 'amSchoolYear', 'term' => 'amTerm', 'grade_level' => 'amGradeLevel', 'section_id' => 'amSection', 'subject_id' => 'amSubject', 'status' => 'amStatus'] as $name => $id) {
+            $this->assertStringContainsString(
+                '<select id="' . $id . '" name="' . $name . '" onchange="this.form.submit()"', $body,
+                "$name is inside the form and submits it on change");
+        }
+        $this->assertSame(1, substr_count($html, 'id="academicMonitoringFilters"'));
+    }
+
+    // --- Test F support: the dashboard card reads academic_concerns only ---------------
+
+    public function test_the_dashboard_card_counts_academic_concerns_and_ignores_risk_results(): void
+    {
+        $card = function (): string {
+            $html = $this->actingAs($this->principal)->get(route('principal.dashboard'))->assertOk()->getContent();
+            $start = strpos($html, 'data-academic-monitoring-card');
+            preg_match('/<p class="stat-value[^"]*">\s*(\d+)\s*<\/p>/', substr($html, $start, 2000), $m);
+            return $m[1] ?? '?';
+        };
+        $this->assertSame('2', $card());
+
+        // Risk results — including High — do not move the Academic Monitoring figure.
+        foreach ($this->learners as $learner) {
+            RiskResult::create([
+                'student_id' => $learner->id, 'section_id' => $this->agila->id, 'grading_period' => 1,
+                'average_grade' => 60, 'risk_level' => 'high', 'school_year' => '2026-2027', 'generated_at' => now(),
+            ]);
+        }
+        $this->assertSame('2', $card());
+
+        // A new open academic concern does.
+        $quiz3 = $this->item($this->agila, $this->cesc, 'Quiz 3');
+        $this->statuses->markMissing($quiz3, $this->learners['NAVARRO']->id, $this->adviser->id);
+        $this->sync($quiz3);
+        $this->assertSame('3', $card());
+    }
+
+    public function test_the_academic_monitoring_code_has_no_ml_or_risk_result_dependency(): void
+    {
+        foreach ([
+            app_path('Http/Controllers/Principal/AcademicMonitoringController.php'),
+            app_path('Services/AcademicMonitoringOverviewService.php'),
+            resource_path('views/principal/academic-monitoring.blade.php'),
+        ] as $path) {
+            $source = file_get_contents($path);
+            $source = str_ends_with($path, '.blade.php')
+                ? preg_replace('/\{\{--.*?--\}\}/s', '', $source)
+                : collect(token_get_all($source))
+                    ->reject(fn($t) => is_array($t) && in_array($t[0], [T_COMMENT, T_DOC_COMMENT], true))
+                    ->map(fn($t) => is_array($t) ? $t[1] : $t)->implode('');
+            foreach (['RiskResult', 'risk_results', 'classify', 'python', 'model_cache', 'RandomForest', 'RiskFeatureExtractor'] as $needle) {
+                $this->assertStringNotContainsStringIgnoringCase($needle, $source, basename($path) . " must not reference $needle");
+            }
+        }
+    }
+
     // --- Query safety -------------------------------------------------------------------
 
     public function test_the_query_count_does_not_grow_with_the_number_of_concerns(): void
