@@ -55,6 +55,10 @@
                         <span class="badge badge-warning">
                             <i class="bi bi-mortarboard-fill"></i> Principal
                         </span>
+                    @elseif($user->role === 'subject_teacher')
+                        <span class="badge badge-info">
+                            <i class="bi bi-journal-text"></i> Subject Teacher
+                        </span>
                     @else
                         <span class="px-2 py-1 rounded-full text-xs font-semibold bg-brand-100 text-brand-700">
                             <i class="bi bi-person-fill"></i> Adviser
@@ -224,6 +228,7 @@
                 <select name="role" id="field_role" required
                         class="form-input">
                     <option value="adviser">Adviser</option>
+                    <option value="subject_teacher">Subject Teacher</option>
                     <option value="admin">Admin</option>
                     <option value="principal">Principal</option>
                 </select>

@@ -20,20 +20,12 @@ use Illuminate\Support\Carbon;
  * displays its output must never say the intervention "caused",
  * "resulted in", or "fixed" anything. Just the numbers.
  *
- * "Before" is the FOCUS component's percentage at the grading period that
- * triggered the intervention (via its linked RiskResult); "after" is the
- * same component in the very next grading period, if that term's
- * assessment evidence exists yet. Comparing the SAME component across
- * terms is deliberate — comparing to a DIFFERENT component wouldn't be
- * a comparison of anything real.
- *
- * The component is $intervention->focus_component, frozen on the row at
- * creation — the same value compareWithinTerm() reads, so both progress
- * columns on a row always name the same component. It is only re-derived
- * from the baseline term's weakest component as a FALLBACK, for a row
- * created before that column existed. (Before the 2026-09-24 audit,
- * compare() always re-derived it, which is how the two columns came to
- * disagree on 56 of the 82 live Term 1 interventions.)
+ * compareWithinTerm() compares the intervention's FOCUS component
+ * ($intervention->focus_component, frozen on the row at creation) as it
+ * stood from the evidence recorded up to delivery against the same
+ * component now, within the intervention's own term. (A term-over-term
+ * comparison anchored on the classifier's risk_results existed before the
+ * rule-based cut-over and was removed with it.)
  */
 class ProgressMonitoringService
 {
@@ -43,140 +35,6 @@ class ProgressMonitoringService
 
     /** The last grading period in a school year — see the 'no_later_term' status below. */
     private const LAST_TERM = 3;
-
-    /**
-     * "Progress column honesty" work order — `status` tells the caller
-     * WHY a comparison is or isn't available, instead of collapsing every
-     * reason into a single null. Four statuses:
-     *
-     *   'not_applicable'   — no risk_result_id (recorded from in-term
-     *                         evidence, e.g. every Principal-recorded
-     *                         intervention today — see Intervention::
-     *                         ORIGINS/isSystemGenerated()). There never
-     *                         was a term-report baseline to compare from.
-     *   'no_later_term'    — a baseline exists, but it was already the
-     *                         last term of the school year (before_term
-     *                         + 1 doesn't exist). Never fills, by
-     *                         construction, for a last-term intervention.
-     *   'awaiting_evidence' — a later term exists but has no assessment
-     *                         evidence for this component yet. May fill
-     *                         once that evidence is entered.
-     *   'available'         — the comparison exists: before/after/change
-     *                         are all populated.
-     *
-     * 'unavailable' is a fifth, unnamed-by-design catch-all for the rare
-     * edge cases the four statuses above don't cover (no subject/section
-     * on record, or a baseline term with literally no assessment evidence
-     * for any component) — these aren't part of the normal Principal-
-     * recorded-vs-report-baseline distinction the other four describe.
-     *
-     * @return array{
-     *     status: 'not_applicable'|'no_later_term'|'awaiting_evidence'|'available'|'unavailable',
-     *     component: string|null,
-     *     before_period: int|null,
-     *     before_percentage: float|null,
-     *     after_period: int|null,
-     *     after_percentage: float|null,
-     *     change: float|null,
-     * }
-     */
-    public function compare(Intervention $intervention): array
-    {
-        if (!$intervention->risk_result_id) {
-            return $this->statusOnly('not_applicable');
-        }
-
-        if (!$intervention->subject_id) {
-            return $this->statusOnly('unavailable');
-        }
-
-        $riskResult = $intervention->riskResult;
-        if (!$riskResult) {
-            return $this->statusOnly('unavailable');
-        }
-
-        $student    = $intervention->student;
-        $subject    = $intervention->subject;
-        // PART 12 — the section the intervention was recorded under
-        // (its own stored context), never the learner's current section.
-        $section    = $intervention->contextSection();
-        $beforeTerm = $riskResult->grading_period;
-        $schoolYear = $riskResult->school_year;
-
-        if (!$section) {
-            return $this->statusOnly('unavailable');
-        }
-
-        $before = $this->performanceAnalysis->analyzeStudent($student, $subject, $section, $beforeTerm, $schoolYear);
-
-        // The component is the one the Principal actually acted on, frozen
-        // on the row at creation — the same value compareWithinTerm() reads
-        // and the same "captured once, never recomputed" rule focus_component
-        // exists to enforce. Re-deriving the weakest component here read the
-        // evidence AS IT IS NOW, so additional-support items entered after
-        // delivery could move the weakest elsewhere and this column would
-        // then report a component the intervention was never about — while
-        // the same row's Type & Reason and Within-Term Progress cells still
-        // named the original one. Measured on the live Term 1 data: 56 of 82
-        // interventions disagreed that way.
-        //
-        // The recomputed value stays as the FALLBACK, unchanged, for a row
-        // created before focus_component existed and never backfilled —
-        // dropping those to 'unavailable' would remove a comparison that is
-        // currently shown and is not wrong, merely unfrozen.
-        $componentKey = $intervention->focus_component ?: $before['weakest_component'];
-
-        if (!$componentKey) {
-            return $this->statusOnly('unavailable');
-        }
-
-        // A frozen component can name one this subject's grading profile has
-        // no evidence for at all (a DO 015 subject with no Examination
-        // component, for instance). The recomputed weakest could never do
-        // that, so this guard only becomes reachable now.
-        $beforePercentage = $before['components'][$componentKey]['percentage'] ?? null;
-
-        if ($beforePercentage === null) {
-            return $this->statusOnly('unavailable');
-        }
-
-        $afterTerm = $beforeTerm + 1;
-
-        if ($afterTerm > self::LAST_TERM) {
-            return $this->result('no_later_term', $componentKey, $beforeTerm, $beforePercentage, null, null);
-        }
-
-        $after = $this->performanceAnalysis->analyzeStudent($student, $subject, $section, $afterTerm, $schoolYear);
-        $afterPercentage = $after['components'][$componentKey]['percentage'] ?? null;
-
-        if ($afterPercentage === null) {
-            return $this->result('awaiting_evidence', $componentKey, $beforeTerm, $beforePercentage, $afterTerm, null);
-        }
-
-        return $this->result('available', $componentKey, $beforeTerm, $beforePercentage, $afterTerm, $afterPercentage);
-    }
-
-    private function statusOnly(string $status): array
-    {
-        return [
-            'status' => $status, 'component' => null,
-            'before_period' => null, 'before_percentage' => null,
-            'after_period' => null, 'after_percentage' => null, 'change' => null,
-        ];
-    }
-
-    private function result(string $status, string $component, int $beforeTerm, float $beforePct, ?int $afterTerm, ?float $afterPct): array
-    {
-        return [
-            'status'            => $status,
-            'component'         => $component,
-            'before_period'     => $beforeTerm,
-            'before_percentage' => $beforePct,
-            'after_period'      => $afterTerm,
-            'after_percentage'  => $afterPct,
-            'change'            => $afterPct === null ? null : round($afterPct - $beforePct, 2),
-        ];
-    }
 
     /**
      * TASK 3 of "close the delivery loop" — this is the point of the
@@ -192,9 +50,9 @@ class ProgressMonitoringService
      * delivered_at; "after" is the SAME component using every scored
      * item on file now — deliberately the cumulative total, not just
      * what's new, so it reads as "where the student stands today,"
-     * matching GradingEngine::componentPercentage()'s own cumulative-
-     * average math (re-derived here, not reused, only because it needs
-     * an extra created_at cutoff GradingEngine has no reason to support).
+     * over SCORED items only — a progress comparison of recorded scores,
+     * not the grade (the grade divides by every item's HPS since
+     * 2026-10-04; see GradingEngine::workbookComponent()).
      *
      * TASK 2 of "status clarity and progress consistency" — the compared
      * component is $intervention->focus_component, the one the recorded
@@ -269,6 +127,7 @@ class ProgressMonitoringService
                 'after_percentage' => null, 'after_item_count' => 0, 'after_earned' => 0.0, 'after_max' => 0.0,
                 'new_item_count' => 0, 'has_enough_evidence' => false, 'change' => null,
                 'other_components_with_new_evidence' => [],
+                'before_scores_changed_since_delivery' => 0,
             ];
         }
 
@@ -307,12 +166,20 @@ class ProgressMonitoringService
                 ? round($after['percentage'] - $before['percentage'], 2)
                 : null,
             'other_components_with_new_evidence' => $otherComponentsWithNewEvidence,
+            // Final release pass (2026-09-27): a score is edited IN PLACE
+            // (created_at kept, updated_at bumped only on a real change), and
+            // no score history is stored — so a pre-delivery score corrected
+            // after delivery is counted in "Before" at its CURRENT value.
+            // The true at-delivery value cannot be recovered; say so rather
+            // than let "Before" pass for the evidence as it stood then.
+            'before_scores_changed_since_delivery' => $before['changed_since'],
         ];
     }
 
     /**
-     * One component's percentage — earned/max across every scored item
-     * for it, exactly GradingEngine::componentPercentage()'s formula —
+     * One component's percentage — earned/max across every SCORED item
+     * for it (a comparison of recorded scores over time; NOT the grade,
+     * which since 2026-10-04 divides by every item's HPS — GradingEngine) —
      * optionally cut off at a point in time via the score's created_at
      * (when the score was actually recorded, not when the assessment
      * item/column was defined).
@@ -338,16 +205,22 @@ class ProgressMonitoringService
         ));
 
         if ($scores->isEmpty()) {
-            return ['percentage' => null, 'item_count' => 0, 'earned' => 0.0, 'max' => 0.0];
+            return ['percentage' => null, 'item_count' => 0, 'earned' => 0.0, 'max' => 0.0, 'changed_since' => 0];
         }
 
         $earned = $scores->sum(fn($row) => (float) $row['score']->score);
         $max = $scores->sum(fn($row) => (float) $row['assessment']->max_score);
+        // Only meaningful for an as-of cut: rows recorded by then whose value
+        // has changed since (see compareWithinTerm()).
+        $changedSince = $asOf === null ? 0 : $scores->filter(
+            fn($row) => $row['score']->updated_at !== null && $row['score']->updated_at->greaterThan($asOf)
+                && ($row['score']->created_at === null || $row['score']->updated_at->greaterThan($row['score']->created_at))
+        )->count();
 
         if ($max <= 0) {
-            return ['percentage' => null, 'item_count' => $scores->count(), 'earned' => $earned, 'max' => $max];
+            return ['percentage' => null, 'item_count' => $scores->count(), 'earned' => $earned, 'max' => $max, 'changed_since' => $changedSince];
         }
 
-        return ['percentage' => round(($earned / $max) * 100, 2), 'item_count' => $scores->count(), 'earned' => $earned, 'max' => $max];
+        return ['percentage' => round(($earned / $max) * 100, 2), 'item_count' => $scores->count(), 'earned' => $earned, 'max' => $max, 'changed_since' => $changedSince];
     }
 }

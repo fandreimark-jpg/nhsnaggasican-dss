@@ -44,10 +44,19 @@
         <span class="block mt-0.5">Before: {{ $p['before_percentage'] !== null ? $fmtPts($p['before_earned']) . '/' . $fmtPts($p['before_max']) . ' (' . number_format($p['before_percentage'], 1) . '%)' : '—' }}, {{ $p['before_item_count'] }} item{{ $p['before_item_count'] === 1 ? '' : 's' }}</span>
         <span class="block">Now: {{ $p['after_percentage'] !== null ? $fmtPts($p['after_earned']) . '/' . $fmtPts($p['after_max']) . ' (' . number_format($p['after_percentage'], 1) . '%)' : '—' }}, {{ $p['after_item_count'] }} item{{ $p['after_item_count'] === 1 ? '' : 's' }}</span>
         @if($p['has_enough_evidence'] && $p['change'] !== null)
-            <span class="block mt-1 font-medium {{ $p['change'] > 0 ? 'text-green-600' : ($p['change'] < 0 ? 'text-red-500' : 'text-gray-500') }}">Change: {{ $p['change'] >= 0 ? '+' : '' }}{{ number_format($p['change'], 1) }} points</span>
+            {{-- Final release pass (2026-09-27): a difference of two
+                 percentages is PERCENTAGE POINTS — "points" sat directly
+                 under the raw earned/possible points above and read as one. --}}
+            <span class="block mt-1 font-medium {{ $p['change'] > 0 ? 'text-green-600' : ($p['change'] < 0 ? 'text-red-500' : 'text-gray-500') }}">Change: {{ $p['change'] >= 0 ? '+' : '' }}{{ number_format($p['change'], 1) }} percentage points</span>
             <span class="block text-gray-400">({{ $p['new_item_count'] }} new item{{ $p['new_item_count'] === 1 ? '' : 's' }} since delivery)</span>
         @else
             <span class="block mt-1 text-gray-400 italic">Not enough evidence yet — {{ $p['new_item_count'] }} new item{{ $p['new_item_count'] === 1 ? '' : 's' }} recorded since delivery</span>
+        @endif
+        @if(($p['before_scores_changed_since_delivery'] ?? 0) > 0)
+            <span class="block mt-1 pt-1 border-t border-line text-amber-700 text-[11px]" data-before-scores-changed>
+                <i class="bi bi-exclamation-triangle"></i>
+                {{ $p['before_scores_changed_since_delivery'] }} score{{ $p['before_scores_changed_since_delivery'] === 1 ? '' : 's' }} recorded before delivery {{ $p['before_scores_changed_since_delivery'] === 1 ? 'was' : 'were' }} changed afterwards — "Before" uses the current value{{ $p['before_scores_changed_since_delivery'] === 1 ? '' : 's' }}, so it may not match what was on record at delivery.
+            </span>
         @endif
         @if(!empty($p['other_components_with_new_evidence']))
             @php

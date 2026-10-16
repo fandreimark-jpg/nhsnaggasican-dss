@@ -13,9 +13,11 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
- * Problem 1a of "live in-term risk + stale data guard": a risk level
- * with no surviving grades behind it must be visibly flagged, not
- * silently deleted, everywhere a risk level is displayed.
+ * AcademicTerm::staleRiskTerms() — a legacy risk_results row with no
+ * surviving grades behind it is still detected (dss:check-integrity reports
+ * it). Since the rule-based cut-over no operational page shows a risk level,
+ * so no page shows a stale-risk banner either: legacy classifier rows stay
+ * archived and never surface as decision support.
  */
 class StaleRiskWarningTest extends TestCase
 {
@@ -49,70 +51,21 @@ class StaleRiskWarningTest extends TestCase
         $this->assertSame([], AcademicTerm::staleRiskTerms('2026-2027'));
     }
 
-    public function test_adviser_dashboard_shows_the_stale_warning_when_detected(): void
+    public function test_legacy_stale_risk_rows_never_surface_on_operational_pages(): void
     {
         $adviser = User::factory()->create();
         $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027']);
         $student = Student::factory()->create(['section_id' => $section->id]);
         RiskResult::create(['student_id' => $student->id, 'grading_period' => 1, 'average_grade' => 70, 'risk_level' => 'moderate', 'school_year' => '2026-2027', 'generated_at' => now()]);
+        $this->assertSame([1], AcademicTerm::staleRiskTerms('2026-2027'), 'the legacy row is stale (no grades behind it)');
 
-        $response = $this->actingAs($adviser)->get('/adviser/dashboard');
-
-        $response->assertOk();
-        $response->assertSee('may be out of date');
-        $response->assertSee('Term 1');
-    }
-
-    public function test_adviser_dashboard_does_not_show_the_warning_when_data_is_consistent(): void
-    {
-        $adviser = User::factory()->create();
-        $section = Section::factory()->create(['adviser_id' => $adviser->id]);
-        Student::factory()->create(['section_id' => $section->id]);
-
-        $response = $this->actingAs($adviser)->get('/adviser/dashboard');
-
-        $response->assertOk();
-        $response->assertDontSee('may be out of date');
-    }
-
-    public function test_principal_dashboard_shows_the_stale_warning_when_detected(): void
-    {
         $principal = User::factory()->principal()->create();
-        $section = Section::factory()->create(['school_year' => '2026-2027']);
-        $student = Student::factory()->create(['section_id' => $section->id]);
-        RiskResult::create(['student_id' => $student->id, 'grading_period' => 3, 'average_grade' => 70, 'risk_level' => 'moderate', 'school_year' => '2026-2027', 'generated_at' => now()]);
-
-        $response = $this->actingAs($principal)->get('/principal/dashboard');
-
-        $response->assertOk();
-        $response->assertSee('may be out of date');
-        $response->assertSee('Term 3');
-    }
-
-    public function test_reports_page_shows_the_stale_warning_named_with_the_school_year(): void
-    {
-        $principal = User::factory()->principal()->create();
-        $section = Section::factory()->create(['school_year' => '2025-2026']);
-        $student = Student::factory()->create(['section_id' => $section->id]);
-        RiskResult::create(['student_id' => $student->id, 'grading_period' => 1, 'average_grade' => 70, 'risk_level' => 'moderate', 'school_year' => '2025-2026', 'generated_at' => now()]);
-
-        $response = $this->actingAs($principal)->get('/principal/reports');
-
-        $response->assertOk();
-        $response->assertSee('may be out of date');
-        $response->assertSee('2025-2026');
-    }
-
-    public function test_principal_students_page_shows_the_stale_warning_when_detected(): void
-    {
-        $principal = User::factory()->principal()->create();
-        $section = Section::factory()->create(['school_year' => '2026-2027']);
-        $student = Student::factory()->create(['section_id' => $section->id]);
-        RiskResult::create(['student_id' => $student->id, 'grading_period' => 1, 'average_grade' => 70, 'risk_level' => 'moderate', 'school_year' => '2026-2027', 'generated_at' => now()]);
-
-        $response = $this->actingAs($principal)->get('/principal/students');
-
-        $response->assertOk();
-        $response->assertSee('may be out of date');
+        $admin = User::factory()->create(['role' => 'admin']);
+        foreach ([[$adviser, '/adviser/dashboard'], [$adviser, '/adviser/grades'], [$principal, '/principal/dashboard'],
+                  [$principal, '/principal/students'], [$admin, '/admin/reports']] as [$user, $url]) {
+            $this->actingAs($user)->get($url)->assertOk()
+                ->assertDontSee('may be out of date')
+                ->assertDontSee('Risk Level');
+        }
     }
 }

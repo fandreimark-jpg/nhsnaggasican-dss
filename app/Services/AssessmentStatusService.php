@@ -150,9 +150,13 @@ class AssessmentStatusService
     /** Removes a Missing marker, if any. Returns how many rows were removed (0 or 1). */
     public function clearMissing(int $assessmentId, int $studentId): int
     {
-        return AssessmentLearnerStatus::where('assessment_id', $assessmentId)
+        // Model deletes so the removal reaches the evidence history.
+        $markers = AssessmentLearnerStatus::where('assessment_id', $assessmentId)
             ->where('student_id', $studentId)
-            ->delete();
+            ->get();
+        $markers->each->delete();
+
+        return $markers->count();
     }
 
     /**

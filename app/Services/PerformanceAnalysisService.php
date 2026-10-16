@@ -87,6 +87,8 @@ class PerformanceAnalysisService
             'transmutation_fallback_scheme' => $grade['transmutation_fallback_scheme'] ?? null,
             'target'            => $target,
             'components'        => $components,
+            // Why no figure can be computed (configuration / ambiguous Examination items).
+            'blockers'          => $grade['blockers'] ?? [],
             'weakest_component' => $this->weakestComponent($components),
             // "Performance audit" pass — how many scored items the figures
             // above rest on, read from the evidence GradingEngine already

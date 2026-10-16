@@ -61,6 +61,11 @@ class GradesImport implements ToCollection, WithMultipleSheets
             if ($colIndex < 3) continue; // 0=lrn, 1=last_name, 2=first_name
             $colName = trim((string) $colName);
             if ($colName === '') continue; // a genuinely blank trailing column, not a subject attempt
+            // The template writes a name starting with = + - @ behind one
+            // apostrophe (ClassRecordService::safeText()); read it back.
+            if (preg_match("/^'[=+\\-@]/", $colName)) {
+                $colName = substr($colName, 1);
+            }
             $subject = $this->subjectsByName->get(strtolower($colName));
             if ($subject) {
                 $columnSubjectMap[$colIndex] = $subject;
@@ -107,6 +112,10 @@ class GradesImport implements ToCollection, WithMultipleSheets
                     continue;
                 }
 
+                Grade::logOfficialCorrection(Grade::where([
+                    'student_id' => $student->id, 'subject_id' => $subject->id, 'section_id' => $this->sectionId,
+                    'grading_period' => $this->gradingPeriod, 'school_year' => $this->schoolYear,
+                ])->first(), $value, 'Encode Grades import');
                 Grade::updateOrCreate(
                     [
                         'student_id'     => $student->id,

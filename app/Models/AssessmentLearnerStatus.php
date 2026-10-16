@@ -42,6 +42,17 @@ class AssessmentLearnerStatus extends Model
                 );
             }
         });
+
+        // Evidence history (App\Services\EvidenceAudit). A marker can only
+        // exist without a score, so its old/new "other" state is Not Yet Given.
+        static::created(function (AssessmentLearnerStatus $status) {
+            \App\Services\EvidenceAudit::record((int) $status->assessment_id, (int) $status->student_id,
+                null, null, \App\Services\AssessmentStatusService::NOT_YET_GIVEN, \App\Services\AssessmentStatusService::MISSING);
+        });
+        static::deleted(function (AssessmentLearnerStatus $status) {
+            \App\Services\EvidenceAudit::record((int) $status->assessment_id, (int) $status->student_id,
+                null, null, \App\Services\AssessmentStatusService::MISSING, \App\Services\AssessmentStatusService::NOT_YET_GIVEN);
+        });
     }
 
     public function assessment()

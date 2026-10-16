@@ -59,6 +59,35 @@ class ReportSubmission extends Model
     }
 
     /**
+     * Only explicit submissions (2026-10-07). Every recipient view and count
+     * reads through this, so a row in any other state is never shown as a
+     * submitted report.
+     */
+    public function scopeSubmitted($query)
+    {
+        return $query->where('status', 'submitted')->whereNotNull('submitted_at');
+    }
+
+    /** Every submitted version, oldest first; the last one is what recipients see. */
+    public function versions()
+    {
+        return $this->hasMany(ReportSubmissionVersion::class)->orderBy('version');
+    }
+
+    public function latestVersion()
+    {
+        return $this->hasOne(ReportSubmissionVersion::class)->latestOfMany('version');
+    }
+
+    /** False until the additive versions migration is applied to this database. */
+    public static function versioningAvailable(): bool
+    {
+        static $available = null;
+
+        return $available ??= \Illuminate\Support\Facades\Schema::hasTable('report_submission_versions');
+    }
+
+    /**
      * Submission was made by an adviser (User)
      * Custom foreign key 'submitted_by' instead of default 'user_id'
      */

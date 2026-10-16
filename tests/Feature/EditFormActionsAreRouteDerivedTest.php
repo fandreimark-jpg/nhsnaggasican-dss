@@ -19,6 +19,7 @@ use Tests\TestCase;
 class EditFormActionsAreRouteDerivedTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
 
     public function test_every_admin_edit_form_carries_a_route_derived_update_url(): void
     {
@@ -39,14 +40,18 @@ class EditFormActionsAreRouteDerivedTest extends TestCase
         }
     }
 
-    public function test_the_adviser_edit_student_form_carries_a_route_derived_update_url(): void
+    /**
+     * The adviser Edit Student form was REMOVED 2026-09-27 (learner records
+     * are Admin-owned master data) — there is no update URL left to derive.
+     */
+    public function test_the_adviser_students_page_has_no_edit_form_or_update_route(): void
     {
+        $this->assertFalse(\Illuminate\Support\Facades\Route::has('adviser.students.update'));
         $adviser = User::factory()->create();
         $html = $this->actingAs($adviser)->get('/adviser/students')->assertOk()->getContent();
-        $this->assertStringContainsString(
-            'data-update-url="' . route('adviser.students.update', ['id' => '__ID__']) . '"',
-            $html
-        );
+        $this->assertStringNotContainsString('editStudentForm', $html);
+        $this->assertStringNotContainsString('data-update-url', $html);
+        $this->assertStringNotContainsString('editStudentForm', file_get_contents(resource_path('js/modal.js')));
     }
 
     public function test_modal_js_no_longer_hardcodes_any_root_relative_form_action(): void
@@ -57,32 +62,31 @@ class EditFormActionsAreRouteDerivedTest extends TestCase
     }
 
     /**
-     * The Adviser Assessments Edit Assessment Item modal was missed by the
-     * 2026-09-17 pass: its inline page script set
-     * `.action = '/adviser/assessments/item/' + data.id` (single-quoted, so
-     * the modal.js backtick check above never saw it). Under the XAMPP
-     * sub-directory it posted outside the app and 404'd.
+     * The Edit Assessment modal was replaced by a full page: the Class Record
+     * links to it, and its form posts to the route-derived update URL — never
+     * a hard-coded path (the old modal's `.action = '/adviser/assessments/item/'`
+     * posted outside the app under the XAMPP sub-directory and 404'd).
      */
     public function test_the_adviser_edit_assessment_item_form_carries_a_route_derived_update_url(): void
     {
         [$adviser, $subject] = $this->adviserWithAnAssessmentItem();
+        $item = \App\Models\Assessment::where('subject_id', $subject->id)->firstOrFail();
 
-        $html = $this->actingAs($adviser)
-            ->get('/adviser/assessments?subject_id=' . $subject->id . '&period=1')
+        $record = $this->actingAs($adviser)
+            ->get(route('teacher.class-record', ['section_id' => $item->section_id, 'subject_id' => $subject->id, 'period' => 1]))
             ->assertOk()
             ->getContent();
+        $this->assertStringContainsString('href="' . route('teacher.assessments.edit', $item->id) . '"', $record);
 
-        $this->assertStringContainsString(
-            'data-update-url="' . route('adviser.assessments.item.update', ['assessment' => '__ID__']) . '"',
-            $html
-        );
-        $this->assertStringContainsString('window.updateUrlFor(editForm, data.id)', $html);
-        $this->assertStringNotContainsString("'/adviser/assessments/item/'", $html);
+        $form = $this->actingAs($adviser)->get(route('teacher.assessments.edit', $item->id))->assertOk()->getContent();
+        $this->assertStringContainsString('action="' . route('teacher.assessments.update', $item->id) . '"', $form);
+        $this->assertStringNotContainsString("'/teacher/assessments/'", $form);
     }
 
     public function test_the_edit_assessment_item_url_follows_a_sub_directory_base_url(): void
     {
         [$adviser, $subject] = $this->adviserWithAnAssessmentItem();
+        $item = \App\Models\Assessment::where('subject_id', $subject->id)->firstOrFail();
 
         // The request exactly as Apache hands a sub-directory install to
         // public/index.php. Laravel derives the base path from the request
@@ -94,12 +98,12 @@ class EditFormActionsAreRouteDerivedTest extends TestCase
                 'SCRIPT_FILENAME' => public_path('index.php'),
                 'PHP_SELF'        => '/naggasican-dss/public/index.php',
             ])
-            ->get('http://school.example/naggasican-dss/public/adviser/assessments?subject_id=' . $subject->id . '&period=1')
+            ->get('http://school.example/naggasican-dss/public/teacher/assessments/' . $item->id . '/edit')
             ->assertOk()
             ->getContent();
 
         $this->assertStringContainsString(
-            'data-update-url="http://school.example/naggasican-dss/public/adviser/assessments/item/__ID__"',
+            'action="http://school.example/naggasican-dss/public/teacher/assessments/' . $item->id . '"',
             $html
         );
     }

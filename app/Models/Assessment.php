@@ -49,6 +49,7 @@ class Assessment extends Model
         'exam_role',
         'is_additional_support',
         'max_score',
+        'assessment_date',
         'import_batch_id',
         'uploaded_by',
     ];
@@ -56,6 +57,7 @@ class Assessment extends Model
     protected $casts = [
         'max_score' => 'decimal:2',
         'is_additional_support' => 'boolean',
+        'assessment_date' => 'date',
     ];
 
     // =============================================
@@ -78,6 +80,17 @@ class Assessment extends Model
     }
 
     /** Per-student earned scores for this item */
+    /**
+     * The evidence history caches item snapshots (name, section, term) for
+     * the rows it writes; any change to an item forgets them, so a history
+     * row never carries a stale or reused item's details.
+     */
+    protected static function booted(): void
+    {
+        static::saved(fn() => \App\Services\EvidenceAudit::flush());
+        static::deleted(fn() => \App\Services\EvidenceAudit::flush());
+    }
+
     public function scores()
     {
         return $this->hasMany(AssessmentScore::class);

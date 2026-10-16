@@ -1,3 +1,9 @@
+> **RETIRED 2026-09-27.** The machine-learning prototype this document
+> describes was removed from the application (the `analytics/` folder is
+> gone; it remains in Git history). The DSS is rule-based ongoing academic
+> monitoring — see CLAUDE.md, "Rule-based academic monitoring". Kept only as
+> a historical record.
+
 # ML Architecture — Naggasican NHS DSS
 
 **The current risk model is a prototype trained using synthetic data and

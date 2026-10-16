@@ -23,6 +23,7 @@ use Tests\TestCase;
 class RecomputeGradesProvisionalTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
 
     protected function setUp(): void
     {

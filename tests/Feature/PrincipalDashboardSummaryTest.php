@@ -102,6 +102,7 @@ class PrincipalDashboardSummaryTest extends TestCase
         $principal = User::factory()->principal()->create();
         $student = Student::factory()->create();
         $subject = Subject::factory()->create();
+        $this->interventionReady($student, $subject);
 
         $before = $this->actingAs($principal)->get('/principal/dashboard');
         $before->assertViewHas('awaiting_decision', 0);
@@ -132,6 +133,7 @@ class PrincipalDashboardSummaryTest extends TestCase
         $principal = User::factory()->principal()->create();
         $student = Student::factory()->create();
         $subject = Subject::factory()->create();
+        $this->interventionReady($student, $subject);
 
         $this->actingAs($principal)->post('/principal/interventions', [
             'student_id'       => $student->id,

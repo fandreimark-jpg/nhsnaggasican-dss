@@ -5,12 +5,10 @@
 
 @section('content')
 
-@include('partials.stale-risk-warning')
 
 @php
     $componentLabels = ['written_work' => 'Written Work', 'performance_task' => 'Performance Task', 'examination' => 'Examination'];
     $inTermStatusColors = ['On Track' => 'bg-status-ontrack/10 text-status-ontrack', 'Needs Attention' => 'bg-status-attention/10 text-status-attention', 'At Risk' => 'bg-status-risk/10 text-status-risk'];
-    $riskLevelColors = ['low' => 'bg-status-ontrack/10 text-status-ontrack', 'moderate' => 'bg-status-attention/10 text-status-attention', 'high' => 'bg-status-risk/10 text-status-risk'];
     $baseParams = request()->except(['sort', 'dir', 'page']);
 
     $sortHeader = function (string $key, string $label) use ($sortKey, $sortDir, $baseParams) {
@@ -116,8 +114,9 @@
                     <option value="">All students</option>
                     <optgroup label="In-Term Status (evidence, during the term)">
                         <option value="On Track" {{ request('status_filter') === 'On Track' ? 'selected' : '' }}>On Track</option>
-                        <option value="Needs Attention" {{ request('status_filter') === 'Needs Attention' ? 'selected' : '' }}>Needs Attention</option>
-                        <option value="At Risk" {{ request('status_filter') === 'At Risk' ? 'selected' : '' }}>At Risk</option>
+                        <option value="Needs Attention" {{ request('status_filter') === 'Needs Attention' ? 'selected' : '' }}>Below Target: 1 Component</option>
+                        <option value="At Risk" {{ request('status_filter') === 'At Risk' ? 'selected' : '' }}>Below Target: 2+ Components</option>
+                        <option value="No Evidence Yet" {{ request('status_filter') === 'No Evidence Yet' ? 'selected' : '' }}>No Evidence Yet</option>
                     </optgroup>
                     <optgroup label="Official Grade (after verification)">
                         <option value="Failing" {{ request('status_filter') === 'Failing' ? 'selected' : '' }}>Failing (74 and below)</option>
@@ -168,7 +167,7 @@
     <div class="px-5 py-3 border-b border-line bg-warning-soft/50 flex flex-wrap items-center justify-between gap-3">
         <span class="text-sm text-warning-text">
             <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
-            {{ $bulkAtRiskCount }} At Risk, {{ $bulkNeedsAttentionCount }} Needs Attention, {{ $bulkFailingCount }} Failing student{{ ($bulkAtRiskCount + $bulkNeedsAttentionCount + $bulkFailingCount) === 1 ? '' : 's' }} in this view.
+            {{ $bulkAtRiskCount }} below target in 2+ components, {{ $bulkNeedsAttentionCount }} below target in 1 component, {{ $bulkFailingCount }} Failing student{{ ($bulkAtRiskCount + $bulkNeedsAttentionCount + $bulkFailingCount) === 1 ? '' : 's' }} in this view.
         </span>
         <button type="button" onclick="window.showModal('bulkInterventionModal'); window.updateBulkInterventionSummary();"
                 class="btn btn-primary btn-sm">
@@ -198,7 +197,7 @@
     <div class="mt-1 mx-6 text-xs text-gray-500 space-y-0.5">
         <p><strong>Computed</strong> is the raw weighted evidence. <strong>Report card</strong> is the grade after DepEd transmutation.</p>
         <p><strong>In-Term Status</strong> is based on Computed, not the report card grade.</p>
-        <p>A learner can be At Risk while their report card still passes — that is intentional.</p>
+        <p>A learner can be Below Target while their report card still passes — that is intentional.</p>
     </div>
     <details class="mt-1 mx-6 text-xs text-gray-500">
         <summary class="cursor-pointer select-none font-medium text-gray-600">How to read this table</summary>
@@ -212,9 +211,8 @@
              prompt: these two signals must never look interchangeable. --}}
         <p class="mt-2">
             <strong>In-Term Status</strong> reflects only the assessment evidence collected so far this term, for this one
-            subject — it updates as more is entered and is not a prediction of the final grade.
-            <strong>Risk Level</strong> comes from the submitted term report, covers every subject, and factors in the
-            trend across terms. They answer different questions and are shown separately on purpose.
+            subject — it updates as more is entered and is not a prediction of the final grade. It never opens an
+            Academic Concern: only an approved monitoring rule does that (today, an assessment recorded as Missing).
         </p>
         {{-- "Correctness and interface pass" TASK 4a — BUG FIX: 60% is
              DO 8, s. 2015's passing anchor only. Under DO 015, s. 2026
@@ -232,10 +230,11 @@
              EARLY-WARNING distinction explicitly, not just what each
              signal happens to mean. --}}
         <p class="mt-2">
-            <strong>Failing</strong> is an outcome recorded after the official grade is encoded. <strong>At
-            Risk</strong> and <strong>Needs Attention</strong> are early warnings from assessment evidence during the
-            term, and are the ones to act on. A student can show At Risk while their official grade is still
-            passing, and that is intentional — it is an early warning, not a prediction of the final grade.
+            <strong>Failing</strong> is an outcome recorded after the official grade is encoded. The
+            <strong>Below Target</strong> statuses only describe the assessment evidence recorded so far this term —
+            each component's percentage against the 75 target (a reference point set in this system, not a DepEd grading rule). They are not predictions, and they do not open an
+            Academic Concern; the Principal decides what, if anything, to do. A learner can be Below Target while
+            the official grade still passes.
         </p>
         {{-- "Correctness and interface pass" TASK 4b — the state this
              covered (a grade with complete evidence but no published
@@ -330,10 +329,11 @@
                      on purpose, see Adviser\DashboardController::buildInTermRows(). --}}
                 @php $h = $sortHeader('in_term_status', 'In-Term Status'); @endphp
                 <th scope="col">
-                    <a href="{{ $h['url'] }}" class="inline-flex items-center gap-1 hover:text-brand-700">In-Term Status (this subject) @if($h['active'])<i class="bi {{ $h['icon'] }} text-[10px]"></i>@endif</a>
+                    <a href="{{ $h['url'] }}" class="inline-flex items-center gap-1 hover:text-brand-700">Academic Performance (this subject) @if($h['active'])<i class="bi {{ $h['icon'] }} text-[10px]"></i>@endif</a>
                 </th>
+                <th scope="col" title="Overall Monitoring: open Academic Concerns for this learner in the selected term (every subject: Subject Performance Concern, Missing Requirement).">Monitoring
+                    <span class="block normal-case font-normal text-gray-400 text-[10px] tracking-normal">open concerns, this term</span></th>
                 <th scope="col">Focus Area</th>
-                <th scope="col">Risk Level</th>
                 <th scope="col" class="text-center">Intervention</th>
             </tr>
         </thead>
@@ -436,6 +436,13 @@
                 <td>
                     @include('partials.in-term-status-badge', ['its' => $row['in_term_status'], 'transmutedGrade' => $row['transmuted_grade']])
                 </td>
+                <td data-monitoring-cell>
+                    <x-ui.monitoring-status :status="$row['monitoring'] ?? null" />
+                    @if(($row['monitoring'] ?? null)?->isForReview())
+                        <a href="{{ route('principal.academic-monitoring', ['school_year' => $schoolYear, 'term' => $gradingPeriod, 'status' => 'open']) }}"
+                           class="block text-[11px] text-brand-700 hover:underline mt-0.5">View evidence →</a>
+                    @endif
+                </td>
                 <td>
                     @if($row['weakest_component'] && ($row['components'][$row['weakest_component']]['status'] ?? null) === 'Needs Attention')
                         <span class="badge bg-status-attention/10 text-status-attention">
@@ -445,15 +452,6 @@
                         <span class="text-xs text-muted">On track</span>
                     @else
                         <span class="text-xs text-gray-300">No data yet</span>
-                    @endif
-                </td>
-                <td>
-                    @if($row['risk_level'] ?? null)
-                        <span class="badge {{ $riskLevelColors[$row['risk_level']] ?? 'bg-gray-100 text-gray-600' }}">
-                            {{ ucfirst($row['risk_level']) }}
-                        </span>
-                    @else
-                        <span class="text-xs text-gray-300" title="No term report submitted yet for this term.">Not yet available</span>
                     @endif
                 </td>
                 <td class="text-center">
@@ -467,7 +465,10 @@
                         </a>
                     @else
                         @php
+                            $advisers ??= []; $advisers[$row['section']->id] ??= app(\App\Services\InterventionScheduleService::class)->resolveAdviser($row['section'], null);
                             $modalPayload = [
+                                'responsible'              => $advisers[$row['section']->id][0]?->name,
+                                'responsible_problem'      => $advisers[$row['section']->id][1],
                                 'student_id'              => $row['student']->id,
                                 'student_name'             => $row['student']->last_name . ', ' . $row['student']->first_name,
                                 'section_name'             => $row['section']->name,
@@ -477,8 +478,6 @@
                                 'components'               => $row['components'],
                                 'weakest_component'        => $row['weakest_component'],
                                 'weakest_component_label'  => $row['weakest_component'] ? ($componentLabels[$row['weakest_component']] ?? $row['weakest_component']) : null,
-                                'has_risk_result'          => $row['risk_result_exists'],
-                                'recommendation'           => $row['recommendation'],
                             ];
                         @endphp
                         <button type="button" onclick='openRecordInterventionModal(@json($modalPayload))'
@@ -548,12 +547,8 @@
             Focus Area: <span class="font-medium text-gray-700" id="rivFocusArea">—</span>
         </p>
 
-        <div id="rivRecommendationBox" class="hidden bg-brand-50 border border-brand-100 text-brand-800 text-xs p-3 rounded-lg mb-4">
-            <p class="font-medium">DSS Recommendation: <span id="rivRecommendationType"></span></p>
-            <p class="mt-1" id="rivRecommendationReason"></p>
-        </div>
-        <p id="rivNoRiskResultNote" class="hidden text-xs text-gray-500 mb-4">
-            <i class="bi bi-info-circle"></i> The DSS recommendation becomes available once the adviser submits the term report. You can still record an intervention now, from this assessment evidence.
+        <p class="text-xs text-gray-500 mb-4">
+            <i class="bi bi-info-circle"></i> The evidence above is for this subject and term. Choose the intervention yourself — nothing is pre-selected.
         </p>
 
         <form method="POST" action="{{ route('principal.interventions.store') }}" class="space-y-4" data-loading="Recording intervention...">
@@ -563,12 +558,18 @@
             <input type="hidden" name="grading_period" id="rivGradingPeriod">
             <input type="hidden" name="recommendation_reason" id="rivRecommendationReasonField">
 
+            <div class="text-xs bg-gray-50 rounded-lg p-3" data-responsible-preview>
+                <span class="text-gray-500">Responsible adviser (assigned automatically):</span>
+                <span class="font-medium text-gray-700" id="rivResponsible">—</span>
+                <span class="block text-red-700 mt-1 hidden" id="rivResponsibleProblem" role="alert"></span>
+            </div>
             <div>
                 <label class="form-label">Intervention Type</label>
                 <select name="recommended_type" id="rivTypeSelect" required
                         class="form-input">
+                    <option value="" selected disabled>— Choose an intervention —</option>
                     @foreach($interventionTypes as $t)
-                        <option value="{{ $t }}">{{ ucfirst(str_replace('_', ' ', $t)) }}</option>
+                        <option value="{{ $t }}">{{ \App\Models\Intervention::typeLabel($t) }}</option>
                     @endforeach
                 </select>
             </div>
@@ -597,7 +598,7 @@
 
             <div class="flex justify-end gap-3 pt-2">
                 <button type="button" onclick="closeRecordInterventionModal()" class="px-4 py-2 text-sm text-muted">Cancel</button>
-                <button type="submit" class="btn btn-primary">
+                <button type="submit" class="btn btn-primary" id="rivSubmit">
                     Record Intervention
                 </button>
             </div>
@@ -654,7 +655,7 @@
                  (not merely disabled). --}}
             <div class="flex-1 flex flex-col items-center justify-center text-center py-10 border rounded-lg mb-2">
                 <i class="bi bi-check2-circle text-2xl text-gray-300 mb-2"></i>
-                <p class="text-sm text-gray-600 max-w-sm">All {{ $skippedAll }} At Risk/Needs Attention/Failing student{{ $skippedAll === 1 ? '' : 's' }} in this view already {{ $skippedAll === 1 ? 'has' : 'have' }} an open intervention for this subject in Term {{ $gradingPeriod }}.</p>
+                <p class="text-sm text-gray-600 max-w-sm">All {{ $skippedAll }} below-target/Failing student{{ $skippedAll === 1 ? '' : 's' }} in this view already {{ $skippedAll === 1 ? 'has' : 'have' }} an open intervention for this subject in Term {{ $gradingPeriod }}.</p>
                 <a href="{{ route('principal.interventions') }}" class="text-sm text-brand-700 hover:underline mt-3">
                     <i class="bi bi-clipboard2-pulse"></i> Go to Interventions
                 </a>
@@ -674,11 +675,11 @@
                 <span class="text-gray-600 font-medium shrink-0">Include:</span>
                 <label class="flex items-center gap-1.5 cursor-pointer">
                     <input type="radio" name="bivThresholdChoice" value="narrow" checked onchange="window.applyBulkThreshold()">
-                    At Risk only
+                    Below target in 2+ components only
                 </label>
                 <label class="flex items-center gap-1.5 cursor-pointer">
                     <input type="radio" name="bivThresholdChoice" value="wide" onchange="window.applyBulkThreshold()">
-                    At Risk and Needs Attention
+                    Below target in 1 or more components
                 </label>
                 <label class="flex items-center gap-1.5 cursor-pointer">
                     <input type="radio" name="bivThresholdChoice" value="failing" onchange="window.applyBulkThreshold()">
@@ -718,7 +719,7 @@
                         <div class="flex-1 min-w-0">
                             <label for="bivInclude{{ $row['student_id'] }}" class="text-sm font-medium text-ink block">
                                 {{ $row['student_name'] }}
-                                <span class="text-xs font-normal {{ $statusColor }}">({{ $row['status'] }})</span>
+                                <span class="text-xs font-normal {{ $statusColor }}">({{ \App\Services\InTermStatusService::label($row['status']) }})</span>
                             </label>
                             @if($row['has_existing_intervention'])
                                 <p class="text-xs text-muted mt-0.5">
@@ -732,7 +733,7 @@
                         <input type="hidden" name="statuses[{{ $row['student_id'] }}]" value="{{ $row['status'] }}">
                         <select name="types[{{ $row['student_id'] }}]" class="form-select-sm text-xs shrink-0">
                             @foreach($interventionTypes as $t)
-                                <option value="{{ $t }}" {{ $t === $row['suggested_type'] ? 'selected' : '' }}>{{ ucfirst(str_replace('_', ' ', $t)) }}</option>
+                                <option value="{{ $t }}" {{ $t === $row['suggested_type'] ? 'selected' : '' }}>{{ \App\Models\Intervention::typeLabel($t) }}</option>
                             @endforeach
                         </select>
                         @endunless
@@ -773,15 +774,6 @@
 
 @push('scripts')
 <script>
-    const RIV_TYPE_LABELS = {
-        remediation: 'Additional Practice and Re-teaching',
-        additional_learning_activity: 'Additional Learning Activity',
-        additional_performance_task: 'Additional Performance Task',
-        teacher_monitoring: 'Teacher Monitoring',
-        attendance_monitoring: 'Attendance Monitoring',
-        parent_conference: 'Parent/Guardian Conference',
-        other: 'Other',
-    };
 
     function rivFormatComponent(c) {
         if (!c || c.percentage === null || c.percentage === undefined) return '—';
@@ -802,24 +794,15 @@
         document.getElementById('rivSubjectId').value = data.subject_id;
         document.getElementById('rivGradingPeriod').value = data.grading_period;
 
-        const recBox = document.getElementById('rivRecommendationBox');
-        const noRiskNote = document.getElementById('rivNoRiskResultNote');
-        const typeSelect = document.getElementById('rivTypeSelect');
-        const reasonField = document.getElementById('rivRecommendationReasonField');
-
-        if (data.has_risk_result && data.recommendation) {
-            recBox.classList.remove('hidden');
-            noRiskNote.classList.add('hidden');
-            document.getElementById('rivRecommendationType').textContent = RIV_TYPE_LABELS[data.recommendation.type] || data.recommendation.type;
-            document.getElementById('rivRecommendationReason').textContent = data.recommendation.reason;
-            typeSelect.value = data.recommendation.type;
-            reasonField.value = data.recommendation.reason;
-        } else {
-            recBox.classList.add('hidden');
-            noRiskNote.classList.remove('hidden');
-            typeSelect.selectedIndex = 0;
-            reasonField.value = '';
-        }
+        const respName = document.getElementById('rivResponsible');
+        const respProblem = document.getElementById('rivResponsibleProblem');
+        respName.textContent = data.responsible || 'None — cannot be recorded';
+        respProblem.textContent = data.responsible_problem || '';
+        respProblem.classList.toggle('hidden', !data.responsible_problem);
+        document.getElementById('rivSubmit').disabled = !!data.responsible_problem;
+        // The Principal chooses: nothing is pre-selected.
+        document.getElementById('rivTypeSelect').value = '';
+        document.getElementById('rivRecommendationReasonField').value = '';
 
         window.showModal('recordInterventionModal');
     };

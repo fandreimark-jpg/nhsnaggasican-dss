@@ -2,8 +2,8 @@
 
 namespace App\Services;
 
-use App\Models\AcademicTerm;
 use App\Models\AcademicYear;
+use App\Models\ReportSubmission;
 use App\Models\Section;
 use App\Models\Subject;
 use Illuminate\Http\Request;
@@ -25,9 +25,10 @@ use Illuminate\Http\Request;
  *  - the roster is the year's enrollment rows (Section::enrolledStudents),
  *    not students.section_id — a promoted learner still appears under
  *    their Grade 11 section when the Grade 11 year is selected;
- *  - grades, risk results, and report submissions are the rows carrying
- *    that school_year — never re-derived from the learner's current
- *    section or from AcademicYear::active().
+ *  - figures come ONLY from submitted reports of that school_year (the
+ *    snapshot in each submission's latest version, 2026-10-07) — never
+ *    from live grades, and never from the learner's current section.
+ *    Live academic information is on Academic Monitoring / Students.
  *
  * Eager-loaded in one pass per relation (no per-row queries).
  */
@@ -37,7 +38,6 @@ class SectionReportService
      * @return array{
      *   sections: \Illuminate\Support\Collection,
      *   gradeLevels: \Illuminate\Support\Collection,
-     *   staleRiskBySchoolYear: array,
      *   schoolYear: string, schoolYears: \Illuminate\Support\Collection, isHistoricalYear: bool,
      *   gradingPeriod: ?int, subject: ?Subject, subjects: \Illuminate\Support\Collection,
      *   sectionOptions: \Illuminate\Support\Collection, selectedSectionId: ?int
@@ -68,12 +68,14 @@ class SectionReportService
                 'adviser',
                 'track',
                 'specialization',
-                // The roster AS ENROLLED that year (PART 5/6).
+                // The roster AS ENROLLED that year (PART 5/6) — names only.
                 'enrolledStudents' => fn($q) => $q->orderBy('last_name')->orderBy('first_name'),
-                'enrolledStudents.grades' => fn($q) => $q->where('school_year', $schoolYear)
-                    ->when($subject, fn($g) => $g->where('subject_id', $subject->id)),
-                'enrolledStudents.riskResults' => fn($q) => $q->where('school_year', $schoolYear),
-                'reportSubmissions' => fn($q) => $q->where('school_year', $schoolYear),
+                // SUBMITTED REPORTS ONLY (2026-10-07): explicit submissions and
+                // the contents frozen in their latest version. Live grades are
+                // never read here — an unsubmitted term shows no figures, and a
+                // submitted one shows what was submitted, not today's grades.
+                'reportSubmissions' => fn($q) => $q->submitted()->where('school_year', $schoolYear)
+                    ->when(ReportSubmission::versioningAvailable(), fn($v) => $v->with('latestVersion.submitter')),
                 'reportSubmissions.adviser',
             ])
             ->orderBy('grade_level')
@@ -93,16 +95,6 @@ class SectionReportService
 
         $sections = $query->get();
 
-        // Grades/risk results on a student model are hasMany(student_id) —
-        // filter each student's loaded grades down to THIS section's rows
-        // so a learner who moved sections within a year never shows the
-        // other section's grades here.
-        foreach ($sections as $section) {
-            foreach ($section->enrolledStudents as $student) {
-                $student->setRelation('grades', $student->grades->where('section_id', $section->id)->values());
-            }
-        }
-
         $gradeLevels = Section::where('school_year', $schoolYear)
             ->select('grade_level')
             ->distinct()
@@ -115,21 +107,9 @@ class SectionReportService
 
         $subjects = Subject::orderBy('grade_level')->orderBy('type')->orderBy('name')->get(['id', 'name', 'grade_level', 'type']);
 
-        // This page can span more than one school year, unlike the
-        // single-active-year dashboards — keyed per year so the warning
-        // can name exactly which year/term combination is affected. See
-        // AcademicTerm::staleRiskTerms() and the "live in-term risk +
-        // stale data guard" prompt.
-        $staleRiskBySchoolYear = [];
-        $stale = AcademicTerm::staleRiskTerms($schoolYear);
-        if (!empty($stale)) {
-            $staleRiskBySchoolYear[$schoolYear] = $stale;
-        }
-
         return [
             'sections'              => $sections,
             'gradeLevels'           => $gradeLevels,
-            'staleRiskBySchoolYear' => $staleRiskBySchoolYear,
             'schoolYear'            => $schoolYear,
             'schoolYears'           => AcademicYear::selectableSchoolYears(),
             'isHistoricalYear'      => $schoolYear !== Section::activeSchoolYear(),

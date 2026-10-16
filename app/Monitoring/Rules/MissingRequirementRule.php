@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Builder;
 /**
  * EXPLICIT_MISSING_REQUIREMENT
  *
- * Condition: an adviser explicitly marked a learner Missing on an
+ * Condition: a learner is recorded Missing (a Missing marker) on an
  * assessment item (Phase 2A, App\Services\AssessmentStatusService).
  * Result: one For Review concern per learner per item.
  *

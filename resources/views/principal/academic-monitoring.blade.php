@@ -1,7 +1,7 @@
 @extends('layouts.app')
 
 @section('title', 'Academic Monitoring')
-@section('subtitle', 'Academic concerns found in the current assessment evidence, For Review — read-only')
+@section('subtitle', 'Academic concerns found in the current assessment evidence, For Review')
 
 @section('content')
 
@@ -19,19 +19,31 @@
         }
         return implode(' · ', $parts);
     };
-    $hasNarrowing = $filters['term'] !== null || $filters['grade_level'] || $filters['section_id'] || $filters['subject_id'] || $filters['status'] !== 'open';
+    $hasNarrowing = $filters['term'] !== null || $filters['grade_level'] || $filters['section_id'] || $filters['subject_id'] || $filters['concern_type'] || $filters['status'] !== 'open';
+    $subjectKey = \App\Monitoring\Rules\OfficialFailingSubjectRule::KEY;
+    // Same display labels the Interventions pages use.
+    $ivTypeLabel = fn(?string $t) => \App\Models\Intervention::typeLabel($t);
+    $ivStatusLabel = fn(?string $s) => ucfirst(str_replace('_', ' ', (string) $s));
 @endphp
+
+@include('partials.validation-errors')
 
 {{-- What this page is — and is not. --}}
 <div class="alert alert-info mb-4" data-monitoring-explainer>
     <p>
         A learner appears here <strong>For Review</strong> when an approved monitoring rule finds a concern in the
-        recorded assessment evidence. It is not a prediction and not a grade, and nothing on this page creates an
-        intervention — you review the evidence and decide.
+        recorded evidence. It is not a prediction and not a grade, and nothing here creates an intervention
+        on its own — you review the evidence and decide.
     </p>
     <p class="mt-1">
-        The rule in use is <strong>Missing Requirement</strong>: the adviser explicitly marked a required assessment
-        as Missing. A blank score (not yet given) is never a concern, and a recorded score of 0 is Completed, not Missing.
+        <strong>Mark as Reviewed</strong> only records that you inspected the evidence: the concern stays open and no
+        intervention is created. <strong>Record Intervention</strong> opens the intervention form for this learner; an
+        intervention exists only when you choose one and submit it.
+    </p>
+    <p class="mt-1">
+        Two rules are in use, and neither introduces a new threshold.
+        <strong>Missing Requirement</strong>: the adviser marked a required assessment as Missing (a blank score is
+        never a concern, and a recorded 0 is Completed). <strong>Subject Performance Concern</strong>: a subject's OFFICIAL grade is Failing (the DepEd failing mark already used for official grades). Each subject is evaluated on its own, so a learner's overall average never hides a failing subject; an in-term Below Target reading is not an official result and opens no concern.
         A concern is <strong>Resolved</strong> automatically when that evidence changes, and kept as history.
     </p>
 </div>
@@ -85,6 +97,15 @@
         </select>
     </div>
     <div class="filter-field">
+        <label class="form-label" for="amConcernType">Concern Type</label>
+        <select id="amConcernType" name="concern_type" onchange="this.form.submit()" class="form-select-sm">
+            <option value="">All</option>
+            @foreach($concernTypes as $key => $label)
+                <option value="{{ $key }}" {{ $filters['concern_type'] === $key ? 'selected' : '' }}>{{ $label }}</option>
+            @endforeach
+        </select>
+    </div>
+    <div class="filter-field">
         <label class="form-label" for="amStatus">Status</label>
         <select id="amStatus" name="status" onchange="this.form.submit()" class="form-select-sm">
             <option value="open" {{ $filters['status'] === 'open' ? 'selected' : '' }}>For Review</option>
@@ -127,7 +148,7 @@
                             <span class="text-xs text-muted font-normal">LRN {{ $group['student']->lrn }}</span>
                         @endif
                     </p>
-                    <p class="text-sm text-gray-600">{{ $group['subject']?->name ?? 'All subjects' }}</p>
+                    <p class="text-sm text-gray-600">{{ $group['subject']?->name ?? '—' }}</p>
                     <p class="text-xs text-muted">
                         {{ $section->name }} — Grade {{ $section->grade_level }}
                         @if($sectionPlacement($section)) · {{ $sectionPlacement($section) }} @endif
@@ -147,19 +168,27 @@
                 @foreach($group['concerns'] as $concern)
                     @php
                         $e = $concern->evidence;
+                        $isSubject = $concern->rule_key === $subjectKey;
                         $item = $e['assessment'] ?? [];
+                        $official = $e['official_grade'] ?? [];
                         $itemLine = ($item['name'] ?? 'Assessment') . ' — ' . ($item['component_label'] ?? '') . (!empty($item['exam_role_label']) ? ' (' . $item['exam_role_label'] . ')' : '');
+                        $gradeLine = 'Official grade ' . (isset($official['grade']) ? number_format((float) $official['grade'], 2) : '—') . ' · ' . ($official['result'] ?? 'Failed');
                     @endphp
                     <div class="rounded-lg border border-line p-3" data-concern-id="{{ $concern->id }}">
                         <div class="flex flex-wrap items-center justify-between gap-2">
                             <div class="text-sm">
-                                @if($concern->isOpen())
+                                @if($concern->isOpen() && $concern->isReviewed())
+                                    {{-- Still open (current evidence) — Reviewed never means Resolved. --}}
+                                    <x-ui.status-badge tone="info" label="Open · Reviewed" />
+                                @elseif($concern->isOpen())
                                     <x-ui.status-badge tone="warning" label="For Review" />
                                 @else
                                     <x-ui.status-badge tone="success" label="Resolved" />
                                 @endif
                                 <span class="font-medium text-ink ml-1">{{ $concern->concern_label }}</span>
-                                @if($concern->isOpen())
+                                @if($isSubject)
+                                    <span class="text-gray-600" data-official-grade-line>· {{ $e['subject']['name'] ?? '' }} · {{ $concern->isOpen() ? $gradeLine : 'was ' . $gradeLine }}</span>
+                                @elseif($concern->isOpen())
                                     <span class="text-gray-600">· {{ $itemLine }} · {{ $e['status_label'] ?? 'Missing' }}</span>
                                 @else
                                     {{-- A resolved concern's evidence status is history: say "was",
@@ -183,15 +212,80 @@
                             <p class="text-xs text-gray-600 mt-1" data-resolution-reason>{{ $concern->resolution_reason }}</p>
                         @endunless
 
+                        @if($concern->isReviewed())
+                            <p class="text-xs text-gray-600 mt-1" data-review-summary>
+                                <i class="bi bi-eye"></i> Reviewed by {{ trim($concern->reviewedBy?->full_name ?? 'the Principal') }} on {{ $fmt($concern->reviewed_at) }}{{ $concern->isOpen() ? ' — still open until its evidence changes' : '' }}.
+                                @if($concern->review_note)
+                                    <span class="block text-gray-500">Note: {{ $concern->review_note }}</span>
+                                @endif
+                            </p>
+                        @endif
+
+                        {{-- Phase 2E actions — open concerns only; history is never edited here. --}}
+                        @if($concern->isOpen())
+                            @php
+                                $advisers ??= []; $advisers[$section->id] ??= app(\App\Services\InterventionScheduleService::class)->resolveAdviser($section, null);
+                                $ivPayload = [
+                                    'responsible'         => $advisers[$section->id][0]?->name,
+                                    'responsible_problem' => $advisers[$section->id][1],
+                                    'academic_concern_id' => $concern->id,
+                                    'student_id'          => $group['student']->id,
+                                    'subject_id'          => $concern->subject_id,
+                                    'grading_period'      => $concern->grading_period,
+                                    'learner'             => $group['student']->last_name . ', ' . $group['student']->first_name,
+                                    'context'             => $section->name . ' — ' . ($e['subject']['name'] ?? '') . ', Term ' . $concern->grading_period,
+                                    'evidence'            => $isSubject
+                                        ? $concern->concern_label . ': the official ' . ($e['subject']['name'] ?? 'subject') . ' grade is ' . (isset($official['grade']) ? number_format((float) $official['grade'], 2) : '—') . ' (Failed).'
+                                        : $concern->concern_label . ': ' . ($item['name'] ?? 'assessment') . ' (' . ($item['component_label'] ?? '') . ') was recorded as Missing in the Class Record.',
+                                ];
+                            @endphp
+                            <div class="flex flex-wrap items-start gap-3 mt-2" data-concern-actions>
+                                @unless($concern->isReviewed())
+                                    <details class="text-xs" data-review-action>
+                                        <summary class="btn btn-secondary btn-xs cursor-pointer">Mark as Reviewed</summary>
+                                        <form method="POST" action="{{ route('principal.academic-monitoring.review', $concern) }}" class="mt-2 space-y-2 max-w-md" data-loading="Saving review...">
+                                            @csrf
+                                            @if($reviewNoteAvailable)
+                                                <label class="form-label" for="reviewNote{{ $concern->id }}">Review note <span class="text-gray-400">(optional)</span></label>
+                                                <textarea id="reviewNote{{ $concern->id }}" name="review_note" rows="2" maxlength="1000" class="form-input" placeholder="What you checked, if anything to note"></textarea>
+                                            @endif
+                                            <p class="text-gray-500">This records that you inspected the evidence. The concern stays open and no intervention is created.</p>
+                                            <button type="submit" class="btn btn-primary btn-xs">Confirm — Mark as Reviewed</button>
+                                        </form>
+                                    </details>
+                                @endunless
+                                @if($interventionLinkAvailable)
+                                    <button type="button" class="btn btn-outline btn-xs" data-record-intervention
+                                            onclick='openConcernInterventionModal(@json($ivPayload))'>
+                                        <i class="bi bi-clipboard2-plus"></i> Record Intervention
+                                    </button>
+                                @endif
+                            </div>
+                        @endif
+
                         <details class="mt-2">
                             <summary class="text-xs text-brand-700 cursor-pointer">View Evidence</summary>
                             <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs mt-2" data-evidence>
                                 <dt class="text-muted">Why this learner is listed</dt>
-                                <dd class="text-ink">{{ $concern->concern_label }}: the adviser explicitly marked {{ $item['name'] ?? 'this assessment' }} as Missing.</dd>
+                                @if($isSubject)
+                                <dd class="text-ink">{{ $concern->concern_label }}: the learner's OFFICIAL {{ $e['subject']['name'] ?? 'subject' }} grade for Term {{ $concern->grading_period }} is Failing. Evaluated for this subject alone — other subjects and the overall average do not change it.</dd>
+                                @else
+                                <dd class="text-ink">{{ $concern->concern_label }}: {{ $item['name'] ?? 'this assessment' }} was recorded as Missing in the Class Record.</dd>
+                                @endif
                                 <dt class="text-muted">Learner</dt>
                                 <dd>{{ $group['student']->last_name }}, {{ $group['student']->first_name }}</dd>
                                 <dt class="text-muted">Section</dt>
                                 <dd>{{ $section->name }} — Grade {{ $section->grade_level }}</dd>
+                                @if($isSubject)
+                                <dt class="text-muted">Subject</dt>
+                                <dd>{{ $e['subject']['name'] ?? ($group['subject']?->name ?? '—') }}</dd>
+                                <dt class="text-muted">Official Grade</dt>
+                                <dd data-official-grade>{{ isset($official['grade']) ? number_format((float) $official['grade'], 2) : '—' }}</dd>
+                                <dt class="text-muted">Result</dt>
+                                <dd>{{ $official['result'] ?? 'Failed' }} (Failing is {{ number_format((float) ($official['failing_threshold'] ?? 74), 0) }} and below)</dd>
+                                <dt class="text-muted">Verified</dt>
+                                <dd>{{ !empty($official['verified_at']) ? \Illuminate\Support\Carbon::parse($official['verified_at'])->format('M j, Y g:i A') : '—' }}</dd>
+                                @else
                                 <dt class="text-muted">Subject</dt>
                                 <dd>{{ $e['subject']['name'] ?? ($group['subject']?->name ?? '—') }}</dd>
                                 <dt class="text-muted">Assessment Item</dt>
@@ -209,6 +303,7 @@
                                         <span class="text-muted">— marked Missing again; a newer open concern is listed for this item</span>
                                     @endif
                                 </dd>
+                                @endif
                                 <dt class="text-muted">School Year / Term</dt>
                                 <dd>{{ $concern->school_year }} · Term {{ $concern->grading_period }}</dd>
                                 <dt class="text-muted">First Detected</dt>
@@ -224,7 +319,39 @@
                                     <dd>{{ $concern->resolution_reason }}</dd>
                                 @endunless
                                 <dt class="text-muted">Principal Review</dt>
-                                <dd>Not recorded — review actions are not enabled yet.</dd>
+                                <dd data-principal-review>
+                                    @if($concern->isReviewed())
+                                        Reviewed by {{ trim($concern->reviewedBy?->full_name ?? 'the Principal') }} on {{ $fmt($concern->reviewed_at) }}{{ $concern->review_note ? ' — ' . $concern->review_note : '' }}
+                                    @else
+                                        {{ $concern->isOpen() ? 'Not yet reviewed.' : 'Not reviewed before it was resolved.' }}
+                                    @endif
+                                </dd>
+                                @if($interventionLinkAvailable)
+                                    <dt class="text-muted">Intervention</dt>
+                                    <dd data-linked-interventions>
+                                        @forelse($concern->interventions as $iv)
+                                            <span class="block" data-linked-intervention="{{ $iv->id }}">
+                                                {{ $ivTypeLabel($iv->recommended_type) }} · {{ $ivStatusLabel($iv->status) }} · recorded {{ $fmt($iv->created_at) }}{{ $iv->createdBy ? ' by ' . trim($iv->createdBy->full_name) : '' }}
+                                                {{-- The adviser's side, so delivery is visible here —
+                                                     and never mistaken for the concern resolving. --}}
+                                                <span class="block text-muted" data-intervention-delivery>
+                                                    @if($iv->delivered_at)
+                                                        Delivered {{ $fmt($iv->delivered_at) }}{{ $iv->deliveredBy ? ' by ' . trim($iv->deliveredBy->full_name) : '' }}@if($iv->delivery_notes) — “{{ $iv->delivery_notes }}”@endif
+                                                        @if($concern->isOpen())
+                                                            <span class="block">Delivery does not close this concern; it stays open until its evidence changes.</span>
+                                                        @endif
+                                                    @elseif($iv->acknowledged_at)
+                                                        Acknowledged by the adviser {{ $fmt($iv->acknowledged_at) }} · not yet delivered
+                                                    @else
+                                                        Not yet acknowledged by the adviser
+                                                    @endif
+                                                </span>
+                                            </span>
+                                        @empty
+                                            No intervention recorded for this concern.
+                                        @endforelse
+                                    </dd>
+                                @endif
                             </dl>
                         </details>
                     </div>
@@ -234,8 +361,97 @@
     @empty
         <x-empty-state icon="bi bi-flag"
             :message="$filters['status'] === 'resolved' ? 'No resolved concerns in this scope.' : 'No learners are For Review in this scope.'"
-            hint="A concern appears when an adviser explicitly marks a required assessment as Missing. Blank scores are not concerns." />
+            hint="A concern appears when a subject's official grade is Failing, or when an adviser explicitly marks a required assessment as Missing. Blank scores are not concerns." />
     @endforelse
 </x-panel>
+
+@if($interventionLinkAvailable)
+{{-- Phase 2E — RECORD INTERVENTION from a concern. Posts to the EXISTING
+     Principal\InterventionController::store() with its usual fields and
+     validation, plus academic_concern_id. The type starts unselected: the
+     Principal chooses; nothing is picked or submitted automatically. --}}
+<div id="concernInterventionModal" class="hidden opacity-0 fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200">
+    <div class="modal-box scale-95 opacity-0 bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold text-ink">Record Intervention</h3>
+            <button type="button" onclick="closeConcernInterventionModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
+        </div>
+
+        <div class="bg-gray-50 rounded-lg p-3 mb-4 text-sm">
+            <p class="font-medium text-ink" id="civLearner"></p>
+            <p class="text-xs text-gray-500" id="civContext"></p>
+            <p class="text-xs text-gray-700 mt-1"><span class="text-gray-500">Evidence:</span> <span id="civEvidence"></span></p>
+        </div>
+
+        <form method="POST" action="{{ route('principal.interventions.store') }}" class="space-y-4" data-loading="Recording intervention...">
+            @csrf
+            <input type="hidden" name="academic_concern_id" id="civConcernId">
+            <input type="hidden" name="student_id" id="civStudentId">
+            <input type="hidden" name="subject_id" id="civSubjectId">
+            <input type="hidden" name="grading_period" id="civGradingPeriod">
+            <input type="hidden" name="recommendation_reason" id="civReason">
+
+            <div class="text-xs bg-gray-50 rounded-lg p-3" data-responsible-preview>
+                <span class="text-gray-500">Responsible adviser (assigned automatically):</span>
+                <span class="font-medium text-gray-700" id="civResponsible">—</span>
+                <span class="block text-red-700 mt-1 hidden" id="civResponsibleProblem" role="alert"></span>
+            </div>
+            <div>
+                <label class="form-label" for="civType">Intervention Type</label>
+                <select name="recommended_type" id="civType" required class="form-input">
+                    <option value="" selected disabled>— Choose an intervention —</option>
+                    @foreach(\App\Models\Intervention::SELECTABLE_TYPES as $t)
+                        <option value="{{ $t }}">{{ $ivTypeLabel($t) }}</option>
+                    @endforeach
+                </select>
+            </div>
+
+            <div>
+                <label class="form-label" for="civNotes">Notes <span class="text-gray-400 text-xs">(optional)</span></label>
+                <textarea name="principal_notes" id="civNotes" rows="3" class="form-input" placeholder="Any additional context for this decision..."></textarea>
+            </div>
+
+            <label class="flex items-start gap-2 text-xs text-gray-600 bg-gray-50 rounded-lg p-3 cursor-pointer">
+                <input type="checkbox" name="recommendation_only" value="1" class="mt-0.5">
+                <span>Record as a recommendation only — I will decide later</span>
+            </label>
+            <p class="text-xs text-gray-500">
+                Submitting records your decision and links it to this concern; the adviser sees it on their Interventions page.
+                The concern itself stays open until its evidence changes.
+            </p>
+
+            <div class="flex justify-end gap-3 pt-2">
+                <button type="button" onclick="closeConcernInterventionModal()" class="px-4 py-2 text-sm text-muted">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="civSubmit">Record Intervention</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@push('scripts')
+<script>
+    window.openConcernInterventionModal = function (data) {
+        document.getElementById('civLearner').textContent = data.learner;
+        document.getElementById('civContext').textContent = data.context;
+        document.getElementById('civEvidence').textContent = data.evidence;
+        document.getElementById('civConcernId').value = data.academic_concern_id;
+        document.getElementById('civStudentId').value = data.student_id;
+        document.getElementById('civSubjectId').value = data.subject_id;
+        document.getElementById('civGradingPeriod').value = data.grading_period;
+        document.getElementById('civReason').value = data.evidence;
+        const respName = document.getElementById('civResponsible');
+        const respProblem = document.getElementById('civResponsibleProblem');
+        respName.textContent = data.responsible || 'None — cannot be recorded';
+        respProblem.textContent = data.responsible_problem || '';
+        respProblem.classList.toggle('hidden', !data.responsible_problem);
+        document.getElementById('civSubmit').disabled = !!data.responsible_problem;
+        document.getElementById('civType').selectedIndex = 0;
+        window.showModal('concernInterventionModal');
+    };
+    window.closeConcernInterventionModal = () => window.hideModal('concernInterventionModal');
+    document.addEventListener('DOMContentLoaded', () => window.bindModalOverlayClose('concernInterventionModal'));
+</script>
+@endpush
+@endif
 
 @endsection

@@ -27,6 +27,7 @@ use Tests\TestCase;
 class GradeVerificationTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
 
     /**
      * TASK 2 of "terminology, transmutation, and interface cleanup" —

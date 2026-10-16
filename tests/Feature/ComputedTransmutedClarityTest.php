@@ -55,7 +55,7 @@ class ComputedTransmutedClarityTest extends TestCase
         $this->score($section, $subject, $student, 'performance_task', 60);
         $this->score($section, $subject, $student, 'examination', 70);
 
-        $response = $this->actingAs($adviser)->get('/adviser/assessments?period=1&subject_id=' . $subject->id);
+        $response = $this->actingAs($adviser)->get('/adviser/verify-grades?period=1&subject_id=' . $subject->id);
         $response->assertOk();
         $response->assertSee('lifted from 68.50', false);
         $response->assertSee('Raw weighted evidence. This is what In-Term Status uses.', false);
@@ -73,7 +73,7 @@ class ComputedTransmutedClarityTest extends TestCase
         $this->score($section, $subject, $student, 'performance_task', 90);
         $this->score($section, $subject, $student, 'examination', 90);
 
-        $response = $this->actingAs($adviser)->get('/adviser/assessments?period=1&subject_id=' . $subject->id);
+        $response = $this->actingAs($adviser)->get('/adviser/verify-grades?period=1&subject_id=' . $subject->id);
         $response->assertOk();
         $response->assertDontSee('lifted from', false);
     }

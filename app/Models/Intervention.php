@@ -8,18 +8,45 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * Intervention
  * ------------
- * A Principal's decision on a DSS recommendation for one student. The
- * DSS recommends (recommended_type/recommendation_reason); the Principal
- * decides (status/principal_notes/decided_by/decided_at) — see
- * App\Services\InterventionRecommender for how a recommendation is
- * generated, and the migration's note for why status starts at
- * 'recommended' rather than any approved state.
+ * A Principal's decision for one learner, subject and term. The Principal
+ * chooses the type (recommended_type) from the evidence shown — nothing is
+ * pre-selected — and decides (status/principal_notes/decided_by/
+ * decided_at). An intervention recorded from an open Academic Concern
+ * links to it (academic_concern_id); it never resolves the concern. See the
+ * migration's note for why status can start at 'recommended' (a deferred
+ * decision) rather than an approved state.
  */
 class Intervention extends Model
 {
     use HasFactory;
 
-    public const STATUSES = ['recommended', 'in_review', 'approved', 'in_progress', 'completed', 'monitoring'];
+    public const STATUSES = ['recommended', 'in_review', 'approved', 'in_progress', 'completed', 'monitoring', 'expired', 'cancelled'];
+
+    /**
+     * Statuses the Principal's ordinary status edit may set. 'expired' and
+     * 'cancelled' are reached only through InterventionScheduleService (the
+     * expiry job, Cancel with a reason) and left only through its explicit
+     * transitions (Principal-approved extension / late-completion approval).
+     */
+    public const EDITABLE_STATUSES = ['in_review', 'approved', 'in_progress', 'completed', 'monitoring'];
+
+    public const STATUS_EXPIRED = 'expired';
+    public const STATUS_CANCELLED = 'cancelled';
+
+    /**
+     * Schedule lifecycle (2026-10-06) — DERIVED, never stored as its own
+     * column, from the decision status, the completion record, the persisted
+     * expiry/cancellation and the server clock. See lifecycle().
+     */
+    public const LIFECYCLE_LABELS = [
+        'awaiting_decision' => 'Awaiting decision',
+        'unscheduled'       => 'Schedule not set',
+        'scheduled'         => 'Scheduled',
+        'ongoing'           => 'Ongoing',
+        'completed'         => 'Completed',
+        'expired'           => 'Expired — Not completed',
+        'cancelled'         => 'Cancelled',
+    ];
 
     /** The status every intervention starts at — see awaitingDecision(). */
     public const STATUS_RECOMMENDED = 'recommended';
@@ -51,6 +78,40 @@ class Intervention extends Model
         'other',
     ];
 
+    /**
+     * Display wording for each stored type — the ONE map every screen reads
+     * (Intervention::typeLabel()). Stored values are unchanged:
+     *  - 'remediation' is not DepEd's post-term remediation (CLAUDE.md,
+     *    Known limitations), so it reads as within-term practice;
+     *  - 'attendance_monitoring' is RETIRED with attendance (2026-09-27):
+     *    kept only so an existing record still reads in words; it is not
+     *    in SELECTABLE_TYPES, so no new intervention can use it.
+     */
+    public const TYPE_LABELS = [
+        'remediation'                  => 'Additional Practice and Re-teaching',
+        'additional_learning_activity' => 'Additional Learning Activity',
+        'additional_performance_task'  => 'Additional Performance Task',
+        'teacher_monitoring'           => 'Teacher Monitoring',
+        'attendance_monitoring'        => 'Attendance Follow-up (retired)',
+        'parent_conference'            => 'Parent/Guardian Conference',
+        'other'                        => 'Other',
+    ];
+
+    /** Types a Principal can choose for a NEW intervention — every stored type but the retired one. */
+    public const SELECTABLE_TYPES = [
+        'remediation',
+        'additional_learning_activity',
+        'additional_performance_task',
+        'teacher_monitoring',
+        'parent_conference',
+        'other',
+    ];
+
+    public static function typeLabel(?string $type): string
+    {
+        return self::TYPE_LABELS[$type] ?? ucfirst(str_replace('_', ' ', (string) $type));
+    }
+
     /** The three recorded-reason labels that name a component, in match priority order — see extractNamedComponent(). */
     private const COMPONENT_LABELS = ['Written Work' => 'written_work', 'Performance Task' => 'performance_task', 'Examination' => 'examination'];
 
@@ -61,6 +122,7 @@ class Intervention extends Model
         'school_year',
         'section_id',
         'risk_result_id',
+        'academic_concern_id',
         'recommended_type',
         'recommendation_reason',
         'focus_component',
@@ -77,13 +139,120 @@ class Intervention extends Model
         'delivery_notes',
         'delivery_mode',
         'delivery_group_id',
+        // Scheduling (2026-10-06) — written only by InterventionScheduleService.
+        'title',
+        'instructions',
+        'completion_criteria',
+        'responsible_user_id',
+        'starts_at',
+        'deadline_at',
+        'completed_at',
+        'expired_at',
+        'expiry_processed_at',
+        'status_before_expiry',
+        'cancelled_at',
+        'cancelled_by',
+        'cancellation_reason',
+        'schedule_version',
     ];
 
     protected $casts = [
         'decided_at' => 'datetime',
         'acknowledged_at' => 'datetime',
         'delivered_at' => 'datetime',
+        'starts_at' => 'datetime',
+        'deadline_at' => 'datetime',
+        'completed_at' => 'datetime',
+        'expired_at' => 'datetime',
+        'expiry_processed_at' => 'datetime',
+        'cancelled_at' => 'datetime',
+        'schedule_version' => 'integer',
     ];
+
+    /**
+     * The schedule lifecycle at $now (server time), in this order:
+     *  cancelled → completed (a completion is recorded, or the Principal
+     *  closed it as completed) → awaiting_decision (an unapproved proposal is
+     *  never scheduled or expired) → expired (persisted, OR deadline passed
+     *  with no completion — shown even if the expiry job has not run yet) →
+     *  unscheduled (no deadline: legacy / not yet scheduled) → scheduled
+     *  (now < start) → ongoing (start <= now <= deadline).
+     * Boundary: completion AT the deadline is on time; expiry is now > deadline.
+     */
+    public function lifecycle(?\DateTimeInterface $now = null): string
+    {
+        $now = $now ? \Illuminate\Support\Carbon::instance($now) : now();
+
+        return match (true) {
+            $this->status === self::STATUS_CANCELLED => 'cancelled',
+            $this->delivered_at !== null || $this->completed_at !== null || $this->status === 'completed' => 'completed',
+            $this->awaitingDecision() => 'awaiting_decision',
+            $this->status === self::STATUS_EXPIRED => 'expired',
+            $this->deadline_at === null => 'unscheduled',
+            $now->greaterThan($this->deadline_at) => 'expired',
+            $this->starts_at !== null && $now->lessThan($this->starts_at) => 'scheduled',
+            default => 'ongoing',
+        };
+    }
+
+    /**
+     * The schedule status SHOWN on pages: lifecycle(), except that an
+     * UNSCHEDULED (legacy) record keeps reading "Schedule not set" even when an
+     * adviser delivery or a Principal closure exists — those are shown as what
+     * they are (delivery / decision), never relabelled as schedule completion.
+     */
+    public function scheduleState(?\DateTimeInterface $now = null): string
+    {
+        $state = $this->lifecycle($now);
+
+        return $state === 'completed' && !$this->isScheduled() ? 'unscheduled' : $state;
+    }
+
+    public function lifecycleLabel(?\DateTimeInterface $now = null): string
+    {
+        return self::LIFECYCLE_LABELS[$this->scheduleState($now)];
+    }
+
+    /** @var array<string, bool> */
+    private static array $schemaMemo = [];
+
+    /**
+     * Whether the scheduling migration (2026_10_06_000001) has been applied.
+     * New code may be served before the migration runs on a database; every
+     * scheduling page, query and the expiry command check this first and say
+     * "not available yet" instead of failing on a missing column/table.
+     */
+    public static function schedulingAvailable(): bool
+    {
+        return self::$schemaMemo['scheduling'] ??= \Illuminate\Support\Facades\Schema::hasTable('intervention_events')
+            && \Illuminate\Support\Facades\Schema::hasColumn('interventions', 'deadline_at');
+    }
+
+    /** True once the activity has a schedule (a deadline): completion then goes through the responsible staff, not adviser delivery. */
+    public function isScheduled(): bool
+    {
+        return $this->deadline_at !== null;
+    }
+
+    public function responsibleUser()
+    {
+        return $this->belongsTo(User::class, 'responsible_user_id');
+    }
+
+    public function cancelledBy()
+    {
+        return $this->belongsTo(User::class, 'cancelled_by');
+    }
+
+    public function scheduleRequests()
+    {
+        return $this->hasMany(InterventionRequest::class)->latest('id');
+    }
+
+    public function events()
+    {
+        return $this->hasMany(InterventionEvent::class)->orderBy('id');
+    }
 
     /**
      * "Multi-school-year academic history" work order, PART 12 — every
@@ -129,6 +298,16 @@ class Intervention extends Model
     public function riskResult()
     {
         return $this->belongsTo(RiskResult::class);
+    }
+
+    /**
+     * Phase 2E — the academic concern this intervention was recorded from,
+     * if any. Nullable: interventions recorded outside Academic Monitoring
+     * (and every intervention before Phase 2E) have none, and stay valid.
+     */
+    public function academicConcern()
+    {
+        return $this->belongsTo(AcademicConcern::class);
     }
 
     /**
@@ -331,9 +510,8 @@ class Intervention extends Model
      * falls back to re-deriving it from recommendation_reason text (for
      * any row created before that column existed and never backfilled),
      * then finally to recommended_type — a looser signal, since e.g.
-     * 'remediation' is also used by InterventionRecommender for a
-     * "Currently failing" reason that names no specific component, so
-     * this last fallback can guess wrong. Either way the adviser still
+     * 'remediation' can be chosen for a reason that names no specific
+     * component, so this last fallback can guess wrong. Either way the adviser still
      * explicitly picks the Component on the Add Assessment Item form —
      * this only saves them a click when the guess is right.
      */

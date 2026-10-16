@@ -33,6 +33,7 @@ use Tests\TestCase;
 class SubjectClassificationSafetyNetTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
 
     public function test_the_admin_form_cannot_create_a_grade_11_subject_with_no_subject_group(): void
     {
@@ -57,9 +58,10 @@ class SubjectClassificationSafetyNetTest extends TestCase
     public function test_assessment_upload_rejects_an_unknown_subject_id_rather_than_creating_one(): void
     {
         $adviser = User::factory()->create();
-        \App\Models\Section::factory()->create(['adviser_id' => $adviser->id]);
+        $section = \App\Models\Section::factory()->create(['adviser_id' => $adviser->id]);
 
-        $response = $this->actingAs($adviser)->post('/adviser/assessments/item', [
+        $response = $this->actingAs($adviser)->post(route('teacher.assessments.store'), [
+            'section_id'     => $section->id,
             'subject_id'     => 999999,
             'grading_period' => 1,
             'item_name'      => 'Quiz 1',

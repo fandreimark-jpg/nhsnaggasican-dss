@@ -37,10 +37,7 @@ class OverallAverageExcludesUnsubmittedTermsTest extends TestCase
 
         // Only Terms 1 and 2 are submitted — Term 3 is verified but not final.
         foreach ([1, 2] as $term) {
-            ReportSubmission::create([
-                'section_id' => $section->id, 'submitted_by' => $section->adviser_id, 'grading_period' => $term,
-                'school_year' => '2026-2027', 'status' => 'submitted', 'submitted_at' => now(),
-            ]);
+            $this->submittedReport($section, $term);
         }
 
         return [$section, $student];
@@ -80,10 +77,7 @@ class OverallAverageExcludesUnsubmittedTermsTest extends TestCase
                 'student_id' => $student->id, 'section_id' => $section->id,
                 'grading_period' => $term, 'grade' => $grade, 'school_year' => '2026-2027',
             ]);
-            ReportSubmission::create([
-                'section_id' => $section->id, 'submitted_by' => $section->adviser_id, 'grading_period' => $term,
-                'school_year' => '2026-2027', 'status' => 'submitted', 'submitted_at' => now(),
-            ]);
+            $this->submittedReport($section, $term);
         }
 
         $admin = User::factory()->admin()->create();

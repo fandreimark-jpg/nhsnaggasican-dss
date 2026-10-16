@@ -81,7 +81,7 @@ class WithinTermProgressDisplayTest extends TestCase
         $adviserResponse->assertSee('Performance Task');
         $adviserResponse->assertSee('Before: 8/20 (40.0%), 1 item', false);
         $adviserResponse->assertSee('Now: 46/60 (76.7%), 3 items', false);
-        $adviserResponse->assertSee('Change: +36.7 points', false);
+        $adviserResponse->assertSee('Change: +36.7 percentage points', false);
         $adviserResponse->assertDontSee('caused', false);
         $adviserResponse->assertSee('added to the term', false);
 
@@ -90,7 +90,7 @@ class WithinTermProgressDisplayTest extends TestCase
         $principalResponse->assertSee('Performance Task');
         $principalResponse->assertSee('Before: 8/20 (40.0%), 1 item', false);
         $principalResponse->assertSee('Now: 46/60 (76.7%), 3 items', false);
-        $principalResponse->assertSee('Change: +36.7 points', false);
+        $principalResponse->assertSee('Change: +36.7 percentage points', false);
         $principalResponse->assertSee('Gave an additional performance task.');
         $principalResponse->assertSee('added to the term', false);
     }

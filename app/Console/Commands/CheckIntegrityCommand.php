@@ -46,7 +46,7 @@ class CheckIntegrityCommand extends Command
             foreach (AcademicTerm::staleRiskTerms($schoolYear) as $term) {
                 $count = RiskResult::where('school_year', $schoolYear)->where('grading_period', $term)->count();
                 $findings[] = [
-                    'Risk results with no surviving grades',
+                    'Legacy (archived) risk_results with no surviving grades',
                     "{$count} row(s) — school year {$schoolYear}, Term {$term}",
                     'php artisan dss:truncate --level=academic',
                 ];
@@ -104,6 +104,63 @@ class CheckIntegrityCommand extends Command
             ];
         }
 
+        // 4d. A current section whose adviser account no longer has the
+        // Adviser role (e.g. the account was later changed to Subject
+        // Teacher): advisory pages need role:adviser, so nobody can open
+        // that section's advisory view or verify its grades. Reported, never
+        // reassigned automatically — Admin > Sections decides.
+        $activeYear = \App\Models\Section::activeSchoolYear();
+        $strandedSections = DB::table('sections')->join('users', 'users.id', '=', 'sections.adviser_id')
+            ->where('users.role', '!=', 'adviser')
+            ->when($activeYear, fn($q) => $q->where('sections.school_year', '>=', $activeYear))
+            ->get(['sections.name', 'sections.school_year', 'users.role']);
+        if ($strandedSections->isNotEmpty()) {
+            $findings[] = [
+                'Current sections whose adviser account is not an Adviser',
+                $strandedSections->map(fn($s) => $s->name . ' (' . $s->school_year . ', account role: ' . $s->role . ')')->join('; '),
+                'Admin > Sections: assign an Adviser account to the section (or restore the account\'s Adviser role on Admin > Users).',
+            ];
+        }
+
+        // 4e. Current teaching assignments held by an account that cannot
+        // teach (admin/principal) or is disabled: no one can encode that class.
+        $strandedAssignments = DB::table('teaching_assignments')->join('users', 'users.id', '=', 'teaching_assignments.user_id')
+            ->where(fn($q) => $q->whereNotIn('users.role', ['adviser', 'subject_teacher'])->orWhere('users.is_active', false))
+            ->when($activeYear, fn($q) => $q->where('teaching_assignments.school_year', '>=', $activeYear))
+            ->count();
+        if ($strandedAssignments > 0) {
+            $findings[] = [
+                'Current teaching assignments held by an account that cannot teach (wrong role or disabled)',
+                "{$strandedAssignments} row(s)",
+                'Admin > Teaching Assignments: Edit / Change Teacher.',
+            ];
+        }
+
+        // 4f. Grading blockers in existing data (GradingEngine computes no
+        // Examination figure / no grade for these; nothing is deleted here).
+        $duplicateExamTypes = DB::table('assessments')->join('sections', 'sections.id', '=', 'assessments.section_id')
+            ->join('subjects', 'subjects.id', '=', 'assessments.subject_id')
+            ->where('assessments.component', 'examination')->whereNotNull('assessments.exam_role')->where('assessments.is_additional_support', false)
+            ->groupBy('sections.name', 'subjects.name', 'assessments.school_year', 'assessments.grading_period', 'assessments.exam_role')
+            ->havingRaw('COUNT(*) > 1')
+            ->get(['sections.name as section', 'subjects.name as subject', 'assessments.school_year', 'assessments.grading_period', 'assessments.exam_role', DB::raw('COUNT(*) as n')]);
+        if ($duplicateExamTypes->isNotEmpty()) {
+            $findings[] = [
+                'Classes with more than one regular item of one Examination Type (no Examination figure is computed)',
+                $duplicateExamTypes->map(fn($d) => "{$d->section} / {$d->subject} ({$d->school_year}, Term {$d->grading_period}): {$d->n} × " . \App\Services\ExaminationRoles::label($d->exam_role))->join('; '),
+                'Class Record: Edit the extra item to its correct Examination Type (Edit Assessment).',
+            ];
+        }
+        $unconfigured = DB::table('subjects')->join('deped_subject_catalog', 'deped_subject_catalog.id', '=', 'subjects.catalog_id')
+            ->where('deped_subject_catalog.teacher_supplied', true)->pluck('subjects.name');
+        if ($unconfigured->isNotEmpty()) {
+            $findings[] = [
+                'Subjects linked to the "Other elective / special curricular program" row (no configured weights, so no grade is computed)',
+                $unconfigured->join('; '),
+                'Admin > Subjects: link each to its own DepEd catalog subject, or record the school\'s decision on its weights.',
+            ];
+        }
+
         // 4c. Academic concerns out of step with the current evidence — a
         // dry run of the monitoring rules, so nothing is written. Guarded:
         // this command must keep working on a database where the
@@ -114,6 +171,7 @@ class CheckIntegrityCommand extends Command
                 ->join('assessments', 'assessments.id', '=', 'assessment_learner_statuses.assessment_id')
                 ->select('assessments.school_year', 'assessments.grading_period')
                 ->union(DB::table('academic_concerns')->where('status', 'open')->select('school_year', 'grading_period'))
+                ->union(DB::table('grades')->where('is_verified', true)->select('school_year', 'grading_period'))
                 ->get()
                 ->unique(fn($row) => $row->school_year . '|' . $row->grading_period);
 

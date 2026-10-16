@@ -58,6 +58,14 @@ window.initInterventionDelivery = function (rowSelector) {
         if (form) form.requestSubmit();
     });
 
+    // With JS present the blank-note check below gives its own clear
+    // message (the native "required" bubble is easy to miss and lets a
+    // whitespace-only note through). Without JS, "required" still applies
+    // and the server's own validation stays authoritative either way.
+    document.querySelectorAll(formSelector).forEach(function (form) {
+        form.noValidate = true;
+    });
+
     document.addEventListener("submit", function (e) {
         if (!e.target.matches(formSelector)) return;
         e.preventDefault();
@@ -65,10 +73,43 @@ window.initInterventionDelivery = function (rowSelector) {
     });
 };
 
+function showDeliverError(form, message) {
+    const box = form.querySelector("[data-deliver-error]");
+    if (box) {
+        box.textContent = message;
+        box.classList.remove("hidden");
+    }
+    window.showToast(message, "error");
+}
+
+function clearDeliverError(form) {
+    const box = form.querySelector("[data-deliver-error]");
+    if (box) {
+        box.textContent = "";
+        box.classList.add("hidden");
+    }
+}
+
 function submitDeliverForm(form, rowSelector) {
     const submitBtn = form.querySelector("[data-deliver-submit]");
+    const textarea = form.querySelector("[data-deliver-textarea]");
     const csrfMeta = document.querySelector('meta[name="csrf-token"]');
-    if (submitBtn) submitBtn.disabled = true;
+
+    // Already saving this row — a second click must not send a second POST.
+    if (submitBtn && submitBtn.disabled) return;
+
+    clearDeliverError(form);
+    if (!textarea || textarea.value.trim() === "") {
+        showDeliverError(form, "Write what was actually provided to the learner before confirming delivery.");
+        if (textarea) textarea.focus();
+        return;
+    }
+
+    const originalLabel = submitBtn ? submitBtn.innerHTML : "";
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = submitBtn.dataset.loadingLabel || "Saving delivery…";
+    }
 
     fetch(form.action, {
         method: "POST",
@@ -80,6 +121,9 @@ function submitDeliverForm(form, rowSelector) {
     })
         .then(function (response) {
             return response.json().catch(() => null).then(function (data) {
+                if (response.status === 419) {
+                    throw new Error("Your session has expired. Copy your note, reload the page and try again — the delivery was not saved.");
+                }
                 if (!response.ok || !data) {
                     throw new Error((data && data.message) || "Could not save this delivery note. Please try again.");
                 }
@@ -93,8 +137,12 @@ function submitDeliverForm(form, rowSelector) {
             focusNextUndeliveredRow(form);
         })
         .catch(function (err) {
-            window.showToast(err.message, "error");
-            if (submitBtn) submitBtn.disabled = false;
+            // The typed note is left exactly as it was, so nothing is lost.
+            showDeliverError(form, err.message || "Could not save this delivery note. Please try again.");
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalLabel;
+            }
         });
 }
 
@@ -105,8 +153,11 @@ function applyDeliveredToRow(form, data) {
     const cell = form.closest("td");
     if (!cell) return;
 
+    // The server decides the destination (Add Assessment for the assigned
+    // teacher, else the read-only Class Record) and its fixed label.
+    const escapeAttr = (v) => String(v).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
     const addItemHtml = data.add_assessment_item_url
-        ? `<a href="${data.add_assessment_item_url}" class="inline-flex items-center gap-1 text-brand-700 border border-brand-200 rounded px-2 py-1 hover:bg-brand-50 mt-1"><i class="bi bi-plus-circle"></i> Add Assessment Item</a>`
+        ? `<a href="${escapeAttr(data.add_assessment_item_url)}" class="inline-flex items-center gap-1 text-brand-700 border border-brand-200 rounded px-2 py-1 hover:bg-brand-50 mt-1"><i class="bi bi-plus-circle"></i> ${escapeAttr(data.add_assessment_item_label || "Open Class Record")}</a>`
         : "";
 
     cell.innerHTML =

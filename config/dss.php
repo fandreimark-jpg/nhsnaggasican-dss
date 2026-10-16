@@ -29,6 +29,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Password for accounts created by `php artisan db:seed`
+    |--------------------------------------------------------------------------
+    |
+    | Final release pass (2026-09-27). Database\Seeders\DatabaseSeeder uses
+    | this ONLY for accounts it has to create; existing accounts are never
+    | touched. Unset in production => the seeder refuses (no known default
+    | password can ever reach a deployed database). Unset locally => a
+    | one-time random password is generated and shown on the console.
+    | Minimum 12 characters. Never commit a value.
+    |
+    */
+    'seed_account_password' => env('SEED_ACCOUNT_PASSWORD'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Enabled academic monitoring rules
     |--------------------------------------------------------------------------
     |
@@ -36,16 +51,23 @@ return [
     | App\Services\AcademicMonitoringService runs. Each must implement
     | App\Monitoring\MonitoringRule and must be school-approved.
     |
-    | EXPLICIT_MISSING_REQUIREMENT is the only approved rule: it needs no
-    | numeric threshold (the adviser explicitly recorded Missing). A rule
-    | that needs a component target, a count of Missing items, a decline or
-    | an attendance figure must not be added here until the school has
-    | approved that figure. Deliberately not an env setting: enabling a
+    | Neither enabled rule introduces a new threshold:
+    |   EXPLICIT_MISSING_REQUIREMENT   — the adviser marked an item Missing.
+    |   OFFICIAL_FAILING_SUBJECT_GRADE — a subject's OFFICIAL grade is
+    |       Failing by the app's existing rule (Grade::scopeFailing(),
+    |       DepEd's failing mark). Evaluated per subject, so the overall
+    |       average never hides it ("Subject Performance Concern").
+    | Attendance was RETIRED (2026-09-27): no approved basis for using it.
+    | Its stored rows are history only (AcademicConcern::scopeActiveRules()).
+    | An in-term (ongoing) numeric trigger, a count of Missing items, a
+    | decline or an attendance figure must not be added here until the
+    | school has approved it. Deliberately not an env setting: enabling a
     | rule is a reviewed code change, not a deployment toggle.
     |
     */
     'monitoring_rules' => [
         \App\Monitoring\Rules\MissingRequirementRule::class,
+        \App\Monitoring\Rules\OfficialFailingSubjectRule::class,
     ],
 
 ];

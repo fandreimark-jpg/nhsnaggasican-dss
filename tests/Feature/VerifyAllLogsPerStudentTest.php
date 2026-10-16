@@ -25,6 +25,8 @@ use Tests\TestCase;
 class VerifyAllLogsPerStudentTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\SharesClassAssessments;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
 
     protected function setUp(): void
     {
@@ -43,11 +45,8 @@ class VerifyAllLogsPerStudentTest extends TestCase
         for ($i = 0; $i < 5; $i++) {
             $student = Student::factory()->create(['section_id' => $section->id]);
             foreach (['written_work' => 84, 'performance_task' => 60, 'examination' => 70] as $component => $earned) {
-                $assessment = Assessment::factory()->create([
-                    'subject_id' => $subject->id, 'section_id' => $section->id,
-                    'grading_period' => 1, 'school_year' => $section->school_year,
-                    'name' => $component . '-' . uniqid(), 'component' => $component, 'max_score' => 100,
-                ]);
+                // One shared column per component, as in a real class record.
+                $assessment = $this->sharedAssessment($section, $subject, $student, $component, 100);
                 AssessmentScore::factory()->create(['assessment_id' => $assessment->id, 'student_id' => $student->id, 'score' => $earned]);
             }
             $students->push($student);

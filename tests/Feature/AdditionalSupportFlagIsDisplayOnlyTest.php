@@ -56,8 +56,11 @@ class AdditionalSupportFlagIsDisplayOnlyTest extends TestCase
         $studentA = Student::factory()->create(['section_id' => $section->id]);
         [$gradeA] = $this->buildScenario($section, $subject, $studentA, false);
 
-        $studentB = Student::factory()->create(['section_id' => $section->id]);
-        [$gradeB] = $this->buildScenario($section, $subject, $studentB, true);
+        // Its own class: every item of a class applies to every learner in it
+        // (workbook N14, D1 2026-10-04), so the two scenarios must not share one.
+        $sectionB = Section::factory()->create(['grade_level' => 12, 'school_year' => '2026-2027']);
+        $studentB = Student::factory()->create(['section_id' => $sectionB->id]);
+        [$gradeB] = $this->buildScenario($sectionB, $subject, $studentB, true);
 
         $this->assertSame($gradeA['computed_grade'], $gradeB['computed_grade']);
         $this->assertSame($gradeA['transmuted_grade'], $gradeB['transmuted_grade']);
@@ -72,8 +75,9 @@ class AdditionalSupportFlagIsDisplayOnlyTest extends TestCase
         $studentA = Student::factory()->create(['section_id' => $section->id]);
         [, $statusA] = $this->buildScenario($section, $subject, $studentA, false);
 
-        $studentB = Student::factory()->create(['section_id' => $section->id]);
-        [, $statusB] = $this->buildScenario($section, $subject, $studentB, true);
+        $sectionB = Section::factory()->create(['grade_level' => 12, 'school_year' => '2026-2027']);
+        $studentB = Student::factory()->create(['section_id' => $sectionB->id]);
+        [, $statusB] = $this->buildScenario($sectionB, $subject, $studentB, true);
 
         $this->assertSame($statusA['status'], $statusB['status']);
         $this->assertSame($statusA['components_below_target'], $statusB['components_below_target']);

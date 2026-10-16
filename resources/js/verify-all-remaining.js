@@ -1,183 +1,147 @@
 // resources/js/verify-all-remaining.js
 //
-// "Verify All Remaining" (adviser/assessments.blade.php) — safe to run in
-// bulk because it is a mechanical transformation with no per-student
-// claim (see Adviser\GradeController::verifyOneGrade()'s docblock): the
-// same computed-grade-to-official-grade transmutation for everyone.
-// Mark as Delivered stays individual-only; nothing here changes that.
+// "Verify all eligible" on Verify Grades (adviser/verify-grades.blade.php).
+// Scope (unchanged server behaviour): EVERY learner of the adviser's section
+// who is eligible in the selected subject and term — the Status filter and
+// the visible rows do not narrow it (Adviser\GradeController::
+// classifyForVerifyAll()).
 //
-// Flow: on load, fetch the read-only preview to enable/disable the
-// button and know the eligible count. On click, re-fetch the preview
-// (state may have changed) and show a confirmation dialog naming the
-// exact count, subject/section/term, and every excluded student grouped
-// by reason. Only on Confirm does anything get written — a single
-// POST that the server re-classifies and executes inside one
-// transaction, never trusting a client-held eligible list.
+// Flow: on click, fetch the read-only preview and show the exact scope —
+// subject, section, school year, term, count, every included and every
+// excluded learner. Only Confirm writes: one POST carrying the learner ids
+// the adviser just saw. The server re-classifies under a lock and, if its
+// set differs from the confirmed one, verifies nothing and answers 409; the
+// dialog then refreshes from a new preview instead of silently expanding.
+// Success is shown only after the server confirms, then the page reloads so
+// every row, count and label reflects the stored grades.
+const FLASH_KEY = "verify-grades-flash";
+
 window.initVerifyAllRemaining = function (buttonSelector) {
+    // A message carried across the reload that follows a successful batch.
+    try {
+        const flash = sessionStorage.getItem(FLASH_KEY);
+        if (flash) {
+            sessionStorage.removeItem(FLASH_KEY);
+            window.showToast(flash, "success");
+        }
+    } catch (e) { /* storage unavailable: nothing to show */ }
+
     const btn = document.querySelector(buttonSelector);
     if (!btn) return;
 
     const previewUrl = btn.dataset.previewUrl;
     const verifyUrl = btn.dataset.verifyUrl;
-    const label = btn.querySelector("[data-var-btn-label]");
-
-    refreshButtonState();
+    const confirmBtn = document.getElementById("varConfirmBtn");
+    let confirmedIds = null;
+    let pending = false;
 
     btn.addEventListener("click", function () {
         if (btn.disabled) return;
-        openConfirmationDialog();
+        loadPreview(null);
     });
+    confirmBtn?.addEventListener("click", execute);
 
-    document.getElementById("varConfirmBtn")?.addEventListener("click", executeVerifyAll);
-
-    // "Decision flow, report scoping, and dashboard pass" TASK 3b — the
-    // count is shown on the button itself, not only inside the preview
-    // dialog, so an adviser scanning the sticky header already knows how
-    // many are left without opening anything.
-    function setLabel(text) {
-        if (label) {
-            label.textContent = text;
-        }
-    }
-
-    function refreshButtonState() {
-        fetch(previewUrl, { headers: { Accept: "application/json" } })
-            .then((r) => r.json())
+    function loadPreview(changedMessage) {
+        btn.disabled = true;
+        fetch(previewUrl, { headers: { Accept: "application/json" }, credentials: "same-origin" })
+            .then((r) => (r.ok ? r.json() : Promise.reject()))
             .then((data) => {
                 btn.disabled = data.eligible_count === 0;
-                btn.dataset.lastPreview = JSON.stringify(data);
-                setLabel(data.eligible_count === 0 ? "All grades verified" : "Verify All Remaining (" + data.eligible_count + ")");
-            })
-            .catch(() => {
-                btn.disabled = true;
-                setLabel("Verify All Remaining");
-            });
-    }
-
-    function openConfirmationDialog() {
-        fetch(previewUrl, { headers: { Accept: "application/json" } })
-            .then((r) => r.json())
-            .then((data) => {
                 if (data.eligible_count === 0) {
-                    btn.disabled = true;
-                    window.showToast("Nothing left to verify for this subject and term.", "error");
+                    window.hideModal("verifyAllRemainingModal");
+                    window.showToast(changedMessage || "No learner is eligible to verify in this subject and term.", "error");
                     return;
                 }
-                populateDialog(data);
+                populate(data, changedMessage);
                 window.showModal("verifyAllRemainingModal");
             })
             .catch(() => {
+                btn.disabled = false;
                 window.showToast("Could not check who is eligible. Please try again.", "error");
             });
     }
 
-    function populateDialog(data) {
-        document.getElementById("varTitle").textContent = "Verify " + data.eligible_count + " student" + (data.eligible_count === 1 ? "" : "s") + "?";
-        document.getElementById("varContext").textContent = data.subject_name + " — " + data.section_name + ", Term " + data.grading_period;
+    function fillList(el, names) {
+        el.innerHTML = "";
+        names.forEach(function (name) {
+            const li = document.createElement("li");
+            li.textContent = name;
+            el.appendChild(li);
+        });
+    }
 
-        const groups = [
+    function populate(data, changedMessage) {
+        confirmedIds = data.eligible_student_ids || [];
+        const n = data.eligible_count;
+        document.getElementById("varTitle").textContent = "Verify " + n + " eligible learner" + (n === 1 ? "" : "s") + "?";
+        document.getElementById("varContext").textContent =
+            data.subject_name + " — " + data.section_name + ", Term " + data.grading_period + ", SY " + data.school_year;
+        fillList(document.getElementById("varIncluded"), data.eligible_names || []);
+
+        const changed = document.getElementById("varChanged");
+        changed.textContent = changedMessage || "";
+        changed.classList.toggle("hidden", !changedMessage);
+
+        let anyExcluded = false;
+        [
             ["varExcludedAlreadyEncoded", data.excluded.already_encoded],
             ["varExcludedIncomplete", data.excluded.incomplete_evidence],
             ["varExcludedNoTransmutation", data.excluded.no_transmutation],
-        ];
-
-        let anyExcluded = false;
-        groups.forEach(function ([elId, names]) {
-            const el = document.getElementById(elId);
-            const list = el.querySelector("[data-name-list]");
-            list.innerHTML = "";
-            if (names.length > 0) {
-                anyExcluded = true;
-                names.forEach(function (name) {
-                    const li = document.createElement("li");
-                    li.textContent = name;
-                    list.appendChild(li);
-                });
-                el.hidden = false;
-            } else {
-                el.hidden = true;
-            }
+        ].forEach(function ([id, names]) {
+            const el = document.getElementById(id);
+            fillList(el.querySelector("[data-name-list]"), names);
+            el.classList.toggle("hidden", names.length === 0);
+            anyExcluded = anyExcluded || names.length > 0;
         });
+        document.getElementById("varExcludedWrap").classList.toggle("hidden", !anyExcluded);
 
-        document.getElementById("varExcludedWrap").hidden = !anyExcluded;
-
-        const confirmBtn = document.getElementById("varConfirmBtn");
         confirmBtn.disabled = false;
-        confirmBtn.textContent = "Verify " + data.eligible_count + " student" + (data.eligible_count === 1 ? "" : "s");
-        confirmBtn.dataset.subjectId = btn.dataset.subjectId;
-        confirmBtn.dataset.gradingPeriod = btn.dataset.gradingPeriod;
+        confirmBtn.textContent = "Verify " + n + " learner" + (n === 1 ? "" : "s");
     }
 
-    function executeVerifyAll() {
-        const confirmBtn = document.getElementById("varConfirmBtn");
-        const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    function execute() {
+        if (pending || !confirmedIds) return;
+        pending = true;
+        const original = confirmBtn.textContent;
         confirmBtn.disabled = true;
-        const originalLabel = confirmBtn.textContent;
+        confirmBtn.setAttribute("aria-busy", "true");
         confirmBtn.textContent = "Verifying...";
 
         const body = new FormData();
-        body.append("subject_id", confirmBtn.dataset.subjectId);
-        body.append("grading_period", confirmBtn.dataset.gradingPeriod);
+        body.append("subject_id", btn.dataset.subjectId);
+        body.append("grading_period", btn.dataset.gradingPeriod);
+        confirmedIds.forEach((id) => body.append("expected_student_ids[]", id));
+        const csrf = document.querySelector('meta[name="csrf-token"]');
 
         fetch(verifyUrl, {
             method: "POST",
-            headers: {
-                "X-CSRF-TOKEN": csrfMeta ? csrfMeta.content : "",
-                Accept: "application/json",
-            },
+            credentials: "same-origin",
+            headers: { "X-CSRF-TOKEN": csrf ? csrf.content : "", Accept: "application/json" },
             body: body,
         })
-            .then(function (response) {
-                return response.json().catch(() => null).then(function (data) {
-                    if (!response.ok || !data) {
-                        throw new Error((data && data.message) || "Verification failed. Please try again.");
-                    }
-                    return data;
-                });
-            })
-            .then(function (data) {
-                window.hideModal("verifyAllRemainingModal");
-                window.showToast(data.message, "success");
-                (data.verified || []).forEach(applyVerifiedRow);
-                refreshButtonState();
-            })
-            .catch(function (err) {
-                window.showToast(err.message, "error");
+            .then((response) => response.json().catch(() => null).then((data) => ({ response, data })))
+            .then(({ response, data }) => {
+                if (response.ok && data) {
+                    try { sessionStorage.setItem(FLASH_KEY, data.message); } catch (e) { /* ignore */ }
+                    window.location.reload();
+                    return;
+                }
+                pending = false;
+                confirmBtn.removeAttribute("aria-busy");
+                if (response.status === 409 && data && data.changed) {
+                    loadPreview(data.message);
+                    return;
+                }
                 confirmBtn.disabled = false;
-                confirmBtn.textContent = originalLabel;
+                confirmBtn.textContent = original;
+                window.showToast((data && data.message) || "Verification failed. Nothing was saved.", "error");
+            })
+            .catch(() => {
+                pending = false;
+                confirmBtn.removeAttribute("aria-busy");
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = original;
+                window.showToast("Could not reach the server. Nothing was verified — try again.", "error");
             });
-    }
-
-    // Rebuilds the cell exactly like grade-verify.js's applyVerifiedGradeToRow()
-    // does for the single-verify path: the grade + badges, PLUS a fresh
-    // re-submit form — the individual "Verify & Use as Official" action
-    // stays available afterward for a later correction, one student at a
-    // time (see Adviser\GradeController::verifyOneGrade()'s docblock on
-    // why overwriting an existing official grade must stay individual).
-    function applyVerifiedRow(row) {
-        const tr = document.querySelector('[data-performance-row][data-student-id="' + row.student_id + '"]');
-        if (!tr) return;
-        const cell = tr.querySelector("[data-official-grade-cell]");
-        if (!cell) return;
-
-        const existingForm = cell.querySelector("[data-grade-verify-form]");
-        if (!existingForm) return;
-
-        const failingNote = row.is_failing
-            ? '<span class="block text-[10px] font-bold text-red-700"><i class="bi bi-x-octagon-fill"></i> Failing</span>'
-            : "";
-        const grade = Number(row.official_grade).toFixed(2);
-        const hiddenInputs = Array.from(existingForm.querySelectorAll('input[type="hidden"]'))
-            .map((el) => el.outerHTML)
-            .join("");
-
-        cell.innerHTML =
-            `<span class="font-medium text-gray-700">${grade}</span>` +
-            `<span class="block text-[10px] text-green-600"><i class="bi bi-check-circle-fill"></i> Verified from evidence</span>` +
-            failingNote +
-            `<form method="POST" action="${existingForm.action}" class="mt-1" data-grade-verify-form data-resubmit="${existingForm.getAttribute('data-resubmit')}">` +
-            hiddenInputs +
-            `<button type="submit" class="text-xs text-brand-700 underline hover:text-brand-900">Verify &amp; Use as Official</button>` +
-            `</form>`;
     }
 };

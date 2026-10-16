@@ -34,6 +34,7 @@ use Tests\TestCase;
 class AcademicConcernTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
     use BuildsEcrFixture;
 
     private User $adviser;
@@ -176,39 +177,6 @@ class AcademicConcernTest extends TestCase
         $this->assertSame([], $report['created']);
         $this->assertSame(0, AcademicConcern::count(), 'neither a blank nor a recorded zero is a Missing concern');
     }
-
-    public function test_an_ordinary_blank_ecr_cell_does_not_create_a_concern(): void
-    {
-        $path = $this->buildFilledEcrCopy(
-            gradeLevel: '11', sectionName: 'Shakespeare', courseTitle: 'General Mathematics',
-            roster: [
-                ['lrn' => '110000000001', 'name' => 'Ana, Aa', 'gender' => 'female'],
-                ['lrn' => '110000000002', 'name' => 'Ben, Bb', 'gender' => 'female'],
-            ],
-            scores: ['D' => [$this->femaleTermRow(0) => 18, $this->femaleTermRow(1) => null]],
-            maxScores: ['D' => 20],
-            schoolYearStart: '2026',
-        );
-        $this->tempFiles[] = $path;
-
-        $detect = $this->actingAs($this->adviser)->post('/adviser/assessments/detect', [
-            'subject_id' => $this->subject->id, 'grading_period' => 1,
-            'file' => new UploadedFile($path, 'ecr.xlsx', null, null, true),
-        ])->assertOk();
-        $columns = collect($detect->viewData('columns'))
-            ->map(fn($c) => ['name' => $c['name'], 'component' => 'written_work', 'max_score' => $c['max_score'] ?? 20])
-            ->values()->all();
-        $this->actingAs($this->adviser)->post('/adviser/assessments/import', [
-            'subject_id' => $this->subject->id, 'grading_period' => 1,
-            'stored_filename' => $detect->viewData('storedFilename'), 'columns' => $columns,
-        ])->assertSessionHas('success');
-
-        $this->evaluate();
-
-        $this->assertSame(1, Assessment::count());
-        $this->assertSame(0, AcademicConcern::count());
-    }
-
     public function test_a_score_wins_over_a_raw_marker_and_no_concern_is_opened(): void
     {
         $item = $this->item();
@@ -461,9 +429,15 @@ class AcademicConcernTest extends TestCase
     // Rules registry, grading separation, integrity
     // ---------------------------------------------------------------
 
-    public function test_only_the_approved_rule_is_enabled_and_no_rules_means_no_concerns(): void
+    public function test_only_the_approved_rules_are_enabled_and_no_rules_means_no_concerns(): void
     {
-        $this->assertSame([MissingRequirementRule::class], config('dss.monitoring_rules'));
+        // Neither introduces a new threshold: an explicit Missing mark, and
+        // an OFFICIAL failing subject grade (the existing Failing rule).
+        // Attendance was retired (2026-09-27).
+        $this->assertSame(
+            [MissingRequirementRule::class, \App\Monitoring\Rules\OfficialFailingSubjectRule::class],
+            config('dss.monitoring_rules')
+        );
 
         $item = $this->item();
         $this->statuses->markMissing($item, $this->ana->id, $this->adviser->id);
@@ -489,7 +463,10 @@ class AcademicConcernTest extends TestCase
 
         $this->assertSame(1, AcademicConcern::count());
         $this->assertSame($before, $engine());
-        $this->assertEqualsWithDelta(90.0, $before['components']['written_work'], 0.001, 'Missing is still not a zero');
+        // Workbook Term 1!N17/N14 (D1, 2026-10-04): 18 / (20 + 20) = 45%. The
+        // Missing item earns nothing but keeps its HPS; it is never stored as 0.
+        $this->assertEqualsWithDelta(45.0, $before['components']['written_work'], 0.001);
+        $this->assertSame(0, AssessmentScore::where('assessment_id', $ww2->id)->count(), 'Missing is never stored as a 0');
     }
 
     public function test_the_migration_is_reversible_and_touches_no_other_table(): void

@@ -156,6 +156,6 @@ class AdviserInterventionDeliveryTest extends TestCase
         $response->assertOk();
         $response->assertSee('Extra performance task given and reviewed.');
         $response->assertSee('Delivered by');
-        $response->assertSee('Ack. by');
+        $response->assertSee('Acknowledged by'); // label spelled out 2026-10-06 (was "Ack. by")
     }
 }

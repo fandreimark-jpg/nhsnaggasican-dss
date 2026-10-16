@@ -33,7 +33,9 @@ return [
         'local' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),
-            'serve' => true,
+            // No signed temporary URLs are used; off removes the public
+            // storage/{path} GET/PUT routes (pre-demo audit 2026-10-06).
+            'serve' => false,
             'throw' => false,
             'report' => false,
         ],

@@ -73,7 +73,7 @@ class StudentsImport implements ToModel, WithHeadingRow, WithValidation, SkipsOn
             'lrn'         => (string) $row['lrn'],
             'last_name'   => trim($row['last_name']),
             'first_name'  => trim($row['first_name']),
-            'middle_name' => $row['middle_name'] ?? null,
+            'middle_name' => trim((string) ($row['middle_name'] ?? '')) ?: null,
             'gender'      => strtolower(trim($row['gender'])),
             'section_id'  => $this->sectionId, // forced — parehong security measure sa manual add
         ]);
@@ -100,8 +100,17 @@ class StudentsImport implements ToModel, WithHeadingRow, WithValidation, SkipsOn
             '*.lrn'         => ['required', 'digits:12', 'unique:students,lrn'],
             '*.last_name'   => ['required', 'string', 'max:255'],
             '*.first_name'  => ['required', 'string', 'max:255'],
+            // Same as the manual Add Student form; without it an over-long
+            // value reached MySQL and failed the whole insert batch.
+            '*.middle_name' => ['nullable', 'string', 'max:255'],
             '*.gender'      => ['required', 'in:male,female,Male,Female,MALE,FEMALE'],
         ];
+    }
+
+    /** Stray spaces around a cell ("Female ", " 1234…") are not a reason to reject the row. */
+    public function prepareForValidation($data, $index)
+    {
+        return array_map(fn($v) => is_string($v) ? trim($v) : $v, $data);
     }
 
     public function customValidationMessages()

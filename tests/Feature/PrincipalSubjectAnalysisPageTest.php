@@ -28,7 +28,8 @@ class PrincipalSubjectAnalysisPageTest extends TestCase
         $response->assertSee('Section');
         $response->assertSee('Narra');
         $response->assertSee('Failure Rate');
-        $response->assertSee('At-Risk Count');
+        $response->assertSee('Open Concerns');
+        $response->assertDontSee('At-Risk Count');
     }
 
     public function test_section_filter_is_accepted_via_query_string(): void

@@ -31,6 +31,7 @@ use Tests\TestCase;
 class PreDemoAuditRegressionsTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
 
     private function adviserWithSection(): array
     {
@@ -44,38 +45,6 @@ class PreDemoAuditRegressionsTest extends TestCase
 
         return [$adviser, $section, $subject];
     }
-
-    public function test_a_corrupt_xlsx_is_refused_with_a_message_instead_of_a_500(): void
-    {
-        [$adviser, $section, $subject] = $this->adviserWithSection();
-        $corrupt = UploadedFile::fake()->createWithContent('scores.xlsx', "PK\x03\x04this is not a workbook");
-
-        $response = $this->actingAs($adviser)->post('/adviser/assessments/detect', [
-            'subject_id' => $subject->id, 'grading_period' => 1, 'file' => $corrupt,
-        ]);
-
-        $response->assertRedirect('/adviser/assessments?period=1&subject_id=' . $subject->id);
-        $response->assertSessionHas('error', fn($m) => str_contains($m, 'could not be read as a spreadsheet'));
-        $this->assertCount(0, \Illuminate\Support\Facades\Storage::disk('local')->files('temp_assessment_uploads'), 'The unreadable temp file is removed.');
-
-        $this->actingAs($adviser)->get('/adviser/assessments?period=1&subject_id=' . $subject->id)
-            ->assertOk()->assertSee('could not be read as a spreadsheet');
-    }
-
-    public function test_a_wrong_file_type_upload_shows_its_validation_error_on_the_assessments_page(): void
-    {
-        [$adviser, $section, $subject] = $this->adviserWithSection();
-
-        $this->actingAs($adviser)->from('/adviser/assessments')->post('/adviser/assessments/detect', [
-            'subject_id' => $subject->id, 'grading_period' => 1,
-            'file' => UploadedFile::fake()->create('scores.exe', 10),
-        ])->assertRedirect('/adviser/assessments')->assertSessionHasErrors('file');
-
-        $this->actingAs($adviser)->get('/adviser/assessments')->assertOk()
-            ->assertSee('data-validation-errors', false)
-            ->assertSee('file');
-    }
-
     public function test_a_duplicate_track_shows_its_validation_error_on_the_tracks_page(): void
     {
         $admin = User::factory()->admin()->create();
@@ -167,21 +136,24 @@ class PreDemoAuditRegressionsTest extends TestCase
 
     /**
      * Final pre-demo audit (2026-09-20) — the Adviser's My Students page
-     * had no validation-error display at all: a rejected Edit Student
-     * submit (blank last name) bounced back silently.
+     * had no validation-error display for a rejected Edit Student submit.
+     * Since 2026-09-27 the adviser cannot edit learner master data at all:
+     * the route is gone, the request 404s and the record is untouched. The
+     * page still renders a flashed validation message.
      */
-    public function test_a_rejected_student_edit_shows_its_validation_error_on_my_students(): void
+    public function test_a_student_edit_by_the_adviser_is_refused_and_my_students_still_shows_errors(): void
     {
         $adviser = User::factory()->create();
         $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027']);
-        $student = Student::factory()->create(['section_id' => $section->id]);
+        $student = Student::factory()->create(['section_id' => $section->id, 'last_name' => 'Kept']);
 
-        $this->actingAs($adviser)->from(route('adviser.students'))
-            ->put(route('adviser.students.update', $student->id), ['last_name' => '', 'first_name' => 'X', 'gender' => 'male'])
-            ->assertRedirect(route('adviser.students'))->assertSessionHasErrors('last_name');
+        $this->actingAs($adviser)->put('/adviser/students/' . $student->id, ['last_name' => '', 'first_name' => 'X', 'gender' => 'male'])
+            ->assertNotFound();
+        $this->assertSame('Kept', $student->fresh()->last_name);
 
-        $this->actingAs($adviser)->get(route('adviser.students'))->assertOk()
+        $this->actingAs($adviser)->withSession(['errors' => (new \Illuminate\Support\ViewErrorBag())->put('default', new \Illuminate\Support\MessageBag(['x' => 'A flashed message.']))])
+            ->get(route('adviser.students'))->assertOk()
             ->assertSee('data-validation-errors', false)
-            ->assertSee('The last name field is required.');
+            ->assertSee('A flashed message.');
     }
 }

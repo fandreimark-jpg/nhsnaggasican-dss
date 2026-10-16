@@ -78,7 +78,7 @@ class InterventionController extends Controller
                 // 'section' — Intervention::contextSection() reads it per
                 // row for the progress comparison below; without it every
                 // row lazy-loaded the same section again.
-                ->with(['student', 'section', 'subject', 'decidedBy', 'acknowledgedBy', 'deliveredBy'])
+                ->with(array_merge(['student', 'section', 'subject', 'decidedBy', 'acknowledgedBy', 'deliveredBy'], Intervention::schedulingAvailable() ? ['responsibleUser'] : []))
                 ->latest()
                 ->get()
             : collect();
@@ -97,6 +97,31 @@ class InterventionController extends Controller
                 ? ($groupSizes[$intervention->delivery_group_id] ?? null)
                 : null;
         });
+
+        // Schedule status filter (2026-10-06, scheduling integrated into this
+        // page): derived per row from the server clock — read only, no writes.
+        $now = now();
+        $schedule = $request->input('schedule');
+        $scheduleFilter = function ($rows) use ($schedule, $now) {
+            if ($schedule === 'mine') {
+                return $rows->where('responsible_user_id', auth()->id())->values();
+            }
+
+            return array_key_exists((string) $schedule, Intervention::LIFECYCLE_LABELS)
+                ? $rows->filter(fn(Intervention $iv) => $iv->scheduleState($now) === $schedule)->values()
+                : $rows;
+        };
+        $interventions = $scheduleFilter($interventions);
+
+        // Interventions this adviser may see OUTSIDE the advisory section: a
+        // class they also teach, or one they are responsible for. Same scope
+        // rule as every action (InterventionScheduleService::inScope()).
+        $otherScope = Intervention::schedulingAvailable()
+            ? $scheduleFilter((new \App\Services\InterventionScheduleService())->scopeFor(auth()->user())
+                ->when($section, fn($q) => $q->where('section_id', '!=', $section->id))
+                ->where('status', '!=', Intervention::STATUS_RECOMMENDED)->whereNotNull('decided_by')
+                ->with(['student', 'section', 'subject', 'responsibleUser'])->latest('id')->get())
+            : collect();
 
         // TASK 4 of "UI cleanup and correctness pass" — undelivered items
         // need attention now; delivered ones are historical record. PHP
@@ -125,7 +150,7 @@ class InterventionController extends Controller
         return view('adviser.interventions', compact(
             'section', 'interventions', 'awaitingPrincipalDecision',
             'awaitingPrincipalOrigin', 'awaitingSystemOrigin',
-            'subjects', 'gradingPeriod'
+            'subjects', 'gradingPeriod', 'schedule', 'otherScope', 'now'
         ));
     }
 
@@ -247,15 +272,42 @@ class InterventionController extends Controller
             return $this->deliveryFailureResponse($request, 'Acknowledge this intervention before marking it delivered.');
         }
 
+        // A SCHEDULED intervention (2026-10-06) is completed by its responsible
+        // staff within the schedule (Interventions › open it › Record
+        // Completion) — adviser delivery stays for unscheduled ones only.
+        if ($intervention->isScheduled()) {
+            return $this->deliveryFailureResponse($request, 'This intervention is scheduled: its responsible staff records completion on the intervention\'s page.');
+        }
+        if (in_array($intervention->status, [Intervention::STATUS_CANCELLED, Intervention::STATUS_EXPIRED], true)) {
+            return $this->deliveryFailureResponse($request, 'This intervention was ' . $intervention->status . ', so delivery can no longer be recorded.');
+        }
+
         $request->validate([
             'delivery_notes' => 'required|string|max:2000',
         ]);
 
-        $intervention->update([
-            'delivered_at'    => now(),
-            'delivered_by'    => auth()->id(),
-            'delivery_notes'  => $request->delivery_notes,
-        ]);
+        // Phase 2E — delivery is recorded ONCE. A second submit (double
+        // click, stale page, second tab) must never overwrite who/when/what
+        // was delivered or log a second delivery; the row is re-read under
+        // a lock so two concurrent submits cannot both pass the check.
+        $delivered = DB::transaction(function () use ($intervention, $request) {
+            $fresh = Intervention::whereKey($intervention->id)->lockForUpdate()->firstOrFail();
+            if ($fresh->delivered_at) {
+                return false;
+            }
+            $fresh->update([
+                'delivered_at'    => now(),
+                'delivered_by'    => auth()->id(),
+                'delivery_notes'  => $request->delivery_notes,
+            ]);
+            $intervention->setRawAttributes($fresh->getAttributes(), true);
+
+            return true;
+        });
+
+        if (!$delivered) {
+            return $this->deliveryFailureResponse($request, 'This intervention was already marked as delivered. The existing delivery record is kept.');
+        }
 
         LogActivity::log(
             'deliver_intervention',
@@ -276,15 +328,8 @@ class InterventionController extends Controller
                 'id'                    => $intervention->id,
                 'delivered_at'          => $intervention->delivered_at->format('M d, Y h:i A'),
                 'delivery_notes'        => $intervention->delivery_notes,
-                'add_assessment_item_url' => ($intervention->subject_id && $intervention->grading_period)
-                    ? route('adviser.assessments', array_filter([
-                        'period'            => $intervention->grading_period,
-                        'subject_id'        => $intervention->subject_id,
-                        'add_item'          => 1,
-                        'component'         => $intervention->focusComponent(),
-                        'from_intervention' => 1,
-                    ]))
-                    : null,
+                'add_assessment_item_url' => ($link = (new \App\Services\TeachingAccess())->supportAssessmentLink(auth()->user(), $intervention))['url'] ?? null,
+                'add_assessment_item_label' => $link['label'] ?? null,
                 'message' => 'Marked as delivered.',
             ]);
         }
@@ -353,6 +398,9 @@ class InterventionController extends Controller
             ->whereNull('delivered_at')
             ->where('status', '!=', Intervention::STATUS_RECOMMENDED)
             ->whereNotNull('decided_by')
+            // Scheduled ones are completed by their responsible staff, not group delivery.
+            ->when(Intervention::schedulingAvailable(), fn($q) => $q->whereNull('deadline_at'))
+            ->whereNotIn('status', [Intervention::STATUS_EXPIRED, Intervention::STATUS_CANCELLED])
             ->get();
 
         if ($eligible->isEmpty()) {

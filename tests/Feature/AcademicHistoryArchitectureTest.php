@@ -33,6 +33,7 @@ use Tests\TestCase;
 class AcademicHistoryArchitectureTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
 
     private const OLD = '2026-2027';
     private const NEW = '2027-2028';
@@ -71,10 +72,7 @@ class AcademicHistoryArchitectureTest extends TestCase
             'encoded_by' => $this->adviserNarra->id, 'grading_period' => 1, 'grade' => 80,
             'school_year' => self::OLD, 'is_verified' => true, 'is_provisional' => false,
         ]);
-        $report = ReportSubmission::create([
-            'section_id' => $this->narra->id, 'submitted_by' => $this->adviserNarra->id, 'grading_period' => 1,
-            'status' => 'submitted', 'school_year' => self::OLD, 'submitted_at' => now(),
-        ]);
+        $report = $this->submittedReport($this->narra, 1, $this->adviserNarra);
         $risk = RiskResult::create([
             'student_id' => $this->learner->id, 'grading_period' => 1, 'average_grade' => 70,
             'risk_level' => 'high', 'school_year' => self::OLD, 'generated_at' => now(),
@@ -276,15 +274,14 @@ class AcademicHistoryArchitectureTest extends TestCase
         $this->assertSame('Agila', $new->fresh()->section->name);
         $this->assertSame(2, RiskResult::where('student_id', $this->learner->id)->count());
 
-        // The Principal dashboard counts only the selected year's results.
-        $this->actingAs($this->principal)->get('/principal/dashboard')->assertOk()->assertSee('School Year:');
-        $dash = app(\App\Services\DashboardAnalyticsService::class);
-        request()->merge(['school_year' => self::OLD]);
-        $this->assertSame(1, $dash->getSummaryData()['highRisk']);
-        $this->assertSame(0, $dash->getSummaryData()['moderateRisk']);
-        request()->merge(['school_year' => self::NEW]);
-        $this->assertSame(0, $dash->getSummaryData()['highRisk']);
-        $this->assertSame(1, $dash->getSummaryData()['moderateRisk']);
+        // Legacy rows stay intact as history, but the Principal dashboard no
+        // longer reads or counts classifier output for any year.
+        $this->actingAs($this->principal)->get('/principal/dashboard')->assertOk()->assertSee('School Year:')
+            ->assertDontSee('High Risk')->assertDontSee('Risk Level');
+        $summary = app(\App\Services\DashboardAnalyticsService::class)->getSummaryData();
+        foreach (['lowRisk', 'moderateRisk', 'highRisk', 'sectionRiskData', 'riskLevelTerms'] as $key) {
+            $this->assertArrayNotHasKey($key, $summary);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -312,9 +309,13 @@ class AcademicHistoryArchitectureTest extends TestCase
     {
         $this->activateNewYear();
         $this->promoteLearner();
+        // A valid context in the new year (2026-10-07): a Grade 12 subject for the
+        // Grade 12 section, which has an adviser to be responsible.
+        $grade12 = Subject::factory()->create(['grade_level' => 12, 'type' => 'core', 'name' => 'Grade 12 Core']);
+        $this->interventionReady($this->learner->fresh(), $grade12);
 
         $response = $this->actingAs($this->principal)->post(route('principal.interventions.store'), [
-            'student_id' => $this->learner->id, 'subject_id' => $this->subject->id, 'grading_period' => 1,
+            'student_id' => $this->learner->id, 'subject_id' => $grade12->id, 'grading_period' => 1,
             'recommended_type' => 'teacher_monitoring', 'recommendation_reason' => 'Test reason',
         ]);
         $response->assertSessionHasNoErrors();
@@ -394,13 +395,14 @@ class AcademicHistoryArchitectureTest extends TestCase
         $grade->assertSessionHas('error');
         $this->assertStringContainsString($expectedMessageFragment, session('error'));
 
-        $item = $this->actingAs($adviser)->post(route('adviser.assessments.item.store'), [
+        $item = $this->actingAs($adviser)->post(route('teacher.assessments.store'), [
+            'section_id' => \App\Models\Section::forAdviser($adviser->id)->id,
             'grading_period' => 1, 'subject_id' => $this->subject->id, 'item_name' => 'Quiz 9',
             'component' => 'written_work', 'max_score' => 10,
         ]);
         $item->assertSessionHasErrors([], null, 'addItem');
 
-        $report = $this->actingAs($adviser)->post('/adviser/submit-report', ['grading_period' => 1]);
+        $report = $this->actingAs($adviser)->post('/adviser/submit-report', ['grading_period' => 1, 'expected_version' => 0]);
         $report->assertSessionHas('error');
 
         $this->assertSame($gradesBefore, Grade::count());
@@ -417,7 +419,7 @@ class AcademicHistoryArchitectureTest extends TestCase
         // The adviser has no 2027-2028 section: their old section is shown read-only.
         $this->actingAs($this->adviserNarra)->get('/adviser/dashboard')->assertOk()->assertSee('Historical Record')->assertSee('2026-2027');
         $this->actingAs($this->adviserNarra)->get('/adviser/grades?period=1')->assertOk()->assertSee('read-only');
-        $this->actingAs($this->adviserNarra)->get('/adviser/assessments?period=1')->assertOk()->assertSee('read-only');
+        $this->actingAs($this->adviserNarra)->get('/adviser/grades?period=1')->assertOk()->assertSee('read-only');
 
         $this->actingAs($this->principal)->get('/principal/students/' . $this->learner->id . '?school_year=' . self::OLD)
             ->assertOk()->assertSee('Historical Record')->assertSee('Narra');

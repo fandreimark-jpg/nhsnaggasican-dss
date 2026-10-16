@@ -42,16 +42,4 @@ class DashboardController extends Controller
             ]
         ));
     }
-
-    /** @deprecated Kept for direct-call test coverage — use DashboardAnalyticsService. */
-    public function computeTrend($history): ?string
-    {
-        return $this->analytics->computeTrend($history);
-    }
-
-    /** @deprecated Kept for direct-call test coverage — use DashboardAnalyticsService. */
-    public function computeConsecutiveDecline($history): bool
-    {
-        return $this->analytics->computeConsecutiveDecline($history);
-    }
 }

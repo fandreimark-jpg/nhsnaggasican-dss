@@ -7,7 +7,6 @@
 
 @php
     $componentLabels = ['written_work' => 'Written Work', 'performance_task' => 'Performance Task', 'examination' => 'Examination'];
-    $riskColors = ['low' => 'bg-status-ontrack/10 text-status-ontrack', 'moderate' => 'bg-status-attention/10 text-status-attention', 'high' => 'bg-status-risk/10 text-status-risk'];
 @endphp
 
 <div class="mb-4">
@@ -41,25 +40,12 @@
     @endif
 </div>
 
-{{-- Risk overview + term selector --}}
+{{-- Term selector --}}
 <div class="card p-5 mb-4 flex flex-wrap justify-between items-center gap-3">
     <div>
-        <p class="text-xs text-gray-500">Latest Risk Level — School Year {{ $schoolYear }}</p>
-        @if($latestRisk)
-            <span class="inline-block mt-1 px-3 py-1 rounded-full text-sm font-medium {{ $riskColors[$latestRisk->risk_level] ?? 'bg-gray-100 text-gray-600' }}">
-                {{ ucfirst($latestRisk->risk_level) }} — {{ number_format($latestRisk->average_grade, 2) }} avg
-            </span>
-            <span class="block text-xs text-muted mt-1" title="Plain-language status: On Track / Needs Monitoring / Needs Attention / At Risk">
-                DSS Status: <span class="font-medium text-gray-600">{{ $dssStatus }}</span>
-            </span>
-            {{-- Standing property of the output, not a notification —
-                 never dismissible. See the "honest model evaluation" prompt. --}}
-            <span class="block text-xs text-muted mt-1">
-                Risk level is derived from grade thresholds, not predictive certainty about this student.
-            </span>
-        @else
-            <p class="text-sm text-gray-400 mt-1">No risk classification yet.</p>
-        @endif
+        <p class="text-xs text-gray-500">Assessment evidence — School Year {{ $schoolYear }}</p>
+        <p class="text-sm text-gray-600 mt-1">Recorded evidence per subject for the selected term. Academic concerns are listed on
+            <a href="{{ route('principal.academic-monitoring', ['school_year' => $schoolYear]) }}" class="text-brand-700 underline hover:text-brand-800">Academic Monitoring</a>.</p>
     </div>
     <form method="GET" class="flex items-center gap-2">
         <label class="text-xs text-gray-500">Term:</label>
@@ -70,6 +56,52 @@
             </a>
         @endforeach
     </form>
+</div>
+
+{{-- Overall Monitoring (open Academic Concerns) is NOT academic performance:
+     the per-subject evidence below can read On Track while this is For Review. --}}
+{{-- Subject first: each subject's OFFICIAL Term grade on its own. The
+     overall average is summary information and never hides a Failed subject. --}}
+<div class="card p-5 mb-4" data-subject-results>
+    <p class="text-xs text-gray-500">Official Subject Results — Term {{ $period }}</p>
+    @if($subjectResults['subjects'] === 0)
+        <p class="text-sm text-muted mt-1">No grades recorded for this term yet.</p>
+    @else
+        <div class="flex flex-wrap gap-x-6 gap-y-1 mt-1 text-sm">
+            <span>Overall Average: <strong data-overall-average>{{ $subjectResults['overall_average'] !== null ? number_format($subjectResults['overall_average'], 2) : '—' }}</strong></span>
+            <span>Passed: <strong>{{ $subjectResults['passed'] }}</strong></span>
+            <span>Failed: <strong class="{{ $subjectResults['failed'] ? 'text-status-failing' : '' }}">{{ $subjectResults['failed'] }}</strong></span>
+            @if($subjectResults['not_official'])
+                <span class="text-muted">Not yet official: {{ $subjectResults['not_official'] }}</span>
+            @endif
+            @if($subjectResults['stale'])
+                <span class="font-medium" data-stale-official>Evidence changed since verification — re-verify: {{ implode(', ', $subjectResults['stale_subjects']) }}</span>
+            @endif
+        </div>
+        @foreach($subjectResults['failed_subjects'] as $f)
+            <p class="text-sm text-status-failing mt-1" data-failed-subject>Failed: {{ $f['subject'] }} — {{ number_format($f['grade'], 2) }}</p>
+        @endforeach
+        <p class="text-xs text-muted mt-2">
+            Overall Average summarizes performance across subjects. Monitoring also considers each subject on its own,
+            so strong performance in other subjects does not hide a subject that requires review. A grade not yet
+            verified is not an official result and is never shown as Failed.
+        </p>
+    @endif
+</div>
+
+<div class="card p-5 mb-4 flex flex-wrap items-start justify-between gap-3" data-overall-monitoring>
+    <div>
+        <p class="text-xs text-gray-500">Overall Monitoring — Term {{ $period }}</p>
+        <div class="mt-1"><x-ui.monitoring-status :status="$monitoring" /></div>
+        <p class="text-xs text-muted mt-2">
+            From open Academic Concerns only, evaluated subject by subject — the overall average never hides a subject that needs review. Academic Performance per subject is shown below and is a separate reading.
+            @if($resolvedConcernCount > 0)
+                History: {{ $resolvedConcernCount }} resolved concern(s) this term.
+            @endif
+        </p>
+    </div>
+    <a href="{{ route('principal.academic-monitoring', ['school_year' => $schoolYear, 'term' => $period, 'status' => 'all']) }}"
+       class="text-sm text-brand-700 hover:underline whitespace-nowrap">Academic Monitoring →</a>
 </div>
 
 {{-- Subject -> Component -> Evidence drill-down --}}
@@ -96,7 +128,7 @@
                             {{ number_format($c['percentage'], 1) }}%
                         </p>
                         <p class="text-xs text-muted">
-                            gap {{ $c['gap'] >= 0 ? '+' : '' }}{{ number_format($c['gap'], 1) }} — {{ $c['status'] }}
+                            gap {{ $c['gap'] >= 0 ? '+' : '' }}{{ number_format($c['gap'], 1) }} — {{ \App\Services\InTermStatusService::componentLabel($c['status']) }}
                         </p>
                     @endif
                 </div>
@@ -148,89 +180,6 @@
     @endforelse
 </div>
 
-{{-- "Student identity and term-specific subject offerings" pass, STEP K —
-     Term-over-Term, said carefully. The OVERALL trend compares term
-     averages from the submitted term reports; the SAME-SUBJECT trend
-     compares only a subject graded in both terms. When the subject mix
-     changed between the two terms, the overall figure is still shown but
-     labelled as comparing different mixes — never as "the same subjects
-     got better/worse". --}}
-@if(($termTrend['composition'] ?? null) !== null)
-<div class="card p-5 mb-4">
-    <h3 class="card-title mb-1">Term-over-Term — School Year {{ $schoolYear }}</h3>
-    <p class="text-xs text-muted mb-3">
-        Term {{ $termTrend['composition']['previous_term'] }} vs Term {{ $termTrend['composition']['current_term'] }}, from the submitted term reports.
-    </p>
-
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-        <div>
-            <p class="text-xs text-gray-500">Overall term trend <span class="text-gray-400">(average of all graded subjects each term)</span></p>
-            <p class="mt-1 font-medium">
-                @if($termTrend['overall'] === 'improving')<span class="text-green-600">&uarr; Improving</span>
-                @elseif($termTrend['overall'] === 'declining')<span class="text-red-600">&darr; Declining</span>
-                @elseif($termTrend['overall'] === 'stable')<span class="text-gray-600">&rarr; Stable</span>
-                @else<span class="text-gray-400">—</span>@endif
-            </p>
-            @if($termTrend['composition']['changed'])
-                <p class="text-xs text-amber-700 mt-1">
-                    <i class="bi bi-info-circle"></i> The subject mix differs between the two terms, so this compares different sets of subjects — not the same subjects twice.
-                    @if(!empty($termTrend['composition']['only_previous']))<span class="block">Term {{ $termTrend['composition']['previous_term'] }} only: {{ implode(', ', $termTrend['composition']['only_previous']) }}.</span>@endif
-                    @if(!empty($termTrend['composition']['only_current']))<span class="block">Term {{ $termTrend['composition']['current_term'] }} only: {{ implode(', ', $termTrend['composition']['only_current']) }}.</span>@endif
-                </p>
-            @else
-                <p class="text-xs text-muted mt-1">Same subjects graded in both terms.</p>
-            @endif
-        </div>
-        <div>
-            <p class="text-xs text-gray-500">Same-subject trend <span class="text-gray-400">(only subjects graded in both terms)</span></p>
-            @if(empty($termTrend['same_subject']))
-                <p class="text-xs text-muted mt-1">No subject was graded in both terms, so no subject-level comparison is possible.</p>
-            @else
-                <ul class="mt-1 space-y-0.5">
-                    @foreach($termTrend['same_subject'] as $row)
-                        <li class="flex items-center justify-between gap-3">
-                            <span>{{ $row['subject'] }}</span>
-                            <span class="tabular-nums text-xs">
-                                {{ number_format($row['from'], 2) }} &rarr; {{ number_format($row['to'], 2) }}
-                                <span class="font-medium {{ $row['diff'] > 0 ? 'text-green-600' : ($row['diff'] < 0 ? 'text-red-600' : 'text-gray-500') }}">({{ $row['diff'] > 0 ? '+' : '' }}{{ number_format($row['diff'], 2) }})</span>
-                            </span>
-                        </li>
-                    @endforeach
-                </ul>
-            @endif
-        </div>
-    </div>
-</div>
-@endif
-
-{{-- PART 11 — every risk classification the learner has received,
-     labelled with the school year, term, and section it was made under. --}}
-<div class="card p-5 mb-4">
-    <h3 class="card-title mb-3">Risk History Across School Years</h3>
-    @if($riskHistoryAllYears->isEmpty())
-        <p class="text-xs text-muted">No risk classification on record.</p>
-    @else
-        <div class="tbl-scroll"><table class="tbl">
-            <thead><tr>
-                <th scope="col">School Year</th><th scope="col">Term</th><th scope="col">Section</th>
-                <th scope="col" class="tbl-num">Average</th><th scope="col">Risk Level</th><th scope="col">Generated</th>
-            </tr></thead>
-            <tbody>
-            @foreach($riskHistoryAllYears as $rr)
-                <tr class="{{ $rr->school_year === $schoolYear ? '' : 'text-gray-500' }}">
-                    <td>{{ $rr->school_year }}</td>
-                    <td>Term {{ $rr->grading_period }}</td>
-                    <td>{{ $rr->section ? 'Grade ' . $rr->section->grade_level . ' ' . $rr->section->name : '—' }}</td>
-                    <td class="tbl-num">{{ number_format($rr->average_grade, 2) }}</td>
-                    <td><span class="badge {{ $riskColors[$rr->risk_level] ?? 'bg-gray-100 text-gray-600' }}">{{ ucfirst($rr->risk_level) }}</span></td>
-                    <td class="text-xs text-muted">{{ $rr->generated_at ? \Illuminate\Support\Carbon::parse($rr->generated_at)->format('M d, Y') : '—' }}</td>
-                </tr>
-            @endforeach
-            </tbody>
-        </table></div>
-    @endif
-</div>
-
 {{-- Intervention history --}}
 @php
     // TASK 1 of "terminology, transmutation, and interface cleanup" —
@@ -238,7 +187,7 @@
     // assessment item), not DepEd's formal post-term remediation — see
     // CLAUDE.md's Known limitations. Every other type still title-cases
     // fine from its raw enum value, so only this one needs a real label.
-    $ivTypeLabels = ['remediation' => 'Additional Practice and Re-teaching'];
+    $ivTypeLabels = \App\Models\Intervention::TYPE_LABELS;
 @endphp
 <div class="card p-5">
     <h3 class="card-title mb-3">Intervention History</h3>
@@ -247,6 +196,10 @@
             <span class="font-medium">{{ $ivTypeLabels[$iv->recommended_type] ?? ucfirst(str_replace('_', ' ', $iv->recommended_type)) }}</span>
             — {{ ucfirst(str_replace('_', ' ', $iv->status)) }}
             <span class="text-gray-400">({{ $iv->created_at->format('M d, Y') }})</span>
+            @if(\App\Models\Intervention::schedulingAvailable())
+                · @include('partials.intervention-lifecycle-badge', ['iv' => $iv])
+                <a href="{{ route('principal.interventions.show', $iv) }}" class="text-brand-700 hover:underline">Open<span class="sr-only"> intervention</span></a>
+            @endif
             {{-- PART 12 — the year/term/section stored ON the intervention. --}}
             <span class="block text-gray-400">
                 SY {{ $iv->school_year ?? '—' }}@if($iv->grading_period) · Term {{ $iv->grading_period }}@endif

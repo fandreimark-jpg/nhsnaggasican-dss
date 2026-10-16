@@ -41,6 +41,8 @@ use Tests\TestCase;
 class AcademicMonitoringTriggerTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\UsesClassRecord;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
     use BuildsEcrFixture;
 
     private User $adviser;
@@ -107,28 +109,31 @@ class AcademicMonitoringTriggerTest extends TestCase
         ]);
     }
 
-    /** The Edit modal's real request shape: every learner's score field and Missing flag. */
+    /**
+     * The Class Record grid's request for one item: every learner's cell —
+     * 'M' where Missing is ticked, else the score or empty.
+     */
     private function edit(Assessment $item, array $scores, array $missing, ?User $as = null)
     {
-        $payloadScores = [];
-        $payloadMissing = [];
+        // Only the learners this edit names are sent — as the grid sends
+        // only its changed cells (plus the blanks of the assessment being
+        // saved). A learner not sent is untouched, never read as blank.
+        $values = [];
         foreach ([$this->ana, $this->ben, $this->cara] as $s) {
-            $payloadScores[$s->id] = $scores[$s->id] ?? '';
-            $payloadMissing[$s->id] = $missing[$s->id] ?? '0';
+            if (array_key_exists($s->id, $scores) || array_key_exists($s->id, $missing)) {
+                $values[$s->id] = ($missing[$s->id] ?? '0') === '1' ? 'M' : (string) ($scores[$s->id] ?? '');
+            }
         }
 
-        return $this->actingAs($as ?? $this->adviser)->put('/adviser/assessments/item/' . $item->id, [
-            'max_score' => $item->max_score, 'grading_period' => 1, 'assessment_id' => $item->id,
-            'scores' => $payloadScores, 'missing' => $payloadMissing,
-        ]);
+        return $this->saveCells($as ?? $this->adviser, $item, $values);
     }
 
+    /** Add Assessment (details only), then enter its cells in the Class Record. */
     private function add(string $name, array $scores, array $missing = [])
     {
-        return $this->actingAs($this->adviser)->post('/adviser/assessments/item', [
-            'subject_id' => $this->subject->id, 'grading_period' => 1, 'item_name' => $name,
-            'component' => 'written_work', 'max_score' => 20, 'scores' => $scores, 'missing' => $missing,
-        ]);
+        $this->addAssessment($this->adviser, $this->section, $this->subject, ['item_name' => $name])->assertSessionHasNoErrors();
+
+        return $this->edit(Assessment::where('name', $name)->sole(), $scores, $missing);
     }
 
     private function openConcernFor(Student $student, Assessment $item): ?AcademicConcern
@@ -136,43 +141,6 @@ class AcademicMonitoringTriggerTest extends TestCase
         return AcademicConcern::open()->forStudent($student->id)
             ->where('context_key', MissingRequirementRule::contextKeyFor($item->id))->first();
     }
-
-    private function uploadEcr(array $cells): void
-    {
-        $scores = [];
-        foreach ($cells as $index => $value) {
-            $scores[$this->femaleTermRow($index)] = $value;
-        }
-
-        $path = $this->buildFilledEcrCopy(
-            gradeLevel: '11', sectionName: 'Shakespeare', courseTitle: 'General Mathematics',
-            roster: [
-                ['lrn' => '110000000001', 'name' => 'Ana, Aa', 'gender' => 'female'],
-                ['lrn' => '110000000002', 'name' => 'Ben, Bb', 'gender' => 'female'],
-                ['lrn' => '110000000003', 'name' => 'Cara, Cc', 'gender' => 'female'],
-            ],
-            scores: ['D' => $scores],
-            maxScores: ['D' => 20],
-            schoolYearStart: '2026',
-        );
-        $this->tempFiles[] = $path;
-
-        $detect = $this->actingAs($this->adviser)->post('/adviser/assessments/detect', [
-            'subject_id' => $this->subject->id, 'grading_period' => 1,
-            'file' => new UploadedFile($path, 'ecr.xlsx', null, null, true),
-        ])->assertOk();
-        $columns = collect($detect->viewData('columns'))
-            ->map(fn($c) => ['name' => $c['name'], 'component' => 'written_work', 'max_score' => $c['max_score'] ?? 20])
-            ->values()->all();
-
-        $this->actingAs($this->adviser)->post('/adviser/assessments/import', [
-            'subject_id' => $this->subject->id, 'grading_period' => 1,
-            'stored_filename' => $detect->viewData('storedFilename'), 'columns' => $columns,
-        ])->assertRedirect()->assertSessionHas('success')->assertSessionMissing('monitoring_warning');
-    }
-
-    // --- 1. Not Yet Given -> Missing --------------------------------------
-
     public function test_1_marking_missing_on_edit_opens_a_concern_automatically(): void
     {
         $item = $this->item();
@@ -191,7 +159,7 @@ class AcademicMonitoringTriggerTest extends TestCase
 
     public function test_1b_marking_missing_when_adding_an_item_opens_a_concern(): void
     {
-        $this->add('Quiz 7', [$this->ana->id => 18], [$this->ben->id => '1'])->assertSessionHas('success');
+        $this->add('Quiz 7', [$this->ana->id => 18], [$this->ben->id => '1'])->assertOk();
 
         $item = Assessment::where('name', 'Quiz 7')->sole();
         $this->assertNotNull($this->openConcernFor($this->ben, $item));
@@ -221,18 +189,20 @@ class AcademicMonitoringTriggerTest extends TestCase
 
     // --- 3. Missing -> Not Yet Given --------------------------------------
 
-    public function test_3_unticking_missing_with_a_blank_score_resolves_without_creating_a_zero(): void
+    public function test_3_emptying_a_missing_cell_keeps_it_missing_and_the_concern_open_without_a_zero(): void
     {
+        // Automatic Missing (2026-10-04): a blank saved in an assessment is
+        // Missing, so emptying a Missing cell no longer removes the marker.
         $item = $this->item();
         $this->edit($item, [], [$this->ana->id => '1']);
+        $opened = $this->openConcernFor($this->ana, $item);
 
-        $this->edit($item, [], [])->assertSessionHasNoErrors();
+        $this->edit($item, [$this->ana->id => ''], [])->assertOk();
 
-        $concern = AcademicConcern::sole();
-        $this->assertSame(AcademicConcern::STATUS_RESOLVED, $concern->status);
-        $this->assertSame('The Missing marker on "Quiz 2" was removed; no score has been recorded yet.', $concern->resolution_reason);
+        $this->assertSame(AcademicConcern::STATUS_OPEN, $opened->fresh()->status);
+        $this->assertSame(1, AcademicConcern::count());
         $this->assertSame(0, AssessmentScore::count(), 'no zero was created');
-        $this->assertSame(AssessmentStatusService::NOT_YET_GIVEN, $this->statuses->statusFor($item, $this->ana->id));
+        $this->assertSame(AssessmentStatusService::MISSING, $this->statuses->statusFor($item, $this->ana->id));
     }
 
     // --- 4-6. Completed, zero, blank ---------------------------------------
@@ -250,7 +220,7 @@ class AcademicMonitoringTriggerTest extends TestCase
 
     public function test_5_an_actual_zero_is_completed_and_opens_no_concern(): void
     {
-        $this->add('Quiz 8', [$this->ana->id => 0])->assertSessionHas('success');
+        $this->add('Quiz 8', [$this->ana->id => 0])->assertOk();
 
         $item = Assessment::where('name', 'Quiz 8')->sole();
         $this->assertDatabaseHas('assessment_scores', ['assessment_id' => $item->id, 'student_id' => $this->ana->id, 'score' => 0]);
@@ -258,13 +228,16 @@ class AcademicMonitoringTriggerTest extends TestCase
         $this->assertSame(0, AcademicConcern::count());
     }
 
-    public function test_6_an_ordinary_blank_stays_not_yet_given_and_opens_no_concern(): void
+    public function test_6_a_saved_blank_becomes_missing_and_opens_a_concern_but_an_unsent_learner_is_untouched(): void
     {
-        $this->add('Quiz 9', [$this->ana->id => 15, $this->ben->id => ''])->assertSessionHas('success');
+        $this->add('Quiz 9', [$this->ana->id => 15, $this->ben->id => ''])->assertOk();
 
         $item = Assessment::where('name', 'Quiz 9')->sole();
-        $this->assertSame(AssessmentStatusService::NOT_YET_GIVEN, $this->statuses->statusFor($item, $this->ben->id));
-        $this->assertSame(0, AcademicConcern::count());
+        $this->assertSame(AssessmentStatusService::MISSING, $this->statuses->statusFor($item, $this->ben->id), 'a blank in the assessment being saved');
+        $this->assertNotNull($this->openConcernFor($this->ben, $item));
+        $this->assertSame(AssessmentStatusService::NOT_YET_GIVEN, $this->statuses->statusFor($item, $this->cara->id), 'not sent = not read as blank');
+        $this->assertNull($this->openConcernFor($this->cara, $item));
+        $this->assertSame(1, AcademicConcern::count());
     }
 
     // --- 7-8. Idempotence and re-opening ------------------------------------
@@ -284,12 +257,13 @@ class AcademicMonitoringTriggerTest extends TestCase
     {
         $item = $this->item();
         $this->edit($item, [], [$this->ana->id => '1']);
-        $this->edit($item, [], []);
+        $this->edit($item, [$this->ana->id => 15], []);
         $old = AcademicConcern::sole();
         $oldSnapshot = $old->toArray();
 
+        // Clear Entry on the score: the blank is saved as Missing again.
         $this->travel(2)->minutes();
-        $this->edit($item, [], [$this->ana->id => '1']);
+        $this->edit($item, [$this->ana->id => ''], []);
 
         $this->assertSame(2, AcademicConcern::count());
         $this->assertSame($oldSnapshot, $old->fresh()->toArray(), 'the resolved row is untouched');
@@ -297,43 +271,6 @@ class AcademicMonitoringTriggerTest extends TestCase
         $this->assertNotSame($old->id, $new->id);
         $this->assertTrue($new->first_detected_at->greaterThan($old->first_detected_at));
     }
-
-    // --- 9-10. ECR import ---------------------------------------------------
-
-    public function test_9_an_imported_real_score_resolves_a_prior_missing_concern(): void
-    {
-        $this->uploadEcr([0 => 18, 1 => null, 2 => 10]);
-        $item = Assessment::sole();
-        $this->edit($item, [$this->ana->id => 18, $this->cara->id => 10], [$this->ben->id => '1']);
-        $opened = $this->openConcernFor($this->ben, $item);
-        $this->assertNotNull($opened);
-
-        $this->uploadEcr([0 => 18, 1 => 14, 2 => 10]);
-
-        $this->assertSame(AcademicConcern::STATUS_RESOLVED, $opened->fresh()->status);
-        $this->assertSame('A score was recorded for "' . $item->name . '".', $opened->fresh()->resolution_reason);
-        $this->assertSame(0, AssessmentLearnerStatus::count());
-        $this->assertDatabaseHas('assessment_scores', ['assessment_id' => $item->id, 'student_id' => $this->ben->id, 'score' => 14]);
-    }
-
-    public function test_10_an_ecr_blank_creates_no_marker_and_no_concern_and_keeps_an_existing_one(): void
-    {
-        $this->uploadEcr([0 => 18, 1 => null, 2 => 10]);
-        $this->assertSame(0, AssessmentLearnerStatus::count());
-        $this->assertSame(0, AcademicConcern::count());
-
-        // A learner the adviser marked Missing, blank again in a repeat upload:
-        // the blank proves nothing either way, so the concern stays open.
-        $item = Assessment::sole();
-        $this->edit($item, [$this->ana->id => 18, $this->cara->id => 10], [$this->ben->id => '1']);
-        $this->uploadEcr([0 => 18, 1 => null, 2 => 10]);
-
-        $this->assertSame(1, AcademicConcern::open()->count());
-        $this->assertSame(AssessmentStatusService::MISSING, $this->statuses->statusFor($item, $this->ben->id));
-    }
-
-    // --- 11, 14. Scope --------------------------------------------------------
-
     public function test_11_and_14_synchronization_touches_only_the_changed_item(): void
     {
         $otherAdviser = User::factory()->create(['role' => 'adviser']);
@@ -379,13 +316,15 @@ class AcademicMonitoringTriggerTest extends TestCase
         $item = $this->item();
         $this->edit($item, [], [$this->ana->id => '1', $this->ben->id => '1']);
         $this->edit($item, [$this->ana->id => 17], [$this->ben->id => '1']);
-        $this->edit($item, [$this->ana->id => 17], []);
+        $this->assertSame(1, AcademicConcern::open()->count(), "resolving one learner's concern leaves the other open");
+        $this->assertNotNull($this->openConcernFor($this->ben, $item));
+        $this->edit($item, [$this->ben->id => 9], []);
 
         $this->assertSame(0, Intervention::count());
         $this->assertSame(2, AcademicConcern::count());
         $this->assertSame(2, AcademicConcern::resolved()->count());
         $this->assertSame(
-            ['A score was recorded for "Quiz 2".', 'The Missing marker on "Quiz 2" was removed; no score has been recorded yet.'],
+            ['A score was recorded for "Quiz 2".', 'A score was recorded for "Quiz 2".'],
             AcademicConcern::orderBy('student_id')->pluck('resolution_reason')->all()
         );
     }
@@ -404,7 +343,7 @@ class AcademicMonitoringTriggerTest extends TestCase
         $this->assertSame(0, AcademicConcern::count());
 
         AcademicTerm::where('school_year', '2026-2027')->where('term', 1)->update(['is_open' => false]);
-        $this->edit($item, [], [$this->ana->id => '1'])->assertSessionHas('error');
+        $this->edit($item, [], [$this->ana->id => '1'])->assertStatus(423);
         $this->assertSame(0, AcademicConcern::count());
         $this->assertSame(0, AssessmentLearnerStatus::count());
     }
@@ -427,7 +366,8 @@ class AcademicMonitoringTriggerTest extends TestCase
 
         $this->assertSame(1, AcademicConcern::count());
         $this->assertSame($before, $grade());
-        $this->assertEqualsWithDelta(90.0, $before['components']['written_work'], 0.001);
+        // Workbook Term 1!N17/N14 (D1, 2026-10-04): 18 / (20 + 20) = 45%.
+        $this->assertEqualsWithDelta(45.0, $before['components']['written_work'], 0.001);
     }
 
     // --- Concurrency -------------------------------------------------------------------
@@ -502,16 +442,14 @@ class AcademicMonitoringTriggerTest extends TestCase
         config()->set('dss.monitoring_rules', [ThrowingMonitoringRule::class]);
         $item = $this->item();
 
-        $this->edit($item, [$this->ana->id => 12], [$this->ben->id => '1'])
-            ->assertSessionHasNoErrors()
-            ->assertSessionHas('success')
-            ->assertSessionHas('monitoring_warning', fn(string $message) =>
+        $response = $this->edit($item, [$this->ana->id => 12], [$this->ben->id => '1'])->assertOk();
+        $this->assertTrue((fn(string $message) =>
                 str_contains($message, 'Your changes were saved')
                 && str_contains($message, 'Academic Monitoring could not update')
                 && str_contains($message, 'do not rely on the concern status')
                 // No exception text reaches the adviser; it stays in the log.
                 && !str_contains($message, 'monitoring rule failed')
-                && !str_contains($message, 'RuntimeException'));
+                && !str_contains($message, 'RuntimeException'))($response->json('monitoring_warning')));
 
         Exceptions::assertReported(\RuntimeException::class);
         $this->assertDatabaseHas('assessment_scores', ['assessment_id' => $item->id, 'student_id' => $this->ana->id, 'score' => 12]);
@@ -523,20 +461,18 @@ class AcademicMonitoringTriggerTest extends TestCase
         $this->artisan('dss:check-integrity')->expectsOutputToContain('Academic concerns out of date')->assertExitCode(1);
 
         $this->followingRedirects()
-            ->get('/adviser/assessments?subject_id=' . $this->subject->id . '&period=1')
+            ->get(route('teacher.class-record', ['section_id' => $this->section->id, 'subject_id' => $this->subject->id, 'period' => 1]))
             ->assertOk();
     }
 
-    public function test_the_monitoring_warning_is_shown_on_the_assessments_page(): void
+    public function test_the_monitoring_warning_is_shown_on_the_class_record(): void
     {
         $this->actingAs($this->adviser)
             ->withSession(['monitoring_warning' => 'Your changes were saved, but Academic Monitoring could not update its concerns for this assessment.'])
-            ->get('/adviser/assessments?subject_id=' . $this->subject->id . '&period=1')
+            ->get(route('teacher.class-record', ['section_id' => $this->section->id, 'subject_id' => $this->subject->id, 'period' => 1]))
             ->assertOk()
             ->assertSee('Academic Monitoring could not update its concerns');
     }
-
-    // --- Deleted item lifecycle ----------------------------------------------------------------
 
     public function test_an_item_that_no_longer_exists_is_skipped_by_sync_and_resolved_by_full_evaluation(): void
     {

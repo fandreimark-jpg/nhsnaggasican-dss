@@ -2,360 +2,223 @@
 
 namespace Tests\Feature;
 
+use App\Models\AcademicConcern;
 use App\Models\AcademicTerm;
 use App\Models\Assessment;
+use App\Models\AssessmentLearnerStatus;
 use App\Models\AssessmentScore;
 use App\Models\Section;
 use App\Models\Student;
 use App\Models\Subject;
 use App\Models\User;
+use App\Services\ClassRecordService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
- * TASK 1 and TASK 3 of "add an assessment item by hand" — the manual
- * entry path alongside the file upload (AssessmentUploadWorkflowTest
- * covers that one). Ground rule: manual entry must produce IDENTICAL
- * Assessment/AssessmentScore rows to the file path — same updateOrCreate
- * keys, same audit trail (see AdviserAssessmentController::storeItem()/
- * updateItem()).
+ * Add / Edit Assessment — DETAILS ONLY ("Class Record refinements",
+ * 2026-09-28; formerly the manual add/edit item endpoints). The definition
+ * endpoints create or correct an assessment column and never write a score,
+ * a zero or a Missing mark; scores are entered in the Class Record grid.
  */
 class ManualAssessmentItemTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
+    use \Tests\Concerns\UsesClassRecord;
 
-    private function setUpSectionWithStudents(int $count = 10): array
+    private function setUpSectionWithStudents(int $count = 5): array
     {
         $adviser = User::factory()->create();
         $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027']);
         $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
         AcademicTerm::ensureExistFor($section->school_year);
-
         $students = Student::factory($count)->create(['section_id' => $section->id]);
 
         return compact('adviser', 'section', 'subject', 'students');
     }
 
-    public function test_adding_an_item_for_two_of_ten_students_creates_exactly_two_scores_and_leaves_the_rest_untouched(): void
+    private function item(Section $section, Subject $subject, User $by, float $max = 20, string $name = 'Quiz 1'): Assessment
     {
-        ['adviser' => $adviser, 'section' => $section, 'subject' => $subject, 'students' => $students] = $this->setUpSectionWithStudents(10);
+        return Assessment::factory()->create(['subject_id' => $subject->id, 'section_id' => $section->id, 'grading_period' => 1,
+            'school_year' => $section->school_year, 'name' => $name, 'component' => 'written_work', 'max_score' => $max, 'uploaded_by' => $by->id]);
+    }
 
-        $response = $this->actingAs($adviser)->post('/adviser/assessments/item', [
-            'subject_id'     => $subject->id,
-            'grading_period' => 1,
-            'item_name'      => 'Remedial Quiz 1',
-            'component'      => 'written_work',
-            'max_score'      => 20,
-            'scores'         => [
-                $students[0]->id => 18,
-                $students[1]->id => 15,
-            ],
-        ]);
+    public function test_saving_an_assessment_creates_the_column_only_with_no_score_zero_or_missing_mark(): void
+    {
+        ['adviser' => $adviser, 'section' => $section, 'subject' => $subject] = $this->setUpSectionWithStudents();
 
-        $response->assertSessionHas('success');
-        $response->assertSessionMissing('errors');
+        $response = $this->addAssessment($adviser, $section, $subject, ['item_name' => 'Quiz 1', 'max_score' => 20, 'assessment_date' => '2026-07-01']);
 
-        $assessment = Assessment::where('name', 'Remedial Quiz 1')->first();
-        $this->assertNotNull($assessment);
-        $this->assertSame('written_work', $assessment->component);
-        $this->assertEquals(20, $assessment->max_score);
-        $this->assertSame($adviser->id, $assessment->uploaded_by);
+        $item = Assessment::where('name', 'Quiz 1')->firstOrFail();
+        $response->assertRedirect(route('teacher.class-record', ['school_year' => $section->school_year, 'section_id' => $section->id, 'subject_id' => $subject->id, 'period' => 1]));
+        $response->assertSessionHas('success', 'Assessment added. Enter scores in the Class Record.');
+        $response->assertSessionHas('new_assessment_id', $item->id);
+        $this->assertSame(['written_work', 20.0, $adviser->id, '2026-07-01'], [$item->component, (float) $item->max_score, $item->uploaded_by, $item->assessment_date->format('Y-m-d')]);
+        $this->assertSame(0, AssessmentScore::count());
+        $this->assertSame(0, AssessmentLearnerStatus::count());
+        $this->assertSame(0, AcademicConcern::count(), 'a new column opens no concern');
+        $this->assertDatabaseHas('assessment_uploads', ['section_id' => $section->id, 'subject_id' => $subject->id, 'status' => 'manual_entry', 'imported_count' => 0]);
 
-        $this->assertSame(2, AssessmentScore::where('assessment_id', $assessment->id)->count());
-        $this->assertDatabaseHas('assessment_scores', ['assessment_id' => $assessment->id, 'student_id' => $students[0]->id, 'score' => 18]);
-        $this->assertDatabaseHas('assessment_scores', ['assessment_id' => $assessment->id, 'student_id' => $students[1]->id, 'score' => 15]);
+        $this->actingAs($adviser)->get(route('teacher.class-record', ['section_id' => $section->id, 'subject_id' => $subject->id, 'period' => 1]))
+            ->assertOk()->assertSee('data-item-head="' . $item->id . '"', false)->assertSee('Assessment added. Enter scores in the Class Record.');
+    }
 
-        // The other 8 students never had a score row created for them at all.
-        for ($i = 2; $i < 10; $i++) {
-            $this->assertDatabaseMissing('assessment_scores', ['assessment_id' => $assessment->id, 'student_id' => $students[$i]->id]);
+    public function test_the_add_page_has_no_score_or_missing_inputs(): void
+    {
+        ['adviser' => $adviser, 'section' => $section, 'subject' => $subject, 'students' => $students] = $this->setUpSectionWithStudents();
+
+        $html = $this->actingAs($adviser)->get(route('teacher.assessments.create', ['section_id' => $section->id, 'subject_id' => $subject->id, 'period' => 1]))
+            ->assertOk()->getContent();
+        $this->assertStringNotContainsString('name="scores[', $html);
+        $this->assertStringNotContainsString('name="missing[', $html);
+        $this->assertStringContainsString('Highest Possible Score', $html);
+        $this->assertStringContainsString('Save Assessment', $html);
+        $this->assertStringNotContainsString($students[0]->last_name . ', ' . $students[0]->first_name, $html);
+    }
+
+    public function test_score_and_missing_payloads_are_refused_and_nothing_is_created(): void
+    {
+        ['adviser' => $adviser, 'section' => $section, 'subject' => $subject, 'students' => $students] = $this->setUpSectionWithStudents();
+
+        foreach ([['scores' => [$students[0]->id => 10]], ['missing' => [$students[0]->id => '1']], ['scores' => []]] as $extra) {
+            $this->addAssessment($adviser, $section, $subject, array_merge(['item_name' => 'Quiz X'], $extra))
+                ->assertSessionHasErrors('scores', null, 'addItem');
         }
+        $this->actingAs($adviser)->postJson(route('teacher.assessments.store'), [
+            'section_id' => $section->id, 'subject_id' => $subject->id, 'grading_period' => 1, 'item_name' => 'Quiz X',
+            'component' => 'written_work', 'max_score' => 20, 'scores' => [$students[0]->id => 10],
+        ])->assertStatus(422);
 
-        // An audit trail row exists, distinguishing manual entry from a file.
-        $this->assertDatabaseHas('assessment_uploads', [
-            'section_id' => $section->id, 'subject_id' => $subject->id, 'status' => 'manual_entry', 'imported_count' => 2,
-        ]);
-
-        // Appears in the item list exactly like an imported one would.
-        $listResponse = $this->actingAs($adviser)->get('/adviser/assessments?subject_id=' . $subject->id . '&period=1');
-        $listResponse->assertSee('Remedial Quiz 1');
+        $this->assertSame(0, Assessment::count());
+        $this->assertSame(0, AssessmentScore::count());
     }
 
-    public function test_a_blank_score_field_is_not_taken_never_a_zero(): void
+    public function test_a_repeated_submission_creates_the_assessment_once(): void
     {
-        ['adviser' => $adviser, 'subject' => $subject, 'students' => $students] = $this->setUpSectionWithStudents(3);
+        ['adviser' => $adviser, 'section' => $section, 'subject' => $subject] = $this->setUpSectionWithStudents();
+        $token = (string) Str::uuid();
 
-        $this->actingAs($adviser)->post('/adviser/assessments/item', [
-            'subject_id'     => $subject->id,
-            'grading_period' => 1,
-            'item_name'      => 'Remedial Quiz',
-            'component'      => 'performance_task',
-            'max_score'      => 10,
-            'scores'         => [
-                $students[0]->id => 8,
-                $students[1]->id => '', // explicitly left blank
-                // $students[2] omitted entirely
-            ],
-        ])->assertSessionHas('success');
+        $this->addAssessment($adviser, $section, $subject, ['item_name' => 'Quiz 1', 'submission_token' => $token])->assertSessionHas('success');
+        $this->addAssessment($adviser, $section, $subject, ['item_name' => 'Quiz 1', 'submission_token' => $token])
+            ->assertSessionHas('success')->assertSessionHasNoErrors();
+        $this->assertSame(1, Assessment::count());
 
-        $assessment = Assessment::where('name', 'Remedial Quiz')->first();
-        $this->assertSame(1, AssessmentScore::where('assessment_id', $assessment->id)->count());
-        $this->assertDatabaseMissing('assessment_scores', ['assessment_id' => $assessment->id, 'student_id' => $students[1]->id]);
-        $this->assertDatabaseMissing('assessment_scores', ['assessment_id' => $assessment->id, 'student_id' => $students[2]->id]);
+        // Without the same form token, a second item with that name is refused, naming the first.
+        $this->addAssessment($adviser, $section, $subject, ['item_name' => 'Quiz 1', 'max_score' => 30])
+            ->assertSessionHasErrors('item_name', null, 'addItem');
+        $this->assertStringContainsString('already exists', session('errors')->getBag('addItem')->first('item_name'));
+        $this->assertSame(1, Assessment::count());
     }
 
-    public function test_duplicate_item_name_is_blocked_and_names_the_existing_items_max_score_and_component(): void
+    public function test_the_highest_possible_score_must_be_positive(): void
     {
-        ['adviser' => $adviser, 'section' => $section, 'subject' => $subject] = $this->setUpSectionWithStudents(2);
-
-        Assessment::factory()->create([
-            'subject_id' => $subject->id, 'section_id' => $section->id, 'grading_period' => 1,
-            'school_year' => $section->school_year, 'name' => 'Quiz 1', 'component' => 'examination', 'max_score' => 50,
-        ]);
-
-        $response = $this->actingAs($adviser)->post('/adviser/assessments/item', [
-            'subject_id'     => $subject->id,
-            'grading_period' => 1,
-            'item_name'      => 'Quiz 1',
-            'component'      => 'written_work',
-            'max_score'      => 20,
-            'scores'         => [],
-        ]);
-
-        $response->assertSessionHasErrors('item_name', null, 'addItem');
-        $errors = session('errors')->getBag('addItem');
-        $this->assertStringContainsString('Examination', $errors->first('item_name'));
-        $this->assertStringContainsString('50.00', $errors->first('item_name'));
-        $this->assertSame(1, Assessment::where('name', 'Quiz 1')->count());
+        ['adviser' => $adviser, 'section' => $section, 'subject' => $subject] = $this->setUpSectionWithStudents();
+        foreach (['0', '-5', 'ten', ''] as $bad) {
+            $this->addAssessment($adviser, $section, $subject, ['item_name' => 'Quiz 1', 'max_score' => $bad])->assertSessionHasErrors('max_score', null, 'addItem');
+        }
+        $this->assertSame(0, Assessment::count());
     }
 
-    public function test_a_score_exceeding_the_max_is_rejected_and_names_the_student(): void
+    public function test_adding_is_blocked_when_the_term_is_closed_or_the_subject_is_out_of_scope(): void
     {
-        ['adviser' => $adviser, 'subject' => $subject, 'students' => $students] = $this->setUpSectionWithStudents(2);
+        ['adviser' => $adviser, 'section' => $section, 'subject' => $subject] = $this->setUpSectionWithStudents();
 
-        $response = $this->actingAs($adviser)->post('/adviser/assessments/item', [
-            'subject_id'     => $subject->id,
-            'grading_period' => 1,
-            'item_name'      => 'Quiz X',
-            'component'      => 'written_work',
-            'max_score'      => 10,
-            'scores'         => [$students[0]->id => 15],
-        ]);
+        AcademicTerm::where('school_year', '2026-2027')->where('term', 2)->update(['is_open' => false]);
+        $this->addAssessment($adviser, $section, $subject, ['item_name' => 'Quiz 1'], 2)->assertSessionHasErrors('item_name', null, 'addItem');
 
-        $response->assertSessionHasErrors('scores', null, 'addItem');
-        $this->assertStringContainsString($students[0]->last_name, session('errors')->getBag('addItem')->first('scores'));
-        $this->assertDatabaseCount('assessments', 0);
+        $otherGrade = Subject::factory()->create(['grade_level' => $section->grade_level === 11 ? 12 : 11, 'type' => 'core']);
+        $this->addAssessment($adviser, $section, $otherGrade, ['item_name' => 'Quiz 1'])->assertSessionHasErrors('item_name', null, 'addItem');
+        $this->assertSame(0, Assessment::count());
     }
 
-    public function test_a_non_numeric_score_is_rejected(): void
+    public function test_principal_cannot_add_or_edit_an_assessment(): void
     {
-        ['adviser' => $adviser, 'subject' => $subject, 'students' => $students] = $this->setUpSectionWithStudents(1);
-
-        $response = $this->actingAs($adviser)->post('/adviser/assessments/item', [
-            'subject_id'     => $subject->id,
-            'grading_period' => 1,
-            'item_name'      => 'Quiz X',
-            'component'      => 'written_work',
-            'max_score'      => 10,
-            'scores'         => [$students[0]->id => 'abc'],
-        ]);
-
-        $response->assertSessionHasErrors('scores', null, 'addItem');
-        $this->assertDatabaseCount('assessments', 0);
-    }
-
-    public function test_suspicious_max_shows_a_non_blocking_warning_and_still_saves(): void
-    {
-        ['adviser' => $adviser, 'subject' => $subject, 'students' => $students] = $this->setUpSectionWithStudents(3);
-
-        $response = $this->actingAs($adviser)->post('/adviser/assessments/item', [
-            'subject_id'     => $subject->id,
-            'grading_period' => 1,
-            'item_name'      => 'Quiz X',
-            'component'      => 'written_work',
-            'max_score'      => 100,
-            'scores'         => [
-                $students[0]->id => 20,
-                $students[1]->id => 25,
-                $students[2]->id => 22,
-            ],
-        ]);
-
-        $response->assertSessionHas('warning');
-        $response->assertSessionMissing('success');
-        $this->assertDatabaseHas('assessments', ['name' => 'Quiz X', 'max_score' => 100]);
-        $this->assertSame(3, AssessmentScore::whereHas('assessment', fn($q) => $q->where('name', 'Quiz X'))->count());
-    }
-
-    public function test_manual_entry_is_blocked_when_the_term_is_closed(): void
-    {
-        ['adviser' => $adviser, 'section' => $section, 'subject' => $subject, 'students' => $students] = $this->setUpSectionWithStudents(1);
-
-        $response = $this->actingAs($adviser)->post('/adviser/assessments/item', [
-            'subject_id'     => $subject->id,
-            'grading_period' => 2, // term 2 is closed by default (only term 1 opens via ensureExistFor)
-            'item_name'      => 'Quiz X',
-            'component'      => 'written_work',
-            'max_score'      => 10,
-            'scores'         => [$students[0]->id => 5],
-        ]);
-
-        $response->assertSessionHasErrors('item_name', null, 'addItem');
-        $this->assertStringContainsString('closed', session('errors')->getBag('addItem')->first('item_name'));
-        $this->assertDatabaseCount('assessments', 0);
-    }
-
-    public function test_adviser_cannot_add_an_item_to_a_subject_outside_their_sections_scope(): void
-    {
-        ['adviser' => $adviser, 'section' => $section, 'students' => $students] = $this->setUpSectionWithStudents(1);
-        // A core subject at a DIFFERENT grade level than the adviser's own
-        // section — guaranteed out of scope regardless of which grade the
-        // section factory randomly picked (see SectionFactory).
-        $foreignSubject = Subject::factory()->create(['grade_level' => $section->grade_level === 11 ? 12 : 11, 'type' => 'core']);
-
-        $response = $this->actingAs($adviser)->post('/adviser/assessments/item', [
-            'subject_id'     => $foreignSubject->id,
-            'grading_period' => 1,
-            'item_name'      => 'Quiz X',
-            'component'      => 'written_work',
-            'max_score'      => 10,
-            'scores'         => [],
-        ]);
-
-        $response->assertSessionHasErrors('item_name', null, 'addItem');
-        $this->assertDatabaseCount('assessments', 0);
-    }
-
-    public function test_principal_cannot_add_an_assessment_item(): void
-    {
+        ['adviser' => $adviser, 'section' => $section, 'subject' => $subject] = $this->setUpSectionWithStudents();
+        $item = $this->item($section, $subject, $adviser);
         $principal = User::factory()->principal()->create();
 
-        $response = $this->actingAs($principal)->post('/adviser/assessments/item', [
-            'subject_id' => 1, 'grading_period' => 1, 'item_name' => 'x', 'component' => 'written_work', 'max_score' => 10,
-        ]);
-
-        $response->assertForbidden();
+        $this->addAssessment($principal, $section, $subject, ['item_name' => 'Quiz P'])->assertForbidden();
+        $this->editAssessment($principal, $item, ['max_score' => 30])->assertForbidden();
+        $this->assertSame(1, Assessment::count());
+        $this->assertEquals(20, $item->fresh()->max_score);
     }
 
-    // =============================================
-    // TASK 3 — editing an existing item
-    // =============================================
-
-    public function test_editing_the_max_score_recomputes_and_reports_before_after_percentages(): void
+    public function test_editing_changes_details_only_and_keeps_every_recorded_score(): void
     {
-        ['adviser' => $adviser, 'section' => $section, 'subject' => $subject, 'students' => $students] = $this->setUpSectionWithStudents(2);
+        ['adviser' => $adviser, 'section' => $section, 'subject' => $subject, 'students' => $students] = $this->setUpSectionWithStudents();
+        $item = $this->item($section, $subject, $adviser);
+        $this->saveCells($adviser, $item, [$students[0]->id => '18', $students[1]->id => '0', $students[2]->id => 'M'])->assertOk();
 
-        // Wrong max score typed on purpose (should have been 20, typed 40).
-        $assessment = Assessment::factory()->create([
-            'subject_id' => $subject->id, 'section_id' => $section->id, 'grading_period' => 1,
-            'school_year' => $section->school_year, 'name' => 'Quiz 1', 'component' => 'written_work', 'max_score' => 40,
-        ]);
-        AssessmentScore::factory()->create(['assessment_id' => $assessment->id, 'student_id' => $students[0]->id, 'score' => 18]); // 45% under wrong max
-        AssessmentScore::factory()->create(['assessment_id' => $assessment->id, 'student_id' => $students[1]->id, 'score' => 20]); // 50% under wrong max
+        $this->editAssessment($adviser, $item, ['max_score' => 25, 'component' => 'performance_task', 'assessment_date' => '2026-07-02'])
+            ->assertSessionHas('success');
 
-        $response = $this->actingAs($adviser)->put('/adviser/assessments/item/' . $assessment->id, [
-            'grading_period' => 1,
-            'max_score'      => 20, // corrected
-            'scores'         => [
-                $students[0]->id => 18,
-                $students[1]->id => 20,
-            ],
-        ]);
-
-        $response->assertSessionHas('success');
-        $response->assertSessionHas('edit_summary');
-
-        $assessment->refresh();
-        $this->assertEquals(20, $assessment->max_score);
-        $this->assertSame('Quiz 1', $assessment->name); // unchanged
-        $this->assertSame('written_work', $assessment->component); // unchanged
-
-        $summary = collect(session('edit_summary'))->keyBy('name');
-        $before1 = $summary->get($students[0]->last_name . ', ' . $students[0]->first_name)['before'];
-        $after1 = $summary->get($students[0]->last_name . ', ' . $students[0]->first_name)['after'];
-        $this->assertEqualsWithDelta(45.0, $before1, 0.01);
-        $this->assertEqualsWithDelta(90.0, $after1, 0.01);
-
-        $after2 = $summary->get($students[1]->last_name . ', ' . $students[1]->first_name)['after'];
-        $this->assertEqualsWithDelta(100.0, $after2, 0.01);
+        $item->refresh();
+        $this->assertSame(['performance_task', 25.0, 'Quiz 1', '2026-07-02'], [$item->component, (float) $item->max_score, $item->name, $item->assessment_date->format('Y-m-d')]);
+        $this->assertSame(['18.00', '0.00'], AssessmentScore::where('assessment_id', $item->id)->orderBy('student_id')->pluck('score')->map(fn($s) => (string) $s)->all());
+        $this->assertSame(1, AssessmentLearnerStatus::where('assessment_id', $item->id)->count());
     }
 
-    public function test_editing_cannot_change_component_or_name_even_if_posted(): void
+    public function test_editing_refuses_scores_a_lower_hps_than_a_recorded_score_and_a_new_scope(): void
     {
-        ['adviser' => $adviser, 'section' => $section, 'subject' => $subject] = $this->setUpSectionWithStudents(1);
+        ['adviser' => $adviser, 'section' => $section, 'subject' => $subject, 'students' => $students] = $this->setUpSectionWithStudents();
+        $item = $this->item($section, $subject, $adviser);
+        $this->saveCells($adviser, $item, [$students[0]->id => '18'])->assertOk();
 
-        $assessment = Assessment::factory()->create([
-            'subject_id' => $subject->id, 'section_id' => $section->id, 'grading_period' => 1,
-            'school_year' => $section->school_year, 'name' => 'Quiz 1', 'component' => 'written_work', 'max_score' => 20,
-        ]);
+        $this->editAssessment($adviser, $item, ['max_score' => 15])->assertSessionHasErrors('max_score', null, 'editItem');
+        $this->editAssessment($adviser, $item, ['scores' => [$students[1]->id => 5]])->assertSessionHasErrors('scores', null, 'editItem');
+        $other = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
+        $this->editAssessment($adviser, $item, ['subject_id' => $other->id])->assertSessionHasErrors('component', null, 'editItem');
+        $this->editAssessment($adviser, $item, ['grading_period' => 2])->assertSessionHasErrors('component', null, 'editItem');
+        $this->editAssessment($adviser, $item, ['max_score' => 0])->assertSessionHasErrors('max_score', null, 'editItem');
 
-        $this->actingAs($adviser)->put('/adviser/assessments/item/' . $assessment->id, [
-            'grading_period' => 1,
-            'max_score'      => 25,
-            // A tampered/extra request cannot change these — the
-            // controller never reads them from the request at all.
-            'name'           => 'Renamed Item',
-            'component'      => 'examination',
-            'scores'         => [],
-        ])->assertSessionHas('success');
+        $item->refresh();
+        $this->assertSame([20.0, $subject->id, 1], [(float) $item->max_score, $item->subject_id, (int) $item->grading_period]);
+        $this->assertSame(1, AssessmentScore::where('assessment_id', $item->id)->count());
 
-        $assessment->refresh();
-        $this->assertSame('Quiz 1', $assessment->name);
-        $this->assertSame('written_work', $assessment->component);
-        $this->assertEquals(25, $assessment->max_score);
+        // Down to exactly the recorded score is allowed.
+        $this->editAssessment($adviser, $item, ['max_score' => 18])->assertSessionHasNoErrors();
+        $this->assertEquals(18, $item->fresh()->max_score);
     }
 
-    public function test_clearing_a_score_on_edit_removes_the_row_rather_than_storing_a_zero(): void
+    public function test_a_stale_edit_form_is_refused(): void
     {
-        ['adviser' => $adviser, 'section' => $section, 'subject' => $subject, 'students' => $students] = $this->setUpSectionWithStudents(1);
+        ['adviser' => $adviser, 'section' => $section, 'subject' => $subject] = $this->setUpSectionWithStudents();
+        $item = $this->item($section, $subject, $adviser);
+        $opened = ClassRecordService::definitionFingerprint($item);
 
-        $assessment = Assessment::factory()->create([
-            'subject_id' => $subject->id, 'section_id' => $section->id, 'grading_period' => 1,
-            'school_year' => $section->school_year, 'name' => 'Quiz 1', 'component' => 'written_work', 'max_score' => 20,
-        ]);
-        AssessmentScore::factory()->create(['assessment_id' => $assessment->id, 'student_id' => $students[0]->id, 'score' => 15]);
+        $this->editAssessment($adviser, $item, ['max_score' => 30])->assertSessionHasNoErrors(); // another tab saved first
+        $this->actingAs($adviser)->put(route('teacher.assessments.update', $item->id), [
+            'max_score' => 40, 'component' => 'written_work', 'loaded_fingerprint' => $opened,
+        ])->assertSessionHasErrors('component', null, 'editItem');
+        $this->assertEquals(30, $item->fresh()->max_score);
 
-        $this->actingAs($adviser)->put('/adviser/assessments/item/' . $assessment->id, [
-            'grading_period' => 1,
-            'max_score'      => 20,
-            'scores'         => [$students[0]->id => ''],
-        ])->assertSessionHas('success');
-
-        $this->assertDatabaseMissing('assessment_scores', ['assessment_id' => $assessment->id, 'student_id' => $students[0]->id]);
+        // No fingerprint at all is refused too.
+        $this->actingAs($adviser)->put(route('teacher.assessments.update', $item->id), ['max_score' => 40, 'component' => 'written_work'])
+            ->assertSessionHasErrors('loaded_fingerprint', null, 'editItem');
     }
 
     public function test_editing_is_blocked_when_the_term_is_closed(): void
     {
-        ['adviser' => $adviser, 'section' => $section, 'subject' => $subject] = $this->setUpSectionWithStudents(1);
+        ['adviser' => $adviser, 'section' => $section, 'subject' => $subject] = $this->setUpSectionWithStudents();
+        $item = $this->item($section, $subject, $adviser);
+        AcademicTerm::where('school_year', '2026-2027')->where('term', 1)->update(['is_open' => false]);
 
-        $assessment = Assessment::factory()->create([
-            'subject_id' => $subject->id, 'section_id' => $section->id, 'grading_period' => 2,
-            'school_year' => $section->school_year, 'name' => 'Quiz 1', 'component' => 'written_work', 'max_score' => 20,
-        ]);
-
-        $response = $this->actingAs($adviser)->put('/adviser/assessments/item/' . $assessment->id, [
-            'grading_period' => 2, 'max_score' => 25, 'scores' => [],
-        ]);
-
-        $response->assertSessionHas('error');
-        $assessment->refresh();
-        $this->assertEquals(20, $assessment->max_score);
+        $this->editAssessment($adviser, $item, ['max_score' => 25])->assertSessionHas('error');
+        $this->actingAs($adviser)->get(route('teacher.assessments.edit', $item->id))->assertRedirect()->assertSessionHas('error');
+        $this->assertEquals(20, $item->fresh()->max_score);
     }
 
     public function test_another_advisers_section_cannot_edit_this_item(): void
     {
-        ['section' => $section, 'subject' => $subject] = $this->setUpSectionWithStudents(1);
+        ['adviser' => $adviser, 'section' => $section, 'subject' => $subject] = $this->setUpSectionWithStudents();
+        $item = $this->item($section, $subject, $adviser);
         $otherAdviser = User::factory()->create();
-        Section::factory()->create(['adviser_id' => $otherAdviser->id]);
+        Section::factory()->create(['adviser_id' => $otherAdviser->id, 'school_year' => '2026-2027']);
 
-        $assessment = Assessment::factory()->create([
-            'subject_id' => $subject->id, 'section_id' => $section->id, 'grading_period' => 1,
-            'school_year' => $section->school_year, 'name' => 'Quiz 1', 'component' => 'written_work', 'max_score' => 20,
-        ]);
-
-        $response = $this->actingAs($otherAdviser)->put('/adviser/assessments/item/' . $assessment->id, [
-            'grading_period' => 1, 'max_score' => 25, 'scores' => [],
-        ]);
-
-        $response->assertForbidden();
+        $this->editAssessment($otherAdviser, $item, ['max_score' => 30])->assertForbidden();
+        $this->actingAs($otherAdviser)->get(route('teacher.assessments.edit', $item->id))->assertForbidden();
+        $this->assertEquals(20, $item->fresh()->max_score);
     }
 }

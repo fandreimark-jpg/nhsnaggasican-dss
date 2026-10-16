@@ -19,6 +19,7 @@ use Tests\TestCase;
 class GradeEncodingScopeTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
 
     public function test_adviser_cannot_encode_a_grade_for_a_subject_outside_their_sections_scope(): void
     {

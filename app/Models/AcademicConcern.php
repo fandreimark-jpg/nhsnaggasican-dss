@@ -46,6 +46,7 @@ class AcademicConcern extends Model
         'resolution_reason',
         'reviewed_by',
         'reviewed_at',
+        'review_note',
     ];
 
     protected $casts = [
@@ -71,6 +72,16 @@ class AcademicConcern extends Model
     public static function openKeyFor(string $ruleKey, int $studentId, string $contextKey): string
     {
         return $ruleKey . '|' . $studentId . '|' . $contextKey;
+    }
+
+    /**
+     * Only concerns of a rule monitoring currently runs. A retired rule's
+     * rows (the Attendance Concern) stay in the table as history but never
+     * make a learner For Review, and are never listed or counted.
+     */
+    public function scopeActiveRules(Builder $query): Builder
+    {
+        return $query->whereIn('rule_key', \App\Services\AcademicMonitoringService::enabledRuleKeys());
     }
 
     public function isOpen(): bool
@@ -104,6 +115,35 @@ class AcademicConcern extends Model
     public function reviewedBy()
     {
         return $this->belongsTo(User::class, 'reviewed_by');
+    }
+
+    /** Interventions the Principal recorded from this concern (Phase 2E). Optional: most interventions have none. */
+    public function interventions()
+    {
+        return $this->hasMany(Intervention::class);
+    }
+
+    public function isReviewed(): bool
+    {
+        return $this->reviewed_at !== null;
+    }
+
+    // --- Phase 2E schema availability ------------------------------------
+    // The working tree is served live by XAMPP; until the Phase 2E
+    // migrations are applied these report false and the review note /
+    // intervention link are simply not read or written, instead of a
+    // "column not found" error. Memoised per process.
+
+    private static array $columnMemo = [];
+
+    public static function reviewNoteAvailable(): bool
+    {
+        return self::$columnMemo['review_note'] ??= \Illuminate\Support\Facades\Schema::hasColumn('academic_concerns', 'review_note');
+    }
+
+    public static function interventionLinkAvailable(): bool
+    {
+        return self::$columnMemo['academic_concern_id'] ??= \Illuminate\Support\Facades\Schema::hasColumn('interventions', 'academic_concern_id');
     }
 
     // --- Scopes ----------------------------------------------------------

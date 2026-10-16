@@ -78,7 +78,7 @@ class TermReadinessTest extends TestCase
         $response->assertOk();
         $response->assertDontSee('assessment evidence complete');
 
-        $submitResponse = $this->actingAs($adviser)->post('/adviser/submit-report', ['grading_period' => 1]);
+        $submitResponse = $this->actingAs($adviser)->post('/adviser/submit-report', ['grading_period' => 1, 'expected_version' => 0]);
         $submitResponse->assertSessionMissing('error');
         $this->assertDatabaseHas('report_submissions', ['section_id' => $section->id, 'grading_period' => 1]);
     }

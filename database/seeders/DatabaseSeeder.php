@@ -27,7 +27,20 @@ use Illuminate\Support\Facades\Hash;
  */
 class DatabaseSeeder extends Seeder
 {
-    private const PASSWORD = 'password';
+    /**
+     * Final release pass (2026-09-27): no login password is committed here
+     * any more. A NEW account's password comes from SEED_ACCOUNT_PASSWORD
+     * (config('dss.seed_account_password'), never committed, at least
+     * MIN_PASSWORD_LENGTH characters). Without it:
+     *   - production: the seeder REFUSES before writing anything, so a
+     *     deployed database can never receive a known default password;
+     *   - local/testing: a random password is generated for this run and
+     *     shown once on the console.
+     * Existing accounts are never touched, so re-seeding needs no password.
+     */
+    public const MIN_PASSWORD_LENGTH = 12;
+
+    private ?string $accountPassword = null;
 
     private const SCHOOL_YEAR = '2026-2027';
 
@@ -106,7 +119,7 @@ class DatabaseSeeder extends Seeder
         }
 
         $this->command?->info('');
-        $this->command?->info('Demo accounts seeded. Change default credentials before use.');
+        $this->command?->info('Demo accounts seeded (existing accounts were left unchanged).');
         $this->command?->table(['Role', 'Email'], [
             ['Admin', $admin->email],
             ['Adviser', $adviser->email],
@@ -131,7 +144,7 @@ class DatabaseSeeder extends Seeder
                 'name'       => $firstName . ' ' . $lastName,
                 'last_name'  => $lastName,
                 'first_name' => $firstName,
-                'password'   => Hash::make(self::PASSWORD),
+                'password'   => Hash::make($this->accountPassword()),
             ]
         );
 
@@ -139,5 +152,38 @@ class DatabaseSeeder extends Seeder
         $user->save();
 
         return $user;
+    }
+
+    /**
+     * The password for accounts this run CREATES — resolved once, only when
+     * an account actually has to be created. Never a committed value.
+     */
+    private function accountPassword(): string
+    {
+        if ($this->accountPassword !== null) {
+            return $this->accountPassword;
+        }
+
+        $configured = (string) config('dss.seed_account_password', '');
+
+        if ($configured !== '') {
+            if (mb_strlen($configured) < self::MIN_PASSWORD_LENGTH || strtolower($configured) === 'password') {
+                throw new \RuntimeException('SEED_ACCOUNT_PASSWORD must be at least ' . self::MIN_PASSWORD_LENGTH
+                    . ' characters and not a default word. No account was created.');
+            }
+
+            return $this->accountPassword = $configured;
+        }
+
+        if (app()->environment('production')) {
+            throw new \RuntimeException('Refusing to create login accounts in production without SEED_ACCOUNT_PASSWORD. '
+                . 'Set it in the deployment environment (never in Git), or create the accounts through Admin > Users. No account was created.');
+        }
+
+        $this->accountPassword = \Illuminate\Support\Str::password(20);
+        $this->command?->warn('No SEED_ACCOUNT_PASSWORD set — the accounts created by this run use this one-time random password '
+            . '(local/testing only; shown once, never stored in plain text): ' . $this->accountPassword);
+
+        return $this->accountPassword;
     }
 }

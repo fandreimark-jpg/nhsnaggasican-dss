@@ -31,6 +31,7 @@ use Tests\TestCase;
 class TransmutationFallbackTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
 
     protected function setUp(): void
     {

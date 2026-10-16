@@ -31,7 +31,7 @@
             Configure which school year is active — no code change or new section required. Everything on this page,
             and every other screen that reads "the active school year," follows whichever one is marked Active below.
             Activating a new year never renames, moves, or deletes a previous year's records — they stay on file as
-            historical records (grades, reports, assessments, risk results, interventions, and enrollments), and any
+            historical records (grades, reports, assessments, interventions, academic concerns, enrollments, and archived legacy risk results), and any
             term still open in the previous year is closed. Academic years are never deleted.
         </p>
         </div>

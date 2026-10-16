@@ -7,8 +7,8 @@
 
 @include('partials.section-school-year-context')
 
-{{-- Final pre-demo audit (2026-09-20): the Edit Student modal's rejected
-     submit (blank name, invalid gender) bounced back with no message. --}}
+{{-- My Students is a view-only roster (the adviser edit action was removed
+     2026-09-27); the partial stays for any flashed validation message. --}}
 @include('partials.validation-errors')
 
 <div class="card overflow-x-auto">
@@ -16,7 +16,23 @@
         <div>
             <h2 class="card-title">Students</h2>
             <p class="text-xs text-muted"><x-count-label :count="$students->total()" noun="student" /> in your section</p>
+            @if($section)
+            <p class="text-xs mt-1" data-for-review-count>
+                <span class="font-medium text-amber-700">{{ $forReviewCount }} of {{ $students->total() }} For Review</span> in Term {{ $period }}
+                — from open Academic Concerns, evaluated subject by subject.
+            </p>
+            @endif
         </div>
+        @if($section)
+        <form method="GET" action="{{ route('adviser.students') }}" class="flex items-center gap-2" data-no-loading>
+            <label for="myStudentsTerm" class="text-xs text-muted">Term</label>
+            <select id="myStudentsTerm" name="period" class="form-select-sm" onchange="this.form.submit()">
+                @foreach($terms as $t)
+                    <option value="{{ $t }}" @selected($t === $period)>Term {{ $t }}</option>
+                @endforeach
+            </select>
+        </form>
+        @endif
         <div class="flex items-center gap-3 flex-wrap">
             {{-- Search box--}}
             <div>
@@ -35,7 +51,7 @@
                 @endif
             </div>
             <p class="text-xs text-muted">
-                <i class="bi bi-info-circle"></i> Adding new students is done by the Admin.
+                <i class="bi bi-info-circle"></i> Learner records are managed by the Admin.
             </p>
         </div>
     </div>
@@ -45,30 +61,40 @@
                 <th scope="col">LRN</th>
                 <th scope="col">Last Name</th>
                 <th scope="col">First Name</th>
-                <th scope="col">Middle Name</th>
-                <th scope="col">Gender</th>
-                <th scope="col" class="text-right">Actions</th>
+                <th scope="col">M.I.</th>
+                <th scope="col">Sex</th>
+                <th scope="col" title="Open Academic Concerns this term (Subject Performance Concern, Missing Requirement). The evidence is under View details.">
+                    Monitoring
+                    <span class="block normal-case font-normal text-gray-400 text-[10px] tracking-normal">Term {{ $period }}</span>
+                </th>
+                <th scope="col" class="text-right">Action</th>
             </tr>
         </thead>
 
         <tbody id="adviserStudentTableBody">
             @forelse($students as $student)
 
-            <tr class="student-row">
+            <tr class="student-row" data-student-row="{{ $student->id }}">
                 <td>{{ $student->lrn }}</td>
                 <td class="font-medium text-ink">{{ $student->last_name }}</td>
                 <td>{{ $student->first_name }}</td>
-                <td>{{ $student->middle_name ?? '—' }}</td>
+                <td>{{ $student->middle_name ? mb_substr($student->middle_name, 0, 1) . '.' : '—' }}</td>
                 <td class="capitalize">{{ $student->gender }}</td>
-                <td class="text-right">
-                    <button type="button"
-                        onclick='openEditModal(@json($student))'
-                        class="text-brand-600 hover:underline text-sm"><i class="bi bi-pencil-square"></i>Edit</button>
+                <td data-monitoring-cell>
+                    <x-ui.monitoring-status :status="$monitoring->get($student->id)" compact />
+                </td>
+                <td class="text-right whitespace-nowrap">
+                    {{-- Official Term results and the full concern evidence
+                         live on Submit Report (read-only here). --}}
+                    <a href="{{ route('adviser.submit.report', ['period' => $period]) }}#learner-{{ $student->id }}"
+                       class="text-brand-700 hover:underline text-sm" data-view-details>
+                        <i class="bi bi-eye"></i> View details
+                    </a>
                 </td>
             </tr>
             @empty
             <tr>
-                <td colspan="6">
+                <td colspan="7">
                     <x-empty-state message="No students in your section yet." hint="An Admin adds students and assigns them to your section." />
                 </td>
             </tr>
@@ -96,61 +122,7 @@
     @endif
 </div>
 
-{{-- EDIT MODAL ONLY --}}
-<div id="editModal"
-     class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50 transition-opacity duration-200 opacity-0">
-    <div class="modal-box bg-white rounded-xl shadow-modal w-full max-w-lg p-6 transition-all duration-200 scale-95 opacity-0">
 
-        <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-semibold text-ink">Edit Student</h3>
-            <button type="button" onclick="closeEditModal()" aria-label="Close" class="text-gray-400 hover:text-gray-600">✕</button>
-        </div>
-
-        <form id="editForm" method="POST" class="space-y-4" data-update-url="{{ route('adviser.students.update', ['id' => '__ID__']) }}">
-            @csrf
-            @method('PUT')
-
-            <div class="grid grid-cols-2 gap-4">
-                <div>
-                    <label class="form-label">Last Name</label>
-                    <input type="text" name="last_name" id="edit_last_name" required
-                           class="w-full border rounded-lg px-3 py-2 text-sm">
-                </div>
-                <div>
-                    <label class="form-label">First Name</label>
-                    <input type="text" name="first_name" id="edit_first_name" required
-                           class="w-full border rounded-lg px-3 py-2 text-sm">
-                </div>
-            </div>
-
-            <div>
-                <label class="form-label">Middle Name</label>
-                <input type="text" name="middle_name" id="edit_middle_name"
-                       class="w-full border rounded-lg px-3 py-2 text-sm">
-            </div>
-
-            <div class="grid grid-cols-2 gap-4">
-                <div>
-                    <label class="form-label">Gender</label>
-                    <select name="gender" id="edit_gender" required
-                            class="w-full border rounded-lg px-3 py-2 text-sm">
-                        <option value="male">Male</option>
-                        <option value="female">Female</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="flex justify-end gap-3 pt-2">
-                <button type="button" onclick="closeEditModal()"
-                        class="px-4 py-2 text-sm text-muted">Cancel</button>
-                <button type="submit"
-                        class="btn btn-primary">
-                    Update Student
-                </button>
-            </div>
-        </form>
-    </div>
-</div>
 
 @push('scripts')
 <script>

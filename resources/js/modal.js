@@ -4,28 +4,91 @@ window.toDateInputValue = function (value) {
     return value ? value.substring(0, 10) : "";
 };
 
-// Mobile sidebar (hamburger menu) — shows/hides the navigation drawer
-// on small screens. On desktop the sidebar is always visible via the
-// md:translate-x-0 class in the blade file, so these functions only
-// ever matter below the md breakpoint.
-window.toggleSidebar = function () {
-    const sidebar = document.getElementById("sidebar");
+// Mobile sidebar drawer ("mobile header" fix, 2026-09-28). Below the md
+// breakpoint the sidebar is an off-canvas MODAL drawer opened from the
+// header's #sidebarToggle: while open the page behind it is inert (no taps,
+// no Tab stops, no background scroll), focus moves into the drawer, Escape
+// or the overlay closes it and focus returns to the trigger. While closed
+// the off-screen drawer is inert too, so its links are not reachable by Tab.
+// At md and above the sidebar is always visible and none of this applies.
+const desktopQuery = window.matchMedia("(min-width: 768px)");
+let drawerReturnFocus = null;
+
+function drawerParts() {
+    return {
+        sidebar: document.getElementById("sidebar"),
+        overlay: document.getElementById("sidebarOverlay"),
+        trigger: document.getElementById("sidebarToggle"),
+        content: document.getElementById("appContent"),
+    };
+}
+
+function drawerIsOpen(sidebar) {
+    return !desktopQuery.matches && !sidebar.classList.contains("-translate-x-full");
+}
+
+function applyDrawerState(open) {
+    const { sidebar, overlay, trigger, content } = drawerParts();
     if (!sidebar) return;
-    const isOpen = !sidebar.classList.contains("-translate-x-full");
+    const mobile = !desktopQuery.matches;
+    const isOpen = mobile && open;
+    sidebar.classList.toggle("-translate-x-full", !isOpen);
+    overlay?.classList.toggle("hidden", !isOpen);
+    trigger?.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    sidebar.inert = mobile && !isOpen;
+    if (content) content.inert = isOpen;
     if (isOpen) {
-        window.closeSidebar();
+        sidebar.setAttribute("role", "dialog");
+        sidebar.setAttribute("aria-modal", "true");
     } else {
-        sidebar.classList.remove("-translate-x-full");
-        document.getElementById("sidebarOverlay")?.classList.remove("hidden");
+        sidebar.removeAttribute("role");
+        sidebar.removeAttribute("aria-modal");
     }
+}
+
+window.toggleSidebar = function () {
+    const { sidebar } = drawerParts();
+    if (!sidebar) return;
+    if (drawerIsOpen(sidebar)) {
+        window.closeSidebar();
+        return;
+    }
+    drawerReturnFocus = document.activeElement;
+    applyDrawerState(true);
+    sidebar.querySelector("button, a[href]")?.focus();
 };
 
 window.closeSidebar = function () {
-    const sidebar = document.getElementById("sidebar");
+    const { sidebar, trigger } = drawerParts();
     if (!sidebar) return;
-    sidebar.classList.add("-translate-x-full");
-    document.getElementById("sidebarOverlay")?.classList.add("hidden");
+    const wasOpen = drawerIsOpen(sidebar);
+    applyDrawerState(false);
+    if (wasOpen) {
+        const target = drawerReturnFocus && document.contains(drawerReturnFocus) ? drawerReturnFocus : trigger;
+        target?.focus();
+    }
+    drawerReturnFocus = null;
 };
+
+document.addEventListener("keydown", function (e) {
+    const { sidebar } = drawerParts();
+    if (e.key === "Escape" && sidebar && drawerIsOpen(sidebar)) {
+        e.preventDefault();
+        window.closeSidebar();
+    }
+});
+
+// Rotating a tablet or resizing across md: reset to one consistent state.
+desktopQuery.addEventListener("change", function () {
+    drawerReturnFocus = null;
+    applyDrawerState(false);
+});
+
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => applyDrawerState(false));
+} else {
+    applyDrawerState(false);
+}
 
 // Accessibility ("UI modernization pass"): the element that opened a modal
 // gets focus back when it closes; focus moves into the dialog on open;
@@ -133,27 +196,6 @@ window.bindModalOverlayClose = function (id, extraCleanup) {
 };
 
 document.addEventListener("DOMContentLoaded", function () {
-    // =============================================
-    // ADVISER — EDIT STUDENT MODAL
-    // =============================================
-    const editStudentForm = document.getElementById("editForm");
-
-    if (document.getElementById("editModal") && editStudentForm) {
-        window.openEditModal = function (student) {
-            document.getElementById("edit_last_name").value = student.last_name;
-            document.getElementById("edit_first_name").value =
-                student.first_name;
-            document.getElementById("edit_middle_name").value =
-                student.middle_name ?? "";
-            document.getElementById("edit_gender").value = student.gender;
-            editStudentForm.action = window.updateUrlFor(editStudentForm, student.id);
-            window.showModal("editModal");
-        };
-
-        window.closeEditModal = () => window.hideModal("editModal");
-        window.bindModalOverlayClose("editModal");
-    }
-
     // =============================================
     // PROFILE MODAL (used on every page, adviser or admin)
     // =============================================

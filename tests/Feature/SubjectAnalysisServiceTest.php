@@ -151,34 +151,56 @@ class SubjectAnalysisServiceTest extends TestCase
      * counting a student under whichever subject is their weakest_subject_id,
      * moderate/high only.
      */
-    public function test_at_risk_count_reflects_students_whose_weakest_subject_is_this_one(): void
+    public function test_open_concern_counts_come_from_open_academic_concerns_in_this_subject_and_scope(): void
     {
-        $section = Section::factory()->create(['school_year' => '2026-2027']);
+        $adviser = \App\Models\User::factory()->create(['role' => 'adviser']);
+        $section = Section::factory()->create(['school_year' => '2026-2027', 'adviser_id' => $adviser->id]);
+        $otherSection = Section::factory()->create(['school_year' => '2026-2027']);
         $subject = Subject::factory()->create();
-        $otherSubject = Subject::factory()->create();
-        $studentHigh = Student::factory()->create(['section_id' => $section->id]);
-        $studentLow = Student::factory()->create(['section_id' => $section->id]);
-        $studentOtherWeakest = Student::factory()->create(['section_id' => $section->id]);
+        $quietSubject = Subject::factory()->create();
+        [$ana, $ben, $cara, $dan] = Student::factory()->count(4)->create(['section_id' => $section->id])->all();
+        $elsewhere = Student::factory()->create(['section_id' => $otherSection->id]);
 
-        RiskResult::create([
-            'student_id' => $studentHigh->id, 'grading_period' => 1, 'average_grade' => 60,
-            'risk_level' => 'high', 'weakest_subject_id' => $subject->id, 'school_year' => '2026-2027', 'generated_at' => now(),
+        $item = fn(Section $s, string $name, int $term = 1) => Assessment::factory()->create([
+            'subject_id' => $subject->id, 'section_id' => $s->id, 'grading_period' => $term, 'school_year' => '2026-2027',
+            'name' => $name, 'component' => 'written_work', 'max_score' => 20,
         ]);
+        $quiz1 = $item($section, 'Quiz 1');
+        $quiz2 = $item($section, 'Quiz 2');
+        $term2Quiz = $item($section, 'Term 2 Quiz', 2);
+        $otherQuiz = $item($otherSection, 'Quiz 1');
+
+        $statuses = new \App\Services\AssessmentStatusService();
+        $statuses->markMissing($quiz1, $ana->id, $adviser->id);   // Ana: 2 open concerns
+        $statuses->markMissing($quiz2, $ana->id, $adviser->id);
+        $statuses->markMissing($quiz1, $ben->id, $adviser->id);   // Ben: 1 open concern
+        $statuses->markMissing($quiz1, $cara->id, $adviser->id);  // Cara: resolved below
+        $statuses->markMissing($term2Quiz, $dan->id, $adviser->id);   // other term
+        $statuses->markMissing($otherQuiz, $elsewhere->id, $adviser->id); // other section
+        $monitoring = app(\App\Services\AcademicMonitoringService::class);
+        $monitoring->synchronizeAssessments([$quiz1->id, $quiz2->id, $term2Quiz->id, $otherQuiz->id]);
+        $statuses->recordScore($quiz1, $cara->id, 0); // a real 0 is evidence: Cara's concern resolves
+        $monitoring->synchronizeAssessments([$quiz1->id]);
+
+        // A legacy classifier row counts for nothing.
         RiskResult::create([
-            'student_id' => $studentLow->id, 'grading_period' => 1, 'average_grade' => 95,
-            'risk_level' => 'low', 'weakest_subject_id' => $subject->id, 'school_year' => '2026-2027', 'generated_at' => now(),
-        ]);
-        RiskResult::create([
-            'student_id' => $studentOtherWeakest->id, 'grading_period' => 1, 'average_grade' => 65,
-            'risk_level' => 'high', 'weakest_subject_id' => $otherSubject->id, 'school_year' => '2026-2027', 'generated_at' => now(),
+            'student_id' => $ben->id, 'grading_period' => 1, 'average_grade' => 60,
+            'risk_level' => 'high', 'weakest_subject_id' => $quietSubject->id, 'school_year' => '2026-2027', 'generated_at' => now(),
         ]);
 
-        $summaries = (new SubjectAnalysisService())->getSubjectSummaries('2026-2027');
+        $service = new SubjectAnalysisService();
+        $row = fn(array $summaries, Subject $s) => collect($summaries)->firstWhere('subject.id', $s->id);
 
-        $row = collect($summaries)->firstWhere('subject.id', $subject->id);
-        // Only studentHigh counts: low risk doesn't count, and the third
-        // student's weakest subject is the OTHER subject.
-        $this->assertSame(1, $row['at_risk_count']);
+        // Whole school year: 5 open (Ana 2, Ben 1, Dan 1, elsewhere 1) across 4 learners.
+        $all = $row($service->getSubjectSummaries('2026-2027'), $subject);
+        $this->assertSame(5, $all['open_concern_count']);
+        $this->assertSame(4, $all['open_concern_learners']);
+        $this->assertNull($row($service->getSubjectSummaries('2026-2027'), $quietSubject), 'a legacy risk row does not make a subject appear');
+
+        // One section, one term: Ana's 2 + Ben's 1.
+        $scoped = $row($service->getSubjectSummaries('2026-2027', $section->id, 1), $subject);
+        $this->assertSame(3, $scoped['open_concern_count']);
+        $this->assertSame(2, $scoped['open_concern_learners']);
     }
 
     public function test_section_filter_narrows_the_summary_to_one_section(): void

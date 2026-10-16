@@ -199,6 +199,8 @@ class SubjectController extends Controller
 
         $subject->delete();
 
+        \App\Helpers\LogActivity::log('delete_subject', 'Deleted subject ' . $subject->name . ' (Grade ' . $subject->grade_level . ')', 'subjects', (int) $id);
+
         return redirect()->route('admin.subjects')
             ->with('success', 'Subject deleted successfully!');
     }

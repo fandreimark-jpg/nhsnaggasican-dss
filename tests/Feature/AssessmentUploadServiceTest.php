@@ -93,7 +93,24 @@ class AssessmentUploadServiceTest extends TestCase
         @unlink($path);
     }
 
-    public function test_unknown_lrn_is_reported_as_an_error_and_not_imported(): void
+    /** Runs import() and returns the blocking problems it refused the file with. */
+    private function refusedWith(string $path, Section $section, Subject $subject, AssessmentUpload $upload, int $adviserId): array
+    {
+        try {
+            $this->service->import(
+                $path, ['Quiz 1' => ['component' => 'written_work', 'max_score' => 20]],
+                $section, $subject, 1, $section->school_year, $adviserId, $upload
+            );
+        } catch (\App\Exceptions\AssessmentImportBlockedException $e) {
+            $this->assertSame(0, \App\Models\Assessment::count(), 'refused before any item is written');
+            $this->assertSame(0, \App\Models\AssessmentScore::count(), 'refused before any score is written');
+
+            return $e->problems();
+        }
+        $this->fail('The file should have been refused as a whole.');
+    }
+
+    public function test_unknown_lrn_with_a_score_refuses_the_whole_file(): void
     {
         $adviser = User::factory()->create();
         $section = Section::factory()->create(['adviser_id' => $adviser->id]);
@@ -102,19 +119,15 @@ class AssessmentUploadServiceTest extends TestCase
 
         $path = $this->csvPath("lrn,last_name,first_name,Quiz 1\n999999999999,Nobody,Here,18\n");
 
-        $result = $this->service->import(
-            $path, ['Quiz 1' => ['component' => 'written_work', 'max_score' => 20]],
-            $section, $subject, 1, $section->school_year, $adviser->id, $upload
-        );
+        $problems = $this->refusedWith($path, $section, $subject, $upload, $adviser->id);
 
-        $this->assertSame(0, $result['imported']);
-        $this->assertCount(1, $result['errors']);
-        $this->assertStringContainsString('999999999999', $result['errors'][0]);
+        $this->assertCount(1, $problems);
+        $this->assertStringContainsString('999999999999', $problems[0]);
 
         @unlink($path);
     }
 
-    public function test_score_exceeding_max_score_is_rejected(): void
+    public function test_score_exceeding_max_score_refuses_the_whole_file(): void
     {
         $adviser = User::factory()->create();
         $section = Section::factory()->create(['adviser_id' => $adviser->id]);
@@ -124,19 +137,16 @@ class AssessmentUploadServiceTest extends TestCase
 
         $path = $this->csvPath("lrn,last_name,first_name,Quiz 1\n100000000011,Dela Cruz,Juan,25\n");
 
-        $result = $this->service->import(
-            $path, ['Quiz 1' => ['component' => 'written_work', 'max_score' => 20]],
-            $section, $subject, 1, $section->school_year, $adviser->id, $upload
-        );
+        $problems = $this->refusedWith($path, $section, $subject, $upload, $adviser->id);
 
-        $this->assertSame(0, $result['imported']);
-        $this->assertCount(1, $result['errors']);
+        $this->assertCount(1, $problems);
+        $this->assertStringContainsString('exceeds its maximum of 20', $problems[0]);
         $this->assertDatabaseMissing('assessment_scores', ['student_id' => $student->id]);
 
         @unlink($path);
     }
 
-    public function test_non_numeric_score_is_rejected(): void
+    public function test_non_numeric_score_refuses_the_whole_file(): void
     {
         $adviser = User::factory()->create();
         $section = Section::factory()->create(['adviser_id' => $adviser->id]);
@@ -146,13 +156,10 @@ class AssessmentUploadServiceTest extends TestCase
 
         $path = $this->csvPath("lrn,last_name,first_name,Quiz 1\n100000000012,Dela Cruz,Juan,abc\n");
 
-        $result = $this->service->import(
-            $path, ['Quiz 1' => ['component' => 'written_work', 'max_score' => 20]],
-            $section, $subject, 1, $section->school_year, $adviser->id, $upload
-        );
+        $problems = $this->refusedWith($path, $section, $subject, $upload, $adviser->id);
 
-        $this->assertSame(0, $result['imported']);
-        $this->assertCount(1, $result['errors']);
+        $this->assertCount(1, $problems);
+        $this->assertStringContainsString("Invalid score 'abc'", $problems[0]);
 
         @unlink($path);
     }
@@ -178,7 +185,7 @@ class AssessmentUploadServiceTest extends TestCase
         @unlink($path);
     }
 
-    public function test_duplicate_lrn_within_the_same_file_is_reported_and_only_first_used(): void
+    public function test_duplicate_lrn_within_the_same_file_refuses_the_whole_file(): void
     {
         $adviser = User::factory()->create();
         $section = Section::factory()->create(['adviser_id' => $adviser->id]);
@@ -192,14 +199,12 @@ class AssessmentUploadServiceTest extends TestCase
             "100000000014,Dela Cruz,Juan,10\n"
         );
 
-        $result = $this->service->import(
-            $path, ['Quiz 1' => ['component' => 'written_work', 'max_score' => 20]],
-            $section, $subject, 1, $section->school_year, $adviser->id, $upload
-        );
+        // Which of 18 and 10 is right? Neither is guessed: nothing is written.
+        $problems = $this->refusedWith($path, $section, $subject, $upload, $adviser->id);
 
-        $this->assertSame(1, $result['imported']);
-        $this->assertCount(1, $result['errors']);
-        $this->assertDatabaseHas('assessment_scores', ['student_id' => $student->id, 'score' => 18.00]);
+        $this->assertCount(1, $problems);
+        $this->assertStringContainsString('also appears on row 2', $problems[0]);
+        $this->assertDatabaseMissing('assessment_scores', ['student_id' => $student->id]);
 
         @unlink($path);
     }

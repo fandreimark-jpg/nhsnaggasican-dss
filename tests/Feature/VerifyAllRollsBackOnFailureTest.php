@@ -32,6 +32,7 @@ use Tests\TestCase;
 class VerifyAllRollsBackOnFailureTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
 
     protected function setUp(): void
     {

@@ -8,6 +8,7 @@ use App\Models\Section;
 use App\Monitoring\ConcernFinding;
 use App\Monitoring\EvaluationScope;
 use App\Monitoring\MonitoringRule;
+use App\Monitoring\Rules\OfficialFailingSubjectRule;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -125,26 +126,65 @@ class AcademicMonitoringService
         return $reports;
     }
 
-    private function evaluateScope(EvaluationScope $scope, bool $dryRun = false): array
+    /**
+     * Automatic synchronization after OFFICIAL grades changed for one
+     * section and term (App\Monitoring\OfficialGradeSync, after commit).
+     * Runs ONLY the Subject Performance rule, so it can neither open nor
+     * resolve a Missing Requirement. Exceptions propagate to the caller.
+     */
+    public function synchronizeOfficialGrades(int $sectionId, string $schoolYear, int $gradingPeriod): array
     {
+        $rules = array_values(array_filter(
+            $this->rules,
+            fn(MonitoringRule $r) => $r->key() === OfficialFailingSubjectRule::KEY
+        ));
+        if ($rules === []) {
+            return [];
+        }
+
+        return $this->evaluateScope(new EvaluationScope($schoolYear, $gradingPeriod, [$sectionId]), rules: $rules);
+    }
+
+    /**
+     * The rule keys monitoring currently runs. A stored concern of any
+     * other key (the retired Attendance Concern) is history only: it never
+     * makes a learner For Review and is never listed or counted
+     * (AcademicConcern::scopeActiveRules()).
+     *
+     * @return list<string>
+     */
+    public static function enabledRuleKeys(): array
+    {
+        return array_values(array_map(fn(string $class) => app($class)->key(), config('dss.monitoring_rules', [])));
+    }
+
+    /** @param list<MonitoringRule>|null $rules defaults to every enabled rule */
+    private function evaluateScope(EvaluationScope $scope, bool $dryRun = false, ?array $rules = null): array
+    {
+        $rules ??= $this->rules;
         $report = [
             'dry_run' => $dryRun, 'school_year' => $scope->schoolYear, 'grading_period' => $scope->gradingPeriod,
             'section_ids' => $scope->sectionIds, 'created' => [], 'refreshed' => [], 'unchanged' => 0, 'resolved' => [],
         ];
 
         if ($dryRun) {
-            foreach ($this->rules as $rule) {
+            foreach ($rules as $rule) {
                 $this->reconcile($rule, $scope, $report, write: false);
             }
 
             return $report;
         }
 
-        DB::transaction(function () use ($scope, &$report) {
-            foreach ($this->rules as $rule) {
+        // 3 attempts: a deadlock with a simultaneous verification (seen in the
+        // pre-demo audit's verify-race, 2026-10-06) rolls this back wholesale;
+        // retrying re-reads the evidence instead of leaving concerns unsynced.
+        $initial = $report;
+        DB::transaction(function () use ($scope, $rules, $initial, &$report) {
+            $report = $initial;
+            foreach ($rules as $rule) {
                 $this->reconcile($rule, $scope, $report, write: true);
             }
-        });
+        }, 3);
 
         return $report;
     }

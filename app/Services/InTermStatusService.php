@@ -11,40 +11,70 @@ use App\Models\Subject;
 use Illuminate\Support\Collection;
 
 /**
- * A second, LIGHTER signal alongside the classifier's risk_results — see
- * the "live in-term risk + stale data guard" prompt (Problem 2).
- * Computed entirely from assessment evidence already on file for ONE
- * subject/term, fresh on every read — never written to risk_results,
- * never stored anywhere, never fed to the classifier, never a
- * substitute for one.
+ * In-Term Status: a DESCRIPTIVE summary computed entirely from assessment
+ * evidence already on file for ONE subject/term, fresh on every read and
+ * never stored. It only ever answers "how does the evidence collected SO
+ * FAR this term, in this one subject, look" against the 75 component
+ * target — it says nothing about trend or other subjects, predicts
+ * nothing, and opens no Academic Concern (only an approved monitoring
+ * rule does that).
  *
- * This is NOT a risk level. A Risk Level answers "how is this student
- * doing across every subject, over a school year's worth of terms, per
- * the submitted term report." In-Term Status only ever answers "how
- * does the evidence collected SO FAR this term, in this one subject,
- * look" — it says nothing about trend, nothing about other subjects,
- * and it exists specifically so a principal isn't stuck waiting for the
- * term (and the student's chance to recover) to be over before seeing
- * anything at all.
- *
- * Thresholds are simple and visible, same style as
- * ReportController::applyFailingSubjectOverride() and
- * InterventionRecommender — no black box:
+ * The rule is simple and visible — no black box:
+ *   0 scored items this term          -> No Evidence Yet
  *   0 components below the 75 target -> On Track
  *   1 component below target         -> Needs Attention
  *   2 or more                        -> At Risk
+ *
+ * No Evidence Yet is not a judgement in either direction: absence of
+ * evidence is never good performance (CLAUDE.md design decision 1), and it
+ * is never a concern either — only an approved monitoring rule opens one.
  */
 class InTermStatusService
 {
+    /** The three statuses an evaluation of recorded evidence can produce. */
     public const STATUSES = ['On Track', 'Needs Attention', 'At Risk'];
+
+    /** A subject/term with no scored item for the learner yet. */
+    public const NO_EVIDENCE = 'No Evidence Yet';
+
+    /**
+     * What each status is CALLED on screen. The keys stay the stored/URL
+     * values (filters, sorting and tests use them); only the words change.
+     * In-Term Status is a descriptive summary of recorded evidence against
+     * the 75 component target — never a prediction, and it opens no
+     * Academic Concern (only an approved monitoring rule does that).
+     */
+    public const LABELS = [
+        'On Track'        => 'On Track',
+        'Needs Attention' => 'Below Target: 1 Component',
+        'At Risk'         => 'Below Target: 2+ Components',
+        self::NO_EVIDENCE => self::NO_EVIDENCE,
+    ];
+
+    /** The same, for ONE component's percentage against the target. */
+    public const COMPONENT_LABELS = [
+        'On Track'        => 'Meets Target',
+        'Needs Attention' => 'Below Target',
+    ];
+
+    public static function label(?string $status): string
+    {
+        return self::LABELS[$status] ?? (string) $status;
+    }
+
+    public static function componentLabel(?string $status): string
+    {
+        return self::COMPONENT_LABELS[$status] ?? (string) $status;
+    }
 
     /**
      * Worst-first severity ordering for the "Overall In-Term Status"
      * worst-of reduction below — the single source other copies of this
      * ordering (formerly duplicated in Adviser\DashboardController and
      * DashboardAnalyticsService) must read from instead of re-declaring.
+     * No Evidence Yet sorts last: unknown, not worse and not better.
      */
-    public const SEVERITY = ['At Risk' => 0, 'Needs Attention' => 1, 'On Track' => 2];
+    public const SEVERITY = ['At Risk' => 0, 'Needs Attention' => 1, 'On Track' => 2, self::NO_EVIDENCE => 3];
 
     public function __construct(private PerformanceAnalysisService $analysis = new PerformanceAnalysisService())
     {
@@ -102,7 +132,8 @@ class InTermStatusService
                 ->count();
 
         return [
-            'status'                  => self::classify($componentsBelowTarget),
+            // No scored item means nothing to evaluate: never "On Track".
+            'status'                  => $itemCount === 0 ? self::NO_EVIDENCE : self::classify($componentsBelowTarget),
             'computed_grade'          => $analysis['computed_grade'],
             'complete'                => $analysis['complete'],
             'weakest_component'       => $analysis['weakest_component'],
@@ -225,6 +256,16 @@ class InTermStatusService
      * intervention" — this method only ever answers a yes/no question;
      * every caller must still require an explicit Principal action before
      * changing anything.
+     *
+     * Rule-based monitoring (Phase 2E) adds two guards, both saying "not
+     * ready" rather than guessing:
+     *   - an intervention linked to an academic concern that is still OPEN
+     *     is never ready: delivery is not resolution, and only the
+     *     monitoring rules resolve a concern when its evidence changes;
+     *   - a subject with NO scored evidence this term is never "On Track"
+     *     for readiness — absence of evidence is not good performance
+     *     (CLAUDE.md design decision 1). statusFor() reports item_count
+     *     for exactly this.
      */
     public function isReadyForReview(Intervention $intervention): bool
     {
@@ -233,6 +274,10 @@ class InTermStatusService
         }
 
         if (!$intervention->delivered_at || !$intervention->subject_id || !$intervention->grading_period) {
+            return false;
+        }
+
+        if ($intervention->academic_concern_id && $intervention->academicConcern?->isOpen()) {
             return false;
         }
 
@@ -246,6 +291,10 @@ class InTermStatusService
         }
 
         $status = $this->statusFor($student, $subject, $section, $intervention->grading_period, $section->school_year);
+
+        if ($status['item_count'] === 0) {
+            return false;
+        }
 
         return $status['status'] === 'On Track';
     }
@@ -263,7 +312,7 @@ class InTermStatusService
         return Intervention::whereIn('status', ['approved', 'in_progress'])
             ->whereNotNull('delivered_at')
             ->when($schoolYear, fn($q) => $q->where('school_year', $schoolYear))
-            ->with(['student.section', 'section', 'subject'])
+            ->with(['student.section', 'section', 'subject', 'academicConcern'])
             ->get()
             ->filter(fn(Intervention $iv) => $this->isReadyForReview($iv))
             ->count();

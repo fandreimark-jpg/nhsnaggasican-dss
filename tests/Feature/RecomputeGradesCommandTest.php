@@ -52,7 +52,7 @@ class RecomputeGradesCommandTest extends TestCase
 
         // WW=100, PT=70, Exam=50 — new do015_2026 core_academic weights
         // (20/50/30) give 100*.2+70*.5+50*.3 = 70.0 exactly, landing on
-        // do015_2026's passing anchor band (70.00-71.17 -> 75). Old flat
+        // do015_2026's passing anchor band (69.99-71.16 -> 75, workbook lookup). Old flat
         // 25/50/25 would have given 72.5, transmuted differently under
         // the OLD code's assumptions — simulated here as the stale
         // "before" row.

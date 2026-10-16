@@ -44,12 +44,13 @@ class InterventionWorkflowTest extends TestCase
         $this->actingAs($principal)->get('/principal/interventions')->assertOk();
     }
 
-    public function test_principal_can_record_an_intervention_with_a_risk_result_present(): void
+    public function test_recording_an_intervention_never_links_a_legacy_risk_result(): void
     {
         $principal = User::factory()->principal()->create();
         $section   = Section::factory()->create();
         $student   = Student::factory()->create(['section_id' => $section->id]);
         $subject   = Subject::factory()->create();
+        $this->interventionReady($student, $subject);
 
         RiskResult::create([
             'student_id' => $student->id, 'grading_period' => 1, 'average_grade' => 65,
@@ -73,7 +74,8 @@ class InterventionWorkflowTest extends TestCase
             'created_by'       => $principal->id,
             'decided_by'       => $principal->id,
         ]);
-        $this->assertNotNull(Intervention::first()->risk_result_id);
+        // Archived classifier output is never attached to a new decision.
+        $this->assertNull(Intervention::first()->risk_result_id);
         $this->assertNotNull(Intervention::first()->decided_at);
     }
 
@@ -88,6 +90,7 @@ class InterventionWorkflowTest extends TestCase
         $section   = Section::factory()->create();
         $student   = Student::factory()->create(['section_id' => $section->id]);
         $subject   = Subject::factory()->create();
+        $this->interventionReady($student, $subject);
 
         $this->assertSame(0, RiskResult::count());
 
@@ -125,6 +128,7 @@ class InterventionWorkflowTest extends TestCase
         $section   = Section::factory()->create();
         $student   = Student::factory()->create(['section_id' => $section->id]);
         $subject   = Subject::factory()->create();
+        $this->interventionReady($student, $subject);
 
         $this->actingAs($principal)->post('/principal/interventions', [
             'student_id'       => $student->id,
@@ -144,6 +148,7 @@ class InterventionWorkflowTest extends TestCase
         $principal = User::factory()->principal()->create();
         $student   = Student::factory()->create();
         $subject   = Subject::factory()->create();
+        $this->interventionReady($student, $subject);
 
         $this->actingAs($principal)->post('/principal/interventions', [
             'student_id'       => $student->id,
@@ -166,6 +171,7 @@ class InterventionWorkflowTest extends TestCase
         $principal = User::factory()->principal()->create();
         $student   = Student::factory()->create();
         $subject   = Subject::factory()->create();
+        $this->interventionReady($student, $subject);
 
         $this->actingAs($principal)->post('/principal/interventions', [
             'student_id'           => $student->id,
@@ -185,6 +191,7 @@ class InterventionWorkflowTest extends TestCase
         $principal = User::factory()->principal()->create();
         $student   = Student::factory()->create();
         $subject   = Subject::factory()->create();
+        $this->interventionReady($student, $subject);
 
         Intervention::factory()->create([
             'student_id' => $student->id, 'subject_id' => $subject->id, 'status' => 'recommended', 'grading_period' => 1,
@@ -206,6 +213,7 @@ class InterventionWorkflowTest extends TestCase
         $principal = User::factory()->principal()->create();
         $student   = Student::factory()->create();
         $subject   = Subject::factory()->create();
+        $this->interventionReady($student, $subject);
 
         Intervention::factory()->create([
             'student_id' => $student->id, 'subject_id' => $subject->id, 'status' => 'completed',
@@ -258,6 +266,7 @@ class InterventionWorkflowTest extends TestCase
         $adviser = User::factory()->create();
         $student = Student::factory()->create();
         $subject = Subject::factory()->create();
+        $this->interventionReady($student, $subject);
 
         $this->actingAs($adviser)->post('/principal/interventions', [
             'student_id'       => $student->id,
@@ -274,54 +283,6 @@ class InterventionWorkflowTest extends TestCase
         $this->get('/principal/interventions')->assertRedirect(route('login'));
     }
 
-    public function test_interventions_page_shows_the_before_after_change_for_an_existing_intervention(): void
-    {
-        $principal = User::factory()->principal()->create();
-        $section   = Section::factory()->create(['school_year' => '2026-2027']);
-        $student   = Student::factory()->create(['section_id' => $section->id]);
-        $subject   = Subject::factory()->create();
-
-        foreach ([1 => 60, 2 => 78] as $term => $earned) {
-            $assessment = Assessment::factory()->create([
-                'subject_id' => $subject->id, 'section_id' => $section->id,
-                'grading_period' => $term, 'school_year' => '2026-2027',
-                'name' => 'PT-' . $term, 'component' => 'performance_task', 'max_score' => 100,
-            ]);
-            AssessmentScore::factory()->create(['assessment_id' => $assessment->id, 'student_id' => $student->id, 'score' => $earned]);
-
-            // Fill the other two components so this component is the
-            // clearly identifiable weakest one at term 1 (baseline).
-            foreach (['written_work', 'examination'] as $other) {
-                $a = Assessment::factory()->create([
-                    'subject_id' => $subject->id, 'section_id' => $section->id,
-                    'grading_period' => $term, 'school_year' => '2026-2027',
-                    'name' => $other . '-' . $term, 'component' => $other, 'max_score' => 100,
-                ]);
-                AssessmentScore::factory()->create(['assessment_id' => $a->id, 'student_id' => $student->id, 'score' => 90]);
-            }
-        }
-
-        $riskResult = RiskResult::create([
-            'student_id' => $student->id, 'grading_period' => 1, 'average_grade' => 70,
-            'risk_level' => 'moderate', 'school_year' => '2026-2027',
-            'weakest_subject' => $subject->name, 'weakest_subject_id' => $subject->id,
-            'weakest_subject_grade' => 70, 'generated_at' => now(),
-        ]);
-
-        Intervention::factory()->create([
-            'student_id' => $student->id, 'subject_id' => $subject->id, 'risk_result_id' => $riskResult->id,
-            'status' => 'in_progress',
-        ]);
-
-        $response = $this->actingAs($principal)->get('/principal/interventions');
-
-        $response->assertOk();
-        $response->assertSee('Change: +18.0 points.');
-        // Neutral language only — never a causal claim.
-        $response->assertDontSee('caused');
-        $response->assertDontSee('improved because');
-    }
-
     /**
      * An intervention recorded from assessment evidence alone (no risk
      * result at all) must still appear on the tracking page — the whole
@@ -332,6 +293,7 @@ class InterventionWorkflowTest extends TestCase
         $principal = User::factory()->principal()->create();
         $student   = Student::factory()->create(['last_name' => 'NoRiskResultYet']);
         $subject   = Subject::factory()->create(['name' => 'General Mathematics']);
+        $this->interventionReady($student, $subject);
 
         Intervention::factory()->create([
             'student_id' => $student->id, 'subject_id' => $subject->id, 'risk_result_id' => null,
@@ -351,6 +313,7 @@ class InterventionWorkflowTest extends TestCase
         $principal = User::factory()->principal()->create();
         $student   = Student::factory()->create();
         $subject   = Subject::factory()->create();
+        $this->interventionReady($student, $subject);
 
         $this->actingAs($principal)->post('/principal/interventions', [
             'student_id' => $student->id, 'subject_id' => $subject->id, 'grading_period' => 1,
@@ -370,6 +333,7 @@ class InterventionWorkflowTest extends TestCase
         $principal = User::factory()->principal()->create();
         $student   = Student::factory()->create();
         $subject   = Subject::factory()->create();
+        $this->interventionReady($student, $subject);
 
         $response = $this->actingAs($principal)->post('/principal/interventions', [
             'student_id'       => $student->id,

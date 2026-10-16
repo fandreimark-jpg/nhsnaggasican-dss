@@ -321,14 +321,16 @@ class PrincipalAcademicMonitoringTest extends TestCase
 
         $this->assertStringContainsString('data-evidence', $block);
         $this->assertStringContainsString('View Evidence', $block);
-        $this->assertStringContainsString('Missing Requirement: the adviser explicitly marked Quiz 1 as Missing.', $block);
+        $this->assertStringContainsString('Missing Requirement: Quiz 1 was recorded as Missing in the Class Record.', $block);
         $this->assertStringContainsString('Quiz 1 — Written Work', $block);
         $this->assertStringContainsString('Community Engagement Solidarity and Citizenship', $block);
         $this->assertStringContainsString('Agila — Grade 12', $block);
         $this->assertStringContainsString('<dd>20</dd>', $block);
         $this->assertStringContainsString('2026-2027 · Term 1', $block);
         $this->assertMatchesRegularExpression('/Current Assessment Status<\/dt>\s*<dd data-current-item-status>\s*Missing/', $block);
-        $this->assertStringContainsString('Not recorded — review actions are not enabled yet.', $block);
+        // Phase 2E: an unreviewed open concern says so, and has no linked intervention yet.
+        $this->assertMatchesRegularExpression('/data-principal-review>\s*Not yet reviewed\.\s*</', $block);
+        $this->assertMatchesRegularExpression('/data-linked-interventions>\s*No intervention recorded for this concern\.\s*</', $block);
     }
 
     public function test_19_a_score_of_zero_is_completed_not_missing(): void

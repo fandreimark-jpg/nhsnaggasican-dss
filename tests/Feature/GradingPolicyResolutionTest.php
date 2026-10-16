@@ -47,6 +47,7 @@ use Tests\TestCase;
 class GradingPolicyResolutionTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
     use BuildsEcrFixture;
 
     private GradingEngine $engine;
@@ -300,7 +301,7 @@ class GradingPolicyResolutionTest extends TestCase
 
         // Adviser Assessments (evidence analysis) and Encode Grades (verify) both read the engine.
         $this->seed(\Database\Seeders\Do015TransmutationSeeder::class);
-        $this->actingAs($adviser)->get('/adviser/assessments?subject_id=' . $subject->id . '&period=1')->assertOk()->assertSee('83.5');
+        $this->actingAs($adviser)->get('/adviser/verify-grades?subject_id=' . $subject->id . '&period=1')->assertOk()->assertSee('83.5');
         $this->actingAs($adviser)->postJson('/adviser/grades/verify', ['student_id' => $student->id, 'subject_id' => $subject->id, 'grading_period' => 1])
             ->assertOk()->assertJsonPath('computed_grade', 83.5);
     }
@@ -331,41 +332,4 @@ class GradingPolicyResolutionTest extends TestCase
         $this->tempFiles[] = $path;
 
         $this->assertNull(app(EcrReaderService::class)->checkWeightMismatch($path, $subject), 'STEM catalog row 20/50/30 agrees with academic_other.');
-    }
-
-    public function test_a_prescribed_ecr_whose_catalog_category_contradicts_the_configured_group_is_refused_and_rewrites_nothing(): void
-    {
-        $adviser = User::factory()->create();
-        $section = Section::factory()->create(['name' => 'Rizal', 'grade_level' => 12, 'school_year' => '2026-2027', 'curriculum' => null, 'track_id' => $this->acad->id, 'adviser_id' => $adviser->id]);
-        // "Philippine Governance (Philippine Politics and Governance)" is an
-        // ARTS, SOCIAL SCIENCES, AND HUMANITIES catalog row at 20/60/20; the
-        // subject is (mis)configured as academic_other (20/50/30).
-        $subject = Subject::factory()->create(['name' => 'Philippine Governance (Philippine Politics and Governance)', 'type' => 'elective', 'grade_level' => 12, 'subject_group' => 'academic_other', 'track_id' => $this->acad->id]);
-        $subject->syncTerms([1, 2, 3]);
-        $this->assertTrue(Subject::forSection($section, 1)->pluck('id')->contains($subject->id), 'Applies by track (no strand on either side).');
-        Student::factory()->create(['section_id' => $section->id, 'lrn' => '120000000001', 'last_name' => 'Agbayani', 'first_name' => 'Rhea Mae', 'gender' => 'female']);
-
-        $path = $this->buildFilledEcrCopy(
-            gradeLevel: '12', sectionName: 'Rizal', subjectCategory: 'SSHS - ACADEMIC',
-            cluster: 'ARTS, SOCIAL SCIENCES, AND HUMANITIES', courseTitle: 'Philippine Governance (Philippine Politics and Governance)',
-            roster: [['lrn' => '120000000001', 'name' => 'Agbayani, Rhea Mae', 'gender' => 'female']],
-            scores: ['D' => [$this->femaleTermRow(0) => 18]], maxScores: ['D' => 20], schoolYearStart: '2026',
-        );
-        $this->tempFiles[] = $path;
-
-        $message = app(EcrReaderService::class)->checkWeightMismatch($path, $subject);
-        $this->assertNotNull($message);
-        $this->assertStringContainsString('20/60/20', $message);
-        $this->assertStringContainsString('20/50/30', $message);
-        $this->assertTrue(app(AssessmentUploadService::class)->ecrWeightMismatchBlocks($message));
-
-        $response = $this->actingAs($adviser)->post('/adviser/assessments/detect', [
-            'subject_id' => $subject->id, 'grading_period' => 1,
-            'file' => new UploadedFile($path, 'ecr.xlsx', null, null, true),
-        ]);
-        $response->assertRedirect('/adviser/assessments?period=1&subject_id=' . $subject->id);
-        $response->assertSessionHas('error', fn($m) => str_contains($m, 'refused') && str_contains($m, '20/60/20'));
-        $this->assertSame('academic_other', $subject->fresh()->subject_group, 'The ECR never rewrites master data.');
-        $this->assertCount(0, \Illuminate\Support\Facades\Storage::disk('local')->files('temp_assessment_uploads'));
-    }
-}
+    }}

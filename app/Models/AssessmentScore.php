@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use App\Services\AssessmentStatusService;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -38,10 +39,29 @@ class AssessmentScore extends Model
     {
         static::saved(function (AssessmentScore $score) {
             if ($score->wasRecentlyCreated) {
+                // Model deletes (not a query-builder delete) so the marker's
+                // removal is written to the evidence history too.
                 AssessmentLearnerStatus::where('assessment_id', $score->assessment_id)
                     ->where('student_id', $score->student_id)
-                    ->delete();
+                    ->get()->each->delete();
             }
+        });
+
+        // Evidence history (App\Services\EvidenceAudit) — every path that
+        // records, changes or clears a score, the import included.
+        static::created(function (AssessmentScore $score) {
+            \App\Services\EvidenceAudit::record((int) $score->assessment_id, (int) $score->student_id,
+                null, (float) $score->score, AssessmentStatusService::NOT_YET_GIVEN, AssessmentStatusService::COMPLETED);
+        });
+        static::updated(function (AssessmentScore $score) {
+            if ($score->wasChanged('score')) {
+                \App\Services\EvidenceAudit::record((int) $score->assessment_id, (int) $score->student_id,
+                    (float) $score->getOriginal('score'), (float) $score->score, AssessmentStatusService::COMPLETED, AssessmentStatusService::COMPLETED);
+            }
+        });
+        static::deleted(function (AssessmentScore $score) {
+            \App\Services\EvidenceAudit::record((int) $score->assessment_id, (int) $score->student_id,
+                (float) $score->score, null, AssessmentStatusService::COMPLETED, AssessmentStatusService::NOT_YET_GIVEN);
         });
     }
 

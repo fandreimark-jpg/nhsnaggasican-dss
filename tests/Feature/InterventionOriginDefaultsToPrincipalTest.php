@@ -26,6 +26,7 @@ class InterventionOriginDefaultsToPrincipalTest extends TestCase
         $principal = User::factory()->principal()->create();
         $student = Student::factory()->create();
         $subject = Subject::factory()->create();
+        $this->interventionReady($student, $subject);
 
         $this->actingAs($principal)->post('/principal/interventions', [
             'student_id'       => $student->id,
@@ -42,6 +43,7 @@ class InterventionOriginDefaultsToPrincipalTest extends TestCase
         $principal = User::factory()->principal()->create();
         $student = Student::factory()->create();
         $subject = Subject::factory()->create();
+        $this->interventionReady($student, $subject);
 
         $this->actingAs($principal)->post('/principal/interventions', [
             'student_id'           => $student->id,
@@ -61,6 +63,7 @@ class InterventionOriginDefaultsToPrincipalTest extends TestCase
         $principal = User::factory()->principal()->create();
         $student = Student::factory()->create();
         $subject = Subject::factory()->create();
+        $this->interventionReady($student, $subject);
 
         $this->actingAs($principal)->post('/principal/interventions/bulk', [
             'subject_id'     => $subject->id,

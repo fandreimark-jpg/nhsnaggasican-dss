@@ -52,8 +52,8 @@ class AdviserDashboardPaginationTest extends TestCase
         // count toward none of the three buckets (null status, not "On
         // Track" — see buildInTermRows()'s own "missing means unknown"
         // rule), so only the 3 At Risk students are reflected here.
-        $response->assertSee('3 At Risk', false);
-        $response->assertSee('0 Needs Attention', false);
+        $response->assertSee('3 Below Target: 2+ Components', false);
+        $response->assertSee('0 Below Target: 1 Component', false);
         $response->assertSee('0 On Track', false);
     }
 

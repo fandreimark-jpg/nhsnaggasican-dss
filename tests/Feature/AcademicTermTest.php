@@ -19,6 +19,7 @@ use Tests\TestCase;
 class AcademicTermTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
 
     private function fullyEncodeTerm(Section $section, Student $student, Subject $subject, int $term): void
     {
@@ -144,7 +145,7 @@ class AcademicTermTest extends TestCase
         $this->fullyEncodeTerm($section, $student, $subject, 1);
         $this->actingAs($admin)->post('/admin/academic-terms/1/close');
 
-        $response = $this->actingAs($adviser)->post('/adviser/submit-report', ['grading_period' => 1]);
+        $response = $this->actingAs($adviser)->post('/adviser/submit-report', ['grading_period' => 1, 'expected_version' => 0]);
 
         $response->assertSessionHas('error');
         $this->assertDatabaseMissing('report_submissions', ['section_id' => $section->id]);
@@ -180,7 +181,7 @@ class AcademicTermTest extends TestCase
         $this->actingAs($admin)->post('/admin/academic-terms/2/open');
         $this->fullyEncodeTerm($section, $student, $subject, 2);
 
-        $response = $this->actingAs($adviser)->post('/adviser/submit-report', ['grading_period' => 2]);
+        $response = $this->actingAs($adviser)->post('/adviser/submit-report', ['grading_period' => 2, 'expected_version' => 0]);
 
         $response->assertSessionHas('error');
         $this->assertDatabaseMissing('report_submissions', ['section_id' => $section->id, 'grading_period' => 2]);
@@ -195,13 +196,13 @@ class AcademicTermTest extends TestCase
 
         AcademicTerm::ensureExistFor('2026-2027'); // Term 1 open by default
         $this->fullyEncodeTerm($section, $student, $subject, 1);
-        $this->actingAs($adviser)->post('/adviser/submit-report', ['grading_period' => 1]);
+        $this->actingAs($adviser)->post('/adviser/submit-report', ['grading_period' => 1, 'expected_version' => 0]);
 
         $admin = User::factory()->admin()->create();
         $this->actingAs($admin)->post('/admin/academic-terms/2/open');
         $this->fullyEncodeTerm($section, $student, $subject, 2);
 
-        $response = $this->actingAs($adviser)->post('/adviser/submit-report', ['grading_period' => 2]);
+        $response = $this->actingAs($adviser)->post('/adviser/submit-report', ['grading_period' => 2, 'expected_version' => 0]);
 
         $response->assertSessionHas('success');
         $this->assertDatabaseHas('report_submissions', ['section_id' => $section->id, 'grading_period' => 2]);

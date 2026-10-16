@@ -22,14 +22,11 @@ use Tests\TestCase;
 class AdviserDashboardInTermStatusTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\SharesClassAssessments;
 
     private function score(Section $section, Subject $subject, Student $student, string $component, float $earned, float $max = 100): void
     {
-        $assessment = Assessment::factory()->create([
-            'subject_id' => $subject->id, 'section_id' => $section->id,
-            'grading_period' => 1, 'school_year' => $section->school_year,
-            'name' => $component . '-' . uniqid(), 'component' => $component, 'max_score' => $max,
-        ]);
+        $assessment = $this->sharedAssessment($section, $subject, $student, $component, $max);
         AssessmentScore::factory()->create(['assessment_id' => $assessment->id, 'student_id' => $student->id, 'score' => $earned]);
     }
 
@@ -56,8 +53,8 @@ class AdviserDashboardInTermStatusTest extends TestCase
         $response->assertDontSee('No data');
         $response->assertDontSee('Submit report to generate');
         $response->assertSee('On Track');
-        $response->assertSee('At Risk');
-        $response->assertSee('Not yet available'); // Risk Level column, no report submitted yet
+        $response->assertSee('Below Target: 2+ Components');
+        $response->assertDontSee('Risk Level'); // no classifier column on the operational dashboard
     }
 
     public function test_dashboard_sorts_at_risk_first(): void

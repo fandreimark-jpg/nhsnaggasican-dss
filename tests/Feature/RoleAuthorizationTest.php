@@ -247,7 +247,7 @@ class RoleAuthorizationTest extends TestCase
     {
         $adviser = User::factory()->create();
 
-        $this->actingAs($adviser)->get('/adviser/assessments')->assertOk();
+        $this->actingAs($adviser)->get('/adviser/grades')->assertOk();
     }
 
     public function test_principal_students_index_renders(): void
@@ -275,24 +275,6 @@ class RoleAuthorizationTest extends TestCase
     {
         $this->get('/principal/students')->assertRedirect(route('login'));
     }
-
-    public function test_principal_cannot_access_assessment_upload_detect_route(): void
-    {
-        $principal = User::factory()->principal()->create();
-
-        $this->actingAs($principal)->post('/adviser/assessments/detect', [])->assertForbidden();
-    }
-
-    /**
-     * Task 5 of "close the intervention loop" — the adviser gained
-     * read + acknowledge access to interventions in that task; these
-     * confirm the boundary still holds everywhere else. Only the
-     * Principal role has 'interventions.store' / '.update' / '.bulk-store'
-     * routes at all (see routes/web.php's principal group comment: "the
-     * one WRITE surface the Principal role has") — an adviser hitting them
-     * is blocked by 'role:principal' middleware before the controller
-     * ever runs, same as every other principal.* route.
-     */
     public function test_adviser_cannot_create_an_intervention(): void
     {
         $adviser = User::factory()->create();

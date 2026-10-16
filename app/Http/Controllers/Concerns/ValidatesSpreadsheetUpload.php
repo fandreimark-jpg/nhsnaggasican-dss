@@ -38,4 +38,25 @@ trait ValidatesSpreadsheetUpload
             }
         }];
     }
+
+    /**
+     * Because the rule above checks only the extension, a corrupt or
+     * truncated workbook reaches the reader and throws. Every import calls
+     * this instead of Excel::import() directly so that is a refusal with a
+     * message, never an HTTP 500. Returns null when the file was read, or the
+     * message to show when it could not be (nothing was imported: the reader
+     * fails before the first row).
+     */
+    protected function importSpreadsheetOrRefuse(object $import, \Illuminate\Http\UploadedFile $file): ?string
+    {
+        try {
+            \Maatwebsite\Excel\Facades\Excel::import($import, $file);
+        } catch (\PhpOffice\PhpSpreadsheet\Exception|\ValueError $e) {
+            report($e);
+
+            return '"' . $file->getClientOriginalName() . '" could not be read as a spreadsheet — it may be damaged or not really an Excel/CSV file. Nothing was imported.';
+        }
+
+        return null;
+    }
 }

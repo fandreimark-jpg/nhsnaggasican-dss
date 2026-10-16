@@ -42,6 +42,7 @@ class TruncateCommand extends Command
             'report_submissions',
             'interventions',
             'academic_concerns',
+            'attendance_records',
             'academic_terms',
             'activity_logs',
         ],

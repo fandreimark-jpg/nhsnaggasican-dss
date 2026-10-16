@@ -48,13 +48,14 @@ class StudentsRecordInterventionTest extends TestCase
         $response = $this->actingAs($principal)->get('/principal/students?subject_id=' . $subject->id . '&period=1');
 
         $response->assertOk();
-        // has_risk_result:false must be in the row's JSON payload — the
-        // modal uses this to decide whether to pre-select a type.
-        $response->assertSee('"has_risk_result":false', false);
-        $response->assertSee('The DSS recommendation becomes available once the adviser submits the term report', false);
+        // The Principal chooses: the type list opens on a placeholder.
+        $response->assertSee('<option value="" selected disabled>— Choose an intervention —</option>', false);
+        $response->assertSee('nothing is pre-selected', false);
+        $response->assertDontSee('has_risk_result', false);
+        $response->assertDontSee('DSS Recommendation', false);
     }
 
-    public function test_students_page_pre_selects_the_dss_recommendation_when_a_risk_result_exists(): void
+    public function test_a_legacy_risk_result_never_pre_selects_or_recommends_an_intervention(): void
     {
         $principal = User::factory()->principal()->create();
         $section   = Section::factory()->create(['grade_level' => 11, 'school_year' => '2026-2027']);
@@ -73,10 +74,12 @@ class StudentsRecordInterventionTest extends TestCase
         $response = $this->actingAs($principal)->get('/principal/students?subject_id=' . $subject->id . '&period=1');
 
         $response->assertOk();
-        $response->assertSee('"has_risk_result":true', false);
-        // Performance Task is the weakest component here (84/60/70 -> PT
-        // at 60% is furthest below the 75 target) -> additional_performance_task.
-        $response->assertSee('"type":"additional_performance_task"', false);
+        // Archived classifier output is not decision support: no recommended
+        // type, no Risk Level column, and the placeholder stays selected.
+        $response->assertDontSee('"type":"additional_performance_task"', false);
+        $response->assertDontSee('"recommendation"', false);
+        $response->assertDontSee('Risk Level');
+        $response->assertSee('<option value="" selected disabled>— Choose an intervention —</option>', false);
     }
 
     public function test_students_page_shows_existing_status_instead_of_a_second_create_action(): void

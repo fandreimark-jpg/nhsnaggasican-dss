@@ -7,5 +7,5 @@
 --}}
 <footer class="mt-8 pt-4 border-t border-line text-xs text-muted flex flex-col sm:flex-row items-center justify-between gap-1">
     <p>&copy; {{ date('Y') }} Naggasican National High School. All rights reserved.</p>
-    <p>Learner Academic Risk and Decision Support System</p>
+    <p>Learner Academic Performance Decision Support System</p>
 </footer>

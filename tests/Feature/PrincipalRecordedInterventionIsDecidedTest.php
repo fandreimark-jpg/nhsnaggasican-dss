@@ -28,6 +28,7 @@ class PrincipalRecordedInterventionIsDecidedTest extends TestCase
         $principal = User::factory()->principal()->create();
         $student = Student::factory()->create();
         $subject = Subject::factory()->create();
+        $this->interventionReady($student, $subject);
 
         $this->actingAs($principal)->post('/principal/interventions', [
             'student_id'       => $student->id,
@@ -49,6 +50,7 @@ class PrincipalRecordedInterventionIsDecidedTest extends TestCase
         $section = Section::factory()->create();
         $student = Student::factory()->create(['section_id' => $section->id]);
         $subject = Subject::factory()->create();
+        $this->interventionReady($student, $subject);
 
         $this->actingAs($principal)->post('/principal/interventions/bulk', [
             'subject_id'     => $subject->id,
@@ -75,6 +77,7 @@ class PrincipalRecordedInterventionIsDecidedTest extends TestCase
         $section = Section::factory()->create(['adviser_id' => $adviser->id]);
         $student = Student::factory()->create(['section_id' => $section->id]);
         $subject = Subject::factory()->create();
+        $this->interventionReady($student, $subject);
 
         $this->actingAs($principal)->post('/principal/interventions', [
             'student_id'       => $student->id,

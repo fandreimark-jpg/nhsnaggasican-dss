@@ -32,7 +32,7 @@ use Illuminate\Support\Facades\Hash;
  */
 class UserController extends Controller
 {
-    private const ROLE_LABELS = ['admin' => 'Admin', 'principal' => 'Principal', 'adviser' => 'Adviser'];
+    private const ROLE_LABELS = ['admin' => 'Admin', 'principal' => 'Principal', 'adviser' => 'Adviser', 'subject_teacher' => 'Subject Teacher'];
 
     /**
      * Null if creating/activating $role right now is fine; otherwise the
@@ -91,7 +91,7 @@ class UserController extends Controller
             'middle_name' => 'nullable|string|max:255',
             'username'    => 'required|string|max:255|alpha_dash',
             'password'    => 'required|string|min:8',
-            'role'        => 'required|in:adviser,admin,principal',
+            'role'        => 'required|in:adviser,subject_teacher,admin,principal',
         ]);
 
         // Build email from username
@@ -164,7 +164,7 @@ class UserController extends Controller
             'middle_name' => 'nullable|string|max:255',
             'username'    => 'required|string|max:255|alpha_dash',
             'password'    => 'nullable|string|min:8',
-            'role'        => 'required|in:adviser,admin,principal',
+            'role'        => 'required|in:adviser,subject_teacher,admin,principal',
         ]);
 
         $email = $request->username . '@naggasican.edu.ph';
@@ -180,6 +180,18 @@ class UserController extends Controller
         // since its role_singleton_key stays null until it's activated
         // (see User::boot() and the activate() uniqueness check below).
         if ($user->is_active && ($error = $this->roleUniquenessError($request->role, excludeUserId: $user->id))) {
+            return back()->withErrors(['role' => $error])->withInput();
+        }
+
+        // Release-readiness pass (2026-09-28): a role change must not strand
+        // responsibilities the new role cannot exercise. Advisory pages need
+        // the adviser role, and teaching pages need adviser/subject_teacher,
+        // so an account that still advises a current section, or still holds
+        // a current teaching assignment, keeps its role until the Admin moves
+        // that section/class to someone else. Past school years are history
+        // and never block. Nothing is reassigned automatically.
+        $oldRole = $user->role;
+        if ($request->role !== $oldRole && ($error = $this->roleChangeStrandsResponsibilities($user, $request->role))) {
             return back()->withErrors(['role' => $error])->withInput();
         }
 
@@ -206,8 +218,39 @@ class UserController extends Controller
                 ->withInput();
         }
 
+        if ($oldRole !== $request->role) {
+            \App\Helpers\LogActivity::log('change_user_role', 'Changed the role of ' . $user->name . ' from ' . $oldRole . ' to ' . $request->role, 'users', $user->id);
+        }
+
         return redirect()->route('admin.users')
             ->with('success', 'User updated successfully!');
+    }
+
+    /**
+     * Why $user cannot move to $newRole yet, or null. Only CURRENT
+     * responsibilities count: sections and teaching assignments of the
+     * active school year or later.
+     */
+    private function roleChangeStrandsResponsibilities(User $user, string $newRole): ?string
+    {
+        $activeYear = \App\Models\Section::activeSchoolYear();
+        $current = fn($q) => $activeYear ? $q->where('school_year', '>=', $activeYear) : $q;
+
+        if ($newRole !== 'adviser') {
+            $advised = $current(\App\Models\Section::where('adviser_id', $user->id))->orderBy('school_year')->get(['name', 'school_year']);
+            if ($advised->isNotEmpty()) {
+                return 'This account advises ' . $advised->map(fn($s) => $s->name . ' (' . $s->school_year . ')')->join(', ')
+                    . '. Assign another adviser to that section on Admin > Sections before changing the role; advisory pages need the Adviser role.';
+            }
+        }
+        if (!in_array($newRole, ['adviser', 'subject_teacher'], true)) {
+            $teaching = $current(\App\Models\TeachingAssignment::where('user_id', $user->id))->count();
+            if ($teaching > 0) {
+                return 'This account holds ' . $teaching . ' current teaching assignment(s). Change the teacher on Admin > Teaching Assignments before giving it a role that cannot teach.';
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -281,6 +324,8 @@ class UserController extends Controller
         }
 
         $user->delete();
+
+        \App\Helpers\LogActivity::log('delete_user', 'Removed account ' . $user->name . ' (' . $user->role . ')', 'users', (int) $id);
 
         
 

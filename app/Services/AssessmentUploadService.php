@@ -3,6 +3,8 @@
 namespace App\Services;
 
 use App\Exceptions\AssessmentMetadataConflictException;
+use App\Exceptions\AssessmentImportBlockedException;
+use App\Exceptions\DuplicateAssessmentHeaderException;
 use App\Models\Assessment;
 use App\Models\AssessmentScore;
 use App\Models\AssessmentUpload;
@@ -76,7 +78,8 @@ class AssessmentUploadService
         private EcrReaderService $ecrReader = new EcrReaderService(),
         private Grade12EcrProfileDetector $grade12Profile = new Grade12EcrProfileDetector(),
         private Grade12EcrReaderService $grade12Reader = new Grade12EcrReaderService(),
-        private AssessmentItemConflictDetector $conflicts = new AssessmentItemConflictDetector()
+        private AssessmentItemConflictDetector $conflicts = new AssessmentItemConflictDetector(),
+        private DssAssessmentRecord $dssRecord = new DssAssessmentRecord()
     ) {
     }
 
@@ -263,14 +266,20 @@ class AssessmentUploadService
                 // 'examination' — see AssessmentColumnClassifier::classifyExamRole().
                 'guessed_exam_role' => $guessedComponent === 'examination' ? $this->classifier->classifyExamRole($name) : null,
                 'file_max_score'    => $fileMaxScore,
+                'index'             => $index,
             ];
         }
 
+        if ($this->lastDetectedFormat === 'dss_record') {
+            $columns = $this->prefillFromDssRecord($filePath, $columns);
+        }
+
         return [
-            'columns'         => $columns,
-            'row_count'       => count($dataRows),
-            'max_row_present' => $maxRow !== null,
-            'max_row_errors'  => $maxRowErrors,
+            'columns'           => $columns,
+            'row_count'         => count($dataRows),
+            'max_row_present'   => $maxRow !== null,
+            'max_row_errors'    => $maxRowErrors,
+            'duplicate_headers' => $this->duplicateHeaders($header),
         ];
     }
 
@@ -445,6 +454,8 @@ class AssessmentUploadService
             ];
         }
 
+        ['blocking' => $blocking, 'warnings' => $warnings] = $this->blockingProblems($dataRows, $columnIndexMap, $studentsByLrn, $rowOffset);
+
         foreach ($columnStats as $name => &$stat) {
             $stat['suspicious_max'] =
                 !$stat['any_exceeds_max']
@@ -460,7 +471,75 @@ class AssessmentUploadService
             'total_valid_cells'   => $totalValid,
             'total_invalid_cells' => $totalInvalid,
             'column_stats'        => $columnStats,
+            // Import is unavailable while any of these exist — see blockingProblems().
+            'blocking_errors'     => $blocking,
+            'warnings'            => $warnings,
         ];
+    }
+
+    /**
+     * The one classification of row/cell problems, shared by previewRows()
+     * (Import unavailable) and import() (refused before the first write).
+     *
+     * BLOCKING — the file cannot be imported until it is corrected:
+     *   - a score that is not a number, or is negative;
+     *   - a score above the item's maximum (HPS);
+     *   - the same LRN on more than one row (which one is right?);
+     *   - an LRN not enrolled in the section whose row carries any score
+     *     (those scores would otherwise be dropped — often a mistyped LRN).
+     * WARNING — reported, nothing is lost:
+     *   - an LRN not enrolled in the section whose row is entirely blank.
+     * Blank cells are neither: blank is "no new evidence", never 0, never Missing.
+     *
+     * @return array{blocking: list<string>, warnings: list<string>}
+     */
+    public function blockingProblems(array $dataRows, array $columnIndexMap, $studentsByLrn, int $rowOffset): array
+    {
+        $blocking = [];
+        $warnings = [];
+        $seen = [];
+
+        foreach ($dataRows as $rowIndex => $row) {
+            $excelRow = $rowIndex + 2 + $rowOffset;
+            $lrn = trim((string) ($row[0] ?? ''));
+            if ($lrn === '') {
+                continue;
+            }
+
+            $filled = [];
+            foreach ($columnIndexMap as $index => $col) {
+                $value = $row[$index] ?? null;
+                if ($value !== null && trim((string) $value) !== '') {
+                    $filled[$index] = $value;
+                }
+            }
+
+            if (isset($seen[$lrn])) {
+                $blocking[] = "Row {$excelRow}: LRN {$lrn} also appears on row {$seen[$lrn]} — each learner must appear once.";
+                continue;
+            }
+            $seen[$lrn] = $excelRow;
+
+            if (!$studentsByLrn->get($lrn)) {
+                if ($filled === []) {
+                    $warnings[] = "Row {$excelRow}: LRN {$lrn} is not enrolled in this section; the row has no scores, so nothing is lost.";
+                } else {
+                    $blocking[] = "Row {$excelRow}: LRN {$lrn} is not enrolled in this section, but the row has scores — check the LRN.";
+                }
+                continue;
+            }
+
+            foreach ($filled as $index => $value) {
+                $col = $columnIndexMap[$index];
+                if (!is_numeric($value) || (float) $value < 0) {
+                    $blocking[] = "Row {$excelRow}: Invalid score '{$value}' for {$col['name']} (must be a number, 0 or more).";
+                } elseif ((float) $value > (float) $col['max_score']) {
+                    $blocking[] = "Row {$excelRow}: Score {$value} for {$col['name']} exceeds its maximum of " . ((float) $col['max_score']) . '.';
+                }
+            }
+        }
+
+        return ['blocking' => $blocking, 'warnings' => $warnings];
     }
 
     /**
@@ -492,13 +571,21 @@ class AssessmentUploadService
 
         // Pre-demo audit (2026-09-17), section 13 — the whole write phase
         // (every Assessment item and every AssessmentScore row) is one
-        // transaction. Row-level rejections are unchanged: an invalid
-        // cell is still skipped and reported, exactly as the Preview step
-        // already showed the adviser. What this adds is that an
+        // transaction. Since 2026-09-27 a problem row or cell is no longer
+        // skipped: blockingProblems() refuses the whole file below, before
+        // this transaction opens. What the transaction adds is that an
         // infrastructure failure part-way through (connection drop,
         // deadlock, disk full) rolls back to "nothing imported" rather
         // than leaving half a class's scores in the database with the
         // upload record still reading pending_review.
+        // Validate first: a blocking problem anywhere refuses the WHOLE
+        // file before a single item or score is written (and, because the
+        // controller wraps this call, before its upload row survives).
+        $problems = $this->blockingProblems($dataRows, $columnIndexMap, $studentsByLrn, $rowOffset);
+        if ($problems['blocking'] !== []) {
+            throw new AssessmentImportBlockedException($problems['blocking']);
+        }
+
         return DB::transaction(function () use ($columnIndexMap, $columnMapping, $dataRows, $studentsByLrn, $rowOffset, $subject, $section, $gradingPeriod, $schoolYear, $uploaderId, $upload, &$errors) {
             $importedCount = 0;
 
@@ -523,10 +610,16 @@ class AssessmentUploadService
             // update array can never change its component, exam role,
             // additional-support flag or max score — only the audit
             // columns (import_batch_id, uploaded_by) move to this upload.
+            // The stored item each column lands on — by name, or for a
+            // regular Examination column by its role (ExaminationRoles):
+            // exactly what the conflict check above compared against.
+            $targets = $this->conflicts->targets($section, $subject, $gradingPeriod, $schoolYear, $columnMapping);
+
             $assessmentsByColumnIndex = [];
             foreach ($columnIndexMap as $index => $col) {
+                $target = $targets[$col['name']] ?? null;
                 $assessment = Assessment::updateOrCreate(
-                    [
+                    $target ? ['id' => $target->id] : [
                         'subject_id'     => $subject->id,
                         'section_id'     => $section->id,
                         'grading_period' => $gradingPeriod,
@@ -534,7 +627,7 @@ class AssessmentUploadService
                         'name'           => $col['name'],
                     ],
                     [
-                        'assessment_type' => $col['name'],
+                        'assessment_type' => $target ? $target->assessment_type : $col['name'],
                         'component'       => $col['component'],
                         // Only relevant for Examination items — a Written
                         // Work/Performance Task column mapping never sets
@@ -583,7 +676,9 @@ class AssessmentUploadService
 
                 $student = $studentsByLrn->get($lrn);
                 if (!$student) {
-                    $errors[] = "Row {$excelRowNumber}: No student with LRN {$lrn} found in your section.";
+                    // Only a row with no scores reaches here (anything else
+                    // was refused above) — a warning, nothing is lost.
+                    $errors[] = "Row {$excelRowNumber}: LRN {$lrn} is not enrolled in this section; the row has no scores, so nothing was lost.";
                     continue;
                 }
 
@@ -628,8 +723,76 @@ class AssessmentUploadService
      * by previewRows() and import() so the two can never validate
      * differently against the same confirmed mapping.
      */
+    /**
+     * A DSS Assessment Record carries each existing item's stored component,
+     * exam role and additional-support flag, and which band (WW/PT/EX) each
+     * column sits under. Those PRE-FILL the Verify screen — the adviser still
+     * confirms every column, and AssessmentItemConflictDetector still refuses
+     * any change to an existing item's protected metadata. A column the
+     * teacher added under a band is suggested as that band's component.
+     *
+     * @param list<array<string, mixed>> $columns
+     * @return list<array<string, mixed>>
+     */
+    private function prefillFromDssRecord(string $filePath, array $columns): array
+    {
+        $identity = $this->dssRecord->identity($filePath);
+
+        return array_map(function (array $col) use ($identity) {
+            $known = $identity['items'][mb_strtolower($col['name'])] ?? null;
+            if ($known) {
+                $col['guessed_component'] = $known['component'];
+                $col['guessed_exam_role'] = $known['component'] === 'examination' ? $known['exam_role'] : null;
+                $col['is_additional_support'] = $known['is_additional_support'];
+
+                return $col;
+            }
+            foreach ($identity['bands'] as $component => [$first, $last]) {
+                if ($col['index'] >= $first && $col['index'] <= $last) {
+                    $col['guessed_component'] = $component;
+                    $col['guessed_exam_role'] = $component === 'examination' ? $this->classifier->classifyExamRole($col['name']) : null;
+                }
+            }
+
+            return $col;
+        }, $columns);
+    }
+
+    /**
+     * Item headers that appear more than once (case-insensitive, trimmed —
+     * the same identity the stored item name has). Each would collapse onto
+     * ONE item, the later column silently overwriting the earlier score.
+     *
+     * @param array<int, mixed> $header
+     * @return list<string>
+     */
+    private function duplicateHeaders(array $header): array
+    {
+        $seen = [];
+        $duplicates = [];
+        foreach ($header as $index => $name) {
+            $name = trim((string) $name);
+            if ($index < self::FIRST_ITEM_COLUMN || $name === '') {
+                continue;
+            }
+            $key = mb_strtolower($name);
+            if (isset($seen[$key]) && !in_array($seen[$key], $duplicates, true)) {
+                $duplicates[] = $seen[$key];
+            }
+            $seen[$key] ??= $name;
+        }
+
+        return $duplicates;
+    }
+
     private function buildColumnIndexMap(array $header, array $columnMapping): array
     {
+        // Refused before anything is read into a score — Preview and Import
+        // both come through here, so a crafted request cannot skip detect()'s check.
+        if ($duplicates = $this->duplicateHeaders($header)) {
+            throw new DuplicateAssessmentHeaderException($duplicates);
+        }
+
         $map = [];
         foreach ($header as $index => $name) {
             $name = trim((string) $name);
@@ -648,7 +811,7 @@ class AssessmentUploadService
         }
 
         if ($duplicateRow) {
-            return ['duplicate', 'Duplicate LRN in this file — only the first occurrence will be used.', false];
+            return ['duplicate', 'Duplicate LRN in this file — each learner must appear once.', false];
         }
 
         if ($value === null || trim((string) $value) === '') {
@@ -742,6 +905,13 @@ class AssessmentUploadService
                 $this->lastDetectedFormat = 'grade12';
                 return $this->grade12Reader->toFlatRows($filePath, $gradingPeriod, $section->id);
             }
+        }
+
+        // A DSS-generated Assessment Record: its own sheet, read from its
+        // header row down, in exactly the flat shape below.
+        if ($this->dssRecord->isRecord($filePath)) {
+            $this->lastDetectedFormat = 'dss_record';
+            return $this->dssRecord->toFlatRows($filePath);
         }
 
         $spreadsheet = IOFactory::load($filePath);

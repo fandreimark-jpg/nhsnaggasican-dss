@@ -49,24 +49,9 @@ class PrincipalStudentDrilldownTest extends TestCase
         $response->assertSee('Statistics');
         $response->assertSee('Quiz 1');
         $response->assertSee('15.00 / 20.00');
-        $response->assertSee('Moderate');
-    }
-
-    public function test_student_detail_shows_the_4_bucket_dss_status(): void
-    {
-        $principal = User::factory()->principal()->create();
-        $section = Section::factory()->create();
-        $student = Student::factory()->create(['section_id' => $section->id]);
-        RiskResult::create([
-            'student_id' => $student->id, 'grading_period' => 1, 'average_grade' => 65,
-            'risk_level' => 'high', 'school_year' => $section->school_year, 'generated_at' => now(),
-        ]);
-
-        $response = $this->actingAs($principal)->get('/principal/students/' . $student->id);
-
-        $response->assertOk();
-        $response->assertSee('DSS Status');
-        $response->assertSee('At Risk');
+        // A legacy classifier row exists, but it is not decision support any more.
+        $response->assertDontSee('Latest Risk Level');
+        $response->assertDontSee('Moderate');
     }
 
     public function test_student_detail_shows_intervention_history(): void
@@ -80,22 +65,6 @@ class PrincipalStudentDrilldownTest extends TestCase
         $response->assertOk();
         $response->assertSee('Additional Practice and Re-teaching');
         $response->assertSee('Approved');
-    }
-
-    public function test_dashboard_at_risk_list_links_to_student_detail_for_principal(): void
-    {
-        $principal = User::factory()->principal()->create();
-        $section = Section::factory()->create();
-        $student = Student::factory()->create(['section_id' => $section->id]);
-        RiskResult::create([
-            'student_id' => $student->id, 'grading_period' => 1, 'average_grade' => 65,
-            'risk_level' => 'high', 'school_year' => $section->school_year, 'generated_at' => now(),
-        ]);
-
-        $response = $this->actingAs($principal)->get('/principal/dashboard');
-
-        $response->assertOk();
-        $response->assertSee(route('principal.students.show', $student->id), false);
     }
 
     public function test_admin_dashboard_at_risk_list_does_not_link_to_principal_student_route(): void

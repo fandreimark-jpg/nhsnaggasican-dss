@@ -27,6 +27,7 @@ use Tests\TestCase;
 class FailingDoesNotAutoCreateInterventionTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
 
     public function test_verifying_an_official_grade_of_70_creates_zero_interventions(): void
     {
