@@ -78,6 +78,6 @@ class FailingIsNotAnInTermBucketTest extends TestCase
 
         $response = $this->actingAs($principal)->get('/principal/dashboard');
         $response->assertOk();
-        $response->assertSee('This is an outcome, not an early warning.', false);
+        $response->assertSee('This is an outcome from official grades, counted after they are encoded.', false);
     }
 }

@@ -84,7 +84,7 @@ class PrincipalDashboardZonesTest extends TestCase
         $response->assertDontSee('No interventions need attention right now.');
     }
 
-    public function test_zone_3_contains_risk_level_and_recommendations(): void
+    public function test_zone_3_contains_outcomes_and_evidence_trends_but_no_risk_level(): void
     {
         $principal = User::factory()->principal()->create();
 
@@ -95,8 +95,10 @@ class PrincipalDashboardZonesTest extends TestCase
         $this->assertNotFalse($zone3Start);
         $zone3 = substr($content, $zone3Start);
 
-        $this->assertStringContainsString('Risk Level', $zone3);
-        $this->assertStringContainsString('Recommendations', $zone3);
+        $this->assertStringContainsString('Failed this term', $zone3);
+        $this->assertStringContainsString('Performance Trend', $zone3);
+        $this->assertStringNotContainsString('Risk Level', $zone3);
+        $this->assertStringNotContainsString('Recommendations', $zone3);
     }
 
     /** Regression guard for the restructuring: intervention cards must never appear before Zone 2's own heading. */

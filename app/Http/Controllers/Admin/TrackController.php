@@ -93,6 +93,8 @@ class TrackController extends Controller
         }
 
         $track->delete();
+
+        \App\Helpers\LogActivity::log('delete_track', 'Deleted track ' . $track->name, 'tracks', (int) $id);
         
         return redirect()->route('admin.tracks')
             ->with('success', 'Track deleted successfully!');

@@ -9,11 +9,16 @@ use Illuminate\Notifications\Notifiable;
 /**
  * User Model
  *
- * Represents a system user — Admin, Adviser, or Principal.
- * Roles: 'admin', 'adviser', or 'principal'
+ * Represents a system user — Admin, Adviser, Subject Teacher, or Principal.
+ * Roles: 'admin', 'adviser', 'subject_teacher', or 'principal'
  *
  * Admin     → manages master/system data (users, tracks, sections, subjects, etc.)
- * Adviser   → encodes grades and submits reports for their assigned section
+ * Adviser   → reads every subject of their advisory section, submits its
+ *             report and follows up interventions; encodes assessment
+ *             evidence ONLY for subjects they are assigned to teach
+ *             (teaching_assignments — App\Services\TeachingAccess)
+ * Subject Teacher → encodes and reads assessment evidence only for the
+ *             subject/section/term combinations assigned to them
  * Principal → read-only academic monitoring and Decision Support; may only
  *             write intervention/monitoring decisions, never grades or
  *             assessment records directly
@@ -113,6 +118,24 @@ class User extends Authenticatable
         return $this->role === 'admin';
     }
 
+    /** Returns true if user is a subject teacher (teaches, advises no section by role) */
+    public function isSubjectTeacher(): bool
+    {
+        return $this->role === 'subject_teacher';
+    }
+
+    /** Adviser or Subject Teacher — the two roles that can hold a teaching assignment. */
+    public function canTeach(): bool
+    {
+        return in_array($this->role, self::TEACHING_ROLES, true);
+    }
+
+    /** Every role that may sign in. A role not listed here is refused at login and on every request. */
+    public const ROLES = ['admin', 'adviser', 'subject_teacher', 'principal'];
+
+    /** Roles that may be given a teaching assignment. */
+    public const TEACHING_ROLES = ['adviser', 'subject_teacher'];
+
     /** Returns true if user is a principal */
     public function isPrincipal(): bool
     {
@@ -129,6 +152,7 @@ class User extends Authenticatable
         return match ($this->role) {
             'admin'     => 'admin.dashboard',
             'principal' => 'principal.dashboard',
+            'subject_teacher' => 'teacher.classes',
             default     => 'adviser.dashboard',
         };
     }
@@ -188,5 +212,11 @@ class User extends Authenticatable
     public function section()
     {
         return $this->hasOne(Section::class, 'adviser_id');
+    }
+
+    /** Subject/section/term teaching assignments (any school year). */
+    public function teachingAssignments()
+    {
+        return $this->hasMany(TeachingAssignment::class);
     }
 }

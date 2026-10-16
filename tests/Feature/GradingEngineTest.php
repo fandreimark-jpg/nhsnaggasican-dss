@@ -209,7 +209,7 @@ class GradingEngineTest extends TestCase
      * Grade 11 in SY 2026-2027 resolves to the do015_2026 scheme, which
      * is now fully seeded 0.00-100.00 (Do015TransmutationSeeder). A
      * computed grade of exactly 70.00 lands on its passing anchor band
-     * (70.00-71.17 -> 75).
+     * (69.99-71.16 -> 75 by the workbook lookup).
      */
     public function test_grade_11_sy_2026_2027_resolves_to_do015_2026_and_transmutes_its_seeded_anchor(): void
     {

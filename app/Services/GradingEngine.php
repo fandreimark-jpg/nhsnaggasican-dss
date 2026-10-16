@@ -26,8 +26,17 @@ use Illuminate\Support\Facades\Log;
  * a caller may choose to store this method's result; storing it is a
  * later phase's responsibility, not this service's.
  *
+ * WORKBOOK PARITY (D1–D3, implementation decision 2026-10-04 — a project
+ * requirement, not a recorded school approval): every figure follows the
+ * client's SSHS E-Class Record, sheet "Term 1" row 17 (N/O/P, AA/AB/AC,
+ * AG:AI, AJ, AK, AL) — see workbookComponent() / workbookExamination() and
+ * tests/Feature/WorkbookParityTest (compared with the workbook's own
+ * formulas). On top of the workbook, a RUNNING grade is shown while
+ * evidence is partial (display only), and verification keeps requiring a
+ * score in every Examination Type that was given.
+ *
  * Per component:
- *   percentage = earned score / maximum score x 100
+ *   percentage = earned score / HPS of every item in the component x 100
  *   weighted contribution = percentage x component weight (from
  *   SubjectGroupWeight, keyed by scheme + the subject's subject_group —
  *   see that model's resolve(). NEVER a single system-wide flat default
@@ -108,6 +117,9 @@ class GradingEngine
     private int $referenceGeneration = -1;
 
     private static int $generation = 0;
+
+    /** @var array<string, array<int, array<int, ?float>>> preview-only score overrides per scope key — see overlayScores() */
+    private array $overlays = [];
 
     /**
      * Marks every evidence/reference cache stale. Called automatically from
@@ -224,6 +236,11 @@ class GradingEngine
             $max[$item->id] = (float) $item->max_score;
             $roles[$item->id] = $item->exam_role;
         }
+        // The workbook's ST 1 / ST 2 / TE columns per subject (one item each).
+        $examColumns = [];
+        foreach ($bySubjectComponent as $subjectId => $components) {
+            $examColumns[$subjectId] = ExaminationRoles::workbookColumns($components['examination'] ?? []);
+        }
 
         $scores = [];
         $values = [];
@@ -241,11 +258,29 @@ class GradingEngine
             }
         }
 
+        foreach ($this->overlays[$key] ?? [] as $assessmentId => $byStudent) {
+            if (!isset($max[$assessmentId])) {
+                continue;
+            }
+            foreach ($byStudent as $studentId => $value) {
+                if ($value === null) {
+                    unset($scores[$studentId][$assessmentId], $values[$studentId][$assessmentId]);
+                    continue;
+                }
+                // An unsaved, in-memory row: never persisted (preview only).
+                $scores[$studentId][$assessmentId] = (new AssessmentScore())->forceFill([
+                    'assessment_id' => $assessmentId, 'student_id' => $studentId, 'score' => $value,
+                ]);
+                $values[$studentId][$assessmentId] = (float) $value;
+            }
+        }
+
         return $this->evidence[$key] = [
             'generation'           => $generation,
             'by_subject_component' => $bySubjectComponent,
             'max'                  => $max,
             'roles'                => $roles,
+            'exam_columns'         => $examColumns,
             'scores'               => $scores,
             'values'               => $values,
         ];
@@ -302,51 +337,98 @@ class GradingEngine
         $ptWeight = $profile['pt_weight'];
         $exWeight = $profile['ex_weight'];
 
-        $componentPercentages = [
-            'written_work'     => $this->componentPercentage($student, $subject, $section, $gradingPeriod, $schoolYear, 'written_work'),
-            'performance_task' => $this->componentPercentage($student, $subject, $section, $gradingPeriod, $schoolYear, 'performance_task'),
-            'examination'      => $exWeight !== null
-                ? $this->examinationPercentage($student, $subject, $section, $gradingPeriod, $schoolYear, $scheme, $catalog)
-                : null,
-        ];
-
-        // A component this subject's group was never supposed to have
-        // (ex_weight null) is not "required" — only components the
-        // group's weights actually name must have evidence for the
-        // grade to be complete.
+        $evidence = $this->evidenceFor($section, $gradingPeriod, $schoolYear);
         $weightMap = [
             'written_work'     => $wwWeight,
             'performance_task' => $ptWeight,
             'examination'      => $exWeight,
         ];
-        $requiredKeys = array_keys(array_filter($weightMap, fn($w) => $w !== null));
 
-        $isComplete = !in_array(null, array_intersect_key($componentPercentages, array_flip($requiredKeys)), true);
-
-        if (!$isComplete) {
+        // A profile that cannot be graded (e.g. a teacher-supplied catalog row
+        // with no configured weights) yields NO figure at all — never a silent
+        // fallback to another profile, never a 0 weight.
+        if ($profile['configuration_error'] !== null) {
             return [
-                'complete'                       => false,
-                'components'                     => $componentPercentages,
-                'contributions'                  => [],
-                'computed_grade'                 => null,
-                'transmuted_grade'               => null,
-                'transmutation_scheme'           => $scheme,
-                'transmutation_available'        => false,
-                'transmutation_provisional'      => false,
-                'transmutation_fallback_scheme'  => null,
+                'components'                    => array_fill_keys(self::COMPONENTS, null),
+                'component_detail'              => array_fill_keys(self::COMPONENTS, self::NO_EXAMINATION),
+                'partial_contributions'         => [],
+                'running_grade'                 => null,
+                'workbook_complete'             => false,
+                'exam_roles'                    => [],
+                'blockers'                      => [$profile['configuration_error']],
+                'transmutation_scheme'          => $scheme,
+                'complete'                      => false,
+                'contributions'                 => [],
+                'computed_grade'                => null,
+                'transmuted_grade'              => null,
+                'transmutation_available'       => false,
+                'transmutation_provisional'     => false,
+                'transmutation_fallback_scheme' => null,
             ];
         }
 
-        $contributions = [];
-        $total = 0.0;
+        $detail = [
+            'written_work'     => $this->workbookComponent($evidence, $student, $subject, 'written_work', $wwWeight),
+            'performance_task' => $this->workbookComponent($evidence, $student, $subject, 'performance_task', $ptWeight),
+            'examination'      => $exWeight !== null
+                ? $this->workbookExamination($evidence, $student, $subject, $scheme, $catalog, $exWeight)
+                : self::NO_EXAMINATION,
+        ];
+        $componentPercentages = array_map(fn($d) => $d['percentage'], $detail);
 
+        // A component this subject's group was never supposed to have
+        // (weight null) is not required — workbook AL17 sums P17+AC17 alone
+        // when $AD$12 = 0.
+        $requiredKeys = array_keys(array_filter($weightMap, fn($w) => $w !== null));
+
+        // Each WS exactly as the workbook rounds it (P17, AC17, AK17).
+        $partialContributions = [];
+        $runningCents = 0;
         foreach ($requiredKeys as $key) {
-            $contribution = round($componentPercentages[$key] * $weightMap[$key] / 100, 2);
-            $contributions[$key] = $contribution;
-            $total += $contribution;
+            if ($detail[$key]['ws'] !== null) {
+                $partialContributions[$key] = $detail[$key]['ws'];
+                $runningCents += self::cents($detail[$key]['ws']);
+            }
+        }
+        // RUNNING grade (Class Record display only): the WS present so far,
+        // added in exact hundredths — weights NOT renormalised, so a partial
+        // term reads partial. With every required WS present it is the
+        // workbook's AL17 = SUM(P17, AC17, AK17) of 2-dp values, exactly.
+        $runningGrade = $partialContributions === [] ? null : $runningCents / 100.0;
+
+        // Two separate questions:
+        //  - workbook_complete: AL17 would be filled (every required WS exists);
+        //  - complete: the grade may become computed_grade and be verified.
+        //    On top of the above, every Examination Type that HAS an item in
+        //    the formula needs a numeric score — the pre-existing verification
+        //    requirement, kept: a computable workbook number never relaxes it.
+        $workbookComplete = count($partialContributions) === count($requiredKeys);
+        $isComplete = $workbookComplete && $detail['examination']['unscored_roles'] === [];
+
+        $base = [
+            'components'            => $componentPercentages,
+            'component_detail'      => $detail,
+            'partial_contributions' => $partialContributions,
+            'running_grade'         => $runningGrade,
+            'workbook_complete'     => $workbookComplete,
+            'exam_roles'            => $detail['examination']['roles'],
+            'blockers'              => $detail['examination']['blockers'] ?? [],
+            'transmutation_scheme'  => $scheme,
+        ];
+
+        if (!$isComplete) {
+            return $base + [
+                'complete'                      => false,
+                'contributions'                 => [],
+                'computed_grade'                => null,
+                'transmuted_grade'              => null,
+                'transmutation_available'       => false,
+                'transmutation_provisional'     => false,
+                'transmutation_fallback_scheme' => null,
+            ];
         }
 
-        $computedGrade = round($total, 2);
+        $computedGrade = $runningGrade;
 
         // An incomplete scheme (e.g. do015_2026 — see
         // TransmutationRangesSeeder's TODO) must never silently fall back
@@ -355,13 +437,11 @@ class GradingEngine
         // than a value that looks real but isn't.
         $transmutation = $this->transmutation->transmuteWithAvailability($computedGrade, $scheme);
 
-        return [
+        return $base + [
             'complete'                      => true,
-            'components'                    => $componentPercentages,
-            'contributions'                 => $contributions,
+            'contributions'                 => $partialContributions,
             'computed_grade'                => $computedGrade,
             'transmuted_grade'              => $transmutation['available'] ? round($transmutation['value'], 2) : null,
-            'transmutation_scheme'          => $scheme,
             'transmutation_available'       => $transmutation['available'],
             // TASK 1 of "unblock verification" — true only when the scheme
             // actually used (transmutation_fallback_scheme) differs from
@@ -372,181 +452,284 @@ class GradingEngine
         ];
     }
 
+    private const NO_EXAMINATION = ['earned' => null, 'possible' => null, 'percentage' => null, 'ws' => null, 'scored' => 0,
+        'roles' => [], 'method' => 'none', 'unscored_roles' => [], 'unmapped' => [], 'blockers' => []];
+
     /**
-     * The student's percentage for one component, aggregated across every
-     * scored item in it (e.g. Quiz 1 + Quiz 2 combined, not just one).
-     * Null if there are no items for this component at all, or the
-     * student has no scores yet among the items that do exist.
+     * DECIMAL-SAFE arithmetic. Every input here is a decimal with at most two
+     * places (scores, HPS: decimal(…,2); weights and shares: whole or 2-dp
+     * percentages), so each is an exact integer number of hundredths, and
+     * every workbook step is an exact rational of those integers. ROUND(x, 2)
+     * is applied to that exact rational, half away from zero — Excel's ROUND
+     * on these decimals — instead of to a binary double that may sit a
+     * hair below or above the .5 tie. No epsilon anywhere.
      */
-    private function componentPercentage(
-        Student $student,
-        Subject $subject,
-        Section $section,
-        int $gradingPeriod,
-        string $schoolYear,
-        string $componentKey
-    ): ?float {
-        // Same predicates as the per-call query this replaced (subject,
-        // section, period, year, component) — read from the evidence
-        // loaded once for this section/term, see evidenceFor().
-        $evidence = $this->evidenceFor($section, $gradingPeriod, $schoolYear);
-        $items = $evidence['by_subject_component'][$subject->id][$componentKey] ?? [];
+    private static function cents(float $value): int
+    {
+        return (int) round($value * 100);
+    }
 
-        if ($items === []) {
-            return null;
-        }
-
-        $studentValues = $evidence['values'][$student->id] ?? [];
-        $maxByItem = $evidence['max'];
-
-        $earned = 0.0;
-        $max    = 0.0;
-        $any    = false;
-        foreach ($items as $assessmentId => $item) {
-            if (!isset($studentValues[$assessmentId])) {
-                continue;
-            }
-            $any = true;
-            $earned += $studentValues[$assessmentId];
-            $max    += $maxByItem[$assessmentId];
-        }
-
-        if (!$any) {
-            return null;
-        }
-
-        if ($max <= 0) {
-            return null;
-        }
-
-        return round(($earned / $max) * 100, 2);
+    /** round(numerator / denominator) for non-negative integers, ties up. */
+    private static function divRound(int $numerator, int $denominator): int
+    {
+        return intdiv(2 * $numerator + $denominator, 2 * $denominator);
     }
 
     /**
-     * The Examination component's percentage — same "missing means
-     * incomplete" contract as componentPercentage() above, but role-aware
-     * (see ExamRoleShare and the assessments.exam_role column):
+     * WW / PT exactly as the client workbook (Term 1; D1, decided for the
+     * implementation 2026-10-04):
+     *   N14 = SUM(D14:M14)                       every assessment's HPS
+     *   N17 = IF(COUNT(D17:M17)=0,"",SUM(...))   numeric scores only; blank / "M" add 0
+     *   O17 = ROUND(N17/N$14*100, 2)             IFERROR -> "" (no positive HPS)
+     *   P17 = ROUND(O17*P$14, 2)                 P14 = weight / 100.0
+     * A blank or Missing entry earns 0 while its HPS stays in the
+     * denominator; a component with no numeric score at all has no PS
+     * (never a fabricated 0). An unused template slot is not an assessment
+     * and adds nothing. A recorded 0 is a numeric score.
      *
-     *  - No Examination items at all -> null (missing, same as before).
-     *  - Items exist but NONE has a role set -> the legacy flat
-     *    aggregate (sum earned / sum max across every item), exactly as
-     *    if roles didn't exist — every pre-existing subject keeps
-     *    computing exactly as it always has.
-     *  - At least one item has a role -> group by role (an item with no
-     *    role in this case is excluded from the calculation below — a
-     *    documented edge case, not expected in practice: a subject
-     *    either adopts roles for all its Examination items or none).
-     *    Each role's percentage is earned/max summed across every item
-     *    under that role (so two items claiming the same role combine
-     *    naturally, "equally," exactly like multiple items in any other
-     *    component — see AssessmentController's duplicate-role warning
-     *    for surfacing that to the adviser). A role with an item that
-     *    exists but this student has no score for yet makes the whole
-     *    component missing for this student (same "items exist, no
-     *    score yet" rule as any other component) — a role with NO ITEM
-     *    AT ALL yet (the exam hasn't happened this term) is different:
-     *    it's simply excluded and the remaining roles' shares are
-     *    renormalised to sum to 100, so a term in progress never reads
-     *    as though the student scored zero on an exam that hasn't
-     *    happened. A role missing from ExamRoleShare for this scheme
-     *    falls back to an equal split among the roles actually present.
+     * Applicability: every REGULAR item of the class/term applies to every
+     * enrolled learner (the system has no per-learner exemption model). An
+     * ADDITIONAL-SUPPORT item applies only to the learners it was given to,
+     * i.e. those with a numeric score on it, and for them it is additive —
+     * its points to earned AND its HPS to the denominator (HANDOFF.md
+     * "within-term additional support is uncapped and additive"). For anyone
+     * else it is absent: adding one can never change their grade.
+     *
+     * @return array{earned: ?float, possible: ?float, percentage: ?float, ws: ?float, scored: int}
      */
-    private function examinationPercentage(
-        Student $student,
-        Subject $subject,
-        Section $section,
-        int $gradingPeriod,
-        string $schoolYear,
-        string $scheme,
-        ?DepedSubjectCatalog $catalog = null
-    ): ?float {
-        $evidence = $this->evidenceFor($section, $gradingPeriod, $schoolYear);
-        // Item ids in id order; the student's pre-cast score per item id.
-        $itemIds = array_keys($evidence['by_subject_component'][$subject->id]['examination'] ?? []);
+    private function workbookComponent(array $evidence, Student $student, Subject $subject, string $componentKey, ?float $weight): array
+    {
+        $items = $evidence['by_subject_component'][$subject->id][$componentKey] ?? [];
+        $values = $evidence['values'][$student->id] ?? [];
 
-        if ($itemIds === []) {
-            return null;
-        }
-
-        $studentValues = $evidence['values'][$student->id] ?? [];
-        $maxByItem = $evidence['max'];
-        $roleByItem = $evidence['roles'];
-
-        $scoredItemIds = array_values(array_filter($itemIds, fn($id) => isset($studentValues[$id])));
-
-        if ($scoredItemIds === []) {
-            return null;
-        }
-
-        $hasAnyRole = false;
-        foreach ($itemIds as $id) {
-            if ($roleByItem[$id] !== null) {
-                $hasAnyRole = true;
-                break;
+        $earned = 0;   // hundredths
+        $possible = 0; // hundredths
+        $counted = 0;
+        $scored = 0;
+        foreach ($items as $id => $item) {
+            $has = isset($values[$id]);
+            if ($item->is_additional_support && !$has) {
+                continue;
+            }
+            $counted++;
+            $possible += self::cents($evidence['max'][$id]);
+            if ($has) {
+                $earned += self::cents($values[$id]);
+                $scored++;
             }
         }
 
-        if (!$hasAnyRole) {
-            $earned = 0.0;
-            $max    = 0.0;
-            foreach ($scoredItemIds as $id) {
-                $earned += $studentValues[$id];
-                $max    += $maxByItem[$id];
-            }
+        // O17 in hundredths of a percent: earned / possible × 100 × 100.
+        $psCents = $scored > 0 && $possible > 0 ? self::divRound($earned * 10000, $possible) : null;
 
-            return $max > 0 ? round(($earned / $max) * 100, 2) : null;
+        return [
+            'earned'     => $scored > 0 ? $earned / 100.0 : null,
+            'possible'   => $counted > 0 ? $possible / 100.0 : null,
+            'percentage' => $psCents === null ? null : $psCents / 100.0,
+            // P17 = ROUND(O17 × weight/100, 2): psCents/100 × W/10000, in hundredths.
+            'ws'         => $psCents !== null && $weight !== null ? self::divRound($psCents * self::cents($weight), 10000) / 100.0 : null,
+            'scored'     => $scored,
+        ];
+    }
+
+    /**
+     * Examination exactly as the client workbook (Term 1; D2/D3, decided for
+     * the implementation 2026-10-04), over the ST 1 / ST 2 / TE columns
+     * (ExaminationRoles::workbookColumns()) and this subject's CONFIGURED
+     * shares (catalog row, else the scheme's exam_role_shares — HELPER!AA:AC):
+     *   AG17 = IFERROR(IF(AD17="","",ROUND(AD17/$AD$14*$AG$14, 2)),"")   per type
+     *   AJ17 = IF(OR(AG17<>"",AH17<>"",AI17<>""),
+     *             SUM(AG17:AI17)/SUM($AG$14:$AI$14)*100, "")             NOT rounded
+     *   AK17 = IFERROR(ROUND(AJ17*$AK$14, 2),"")                          AK14 = weight / 100.0
+     * The denominator is the sum of every configured share whether or not
+     * that exam was given — the available types are never rescaled to 100.
+     * A type with no item, no numeric score (blank or Missing) or no
+     * positive HPS contributes nothing ("" in the workbook). The exam PS
+     * shown is AJ17 to 2 dp; the WS is rounded from the EXACT AJ17.
+     *
+     * A type's cell (AD17) = its REGULAR item, plus — for a learner scored on
+     * them — that type's additional-support items, additively (points and HPS).
+     *
+     * BLOCKED (no Examination figure for the class; listed in `blockers` with
+     * the correction to make): two REGULAR items of one type (ambiguous —
+     * the workbook has one cell; never "first wins"), or a typed item whose
+     * type this subject's profile gives no share. Untyped items while typed
+     * ones exist are not counted (`unmapped`; warned on the Class Record).
+     *
+     * No configured shares at all (a DO 8 / k12_2013 profile, outside this
+     * workbook): the pre-existing equal split among the types that have an
+     * item (`method` = equal_split). No typed item at all (legacy data): the
+     * pre-existing POOLED Examination percentage over the Examination items,
+     * with the WW/PT rule (`method` = pooled).
+     *
+     * `unscored_roles`: types with a regular item but no numeric score for
+     * this learner. The workbook computes without them; the system shows
+     * that running figure but keeps the grade out of verification.
+     */
+    private function workbookExamination(array $evidence, Student $student, Subject $subject, string $scheme, ?DepedSubjectCatalog $catalog, float $weight): array
+    {
+        $items = $evidence['by_subject_component'][$subject->id]['examination'] ?? [];
+        if ($items === []) {
+            return ['method' => 'workbook'] + self::NO_EXAMINATION;
         }
 
-        // role => [item ids], items with no role excluded, id order kept.
-        $itemIdsByRole = [];
-        foreach ($itemIds as $id) {
-            if ($roleByItem[$id] !== null) {
-                $itemIdsByRole[$roleByItem[$id]][] = $id;
-            }
+        $values = $evidence['values'][$student->id] ?? [];
+        $columns = $evidence['exam_columns'][$subject->id];
+        $typedRoles = array_keys(array_filter($columns['roles']) + $columns['support']);
+        if ($typedRoles === []) {
+            return $this->workbookComponent($evidence, $student, $subject, 'examination', $weight)
+                + ['roles' => [], 'method' => 'pooled', 'unscored_roles' => [], 'unmapped' => [], 'blockers' => []];
         }
 
-        // "ECR alignment" work order, PART 2c — a linked catalog row's own
-        // st1/st2/te shares win when it has any (including a TE-only row,
-        // where st1/st2 are simply absent from the array and fall through
-        // to the equal-split fallback below exactly like an unknown role
-        // always has). Only when there is no catalog row, or its shares are
-        // entirely null, does this fall back to the scheme-wide table.
-        $catalogShares = $catalog?->examRoleShares() ?? [];
-        $shareRows = !empty($catalogShares)
-            ? $catalogShares
-            : $this->memo('exam_role_shares|' . $scheme, fn() => ExamRoleShare::where('scheme', $scheme)->pluck('share', 'exam_role'));
+        $shareRows = $this->examRoleShareRows($scheme, $catalog);
+        $shares = [];
+        foreach (self::EXAM_ROLES as $role) {
+            if (isset($shareRows[$role]) && $shareRows[$role] !== null) {
+                $shares[$role] = (float) $shareRows[$role];
+            }
+        }
+        $method = 'workbook';
+        if (array_sum($shares) <= 0) {
+            // No shares configured for this profile (DO 8 / k12_2013 — outside
+            // this workbook): the pre-existing equal split among the types that
+            // have an item, through the same columns and rounding.
+            $shares = array_fill_keys($typedRoles, 100.0); // equal weight, exact
+            $method = 'equal_split';
+        }
 
-        $presentRoles = array_values(array_intersect(self::EXAM_ROLES, array_keys($itemIdsByRole)));
-        $equalShare = 100 / count($presentRoles);
+        $blockers = [];
+        foreach ($columns['duplicates'] as $role => $extra) {
+            $names = array_map(fn($i) => '"' . $i->name . '"', array_merge([$columns['roles'][$role]], $extra));
+            $blockers[] = 'More than one regular ' . ExaminationRoles::label($role) . ' item (' . implode(', ', $names) . '). The E-Class Record has one '
+                . ExaminationRoles::label($role) . ' column, so no Examination figure is computed until only one remains: '
+                . 'Edit the extra item to its correct Examination Type (Edit Assessment).';
+        }
+        foreach ($typedRoles as $role) {
+            if (!isset($shares[$role])) {
+                $blockers[] = 'An ' . ExaminationRoles::label($role) . ' item exists, but this subject\'s grading profile gives '
+                    . ExaminationRoles::label($role) . ' no share. Edit the item to an Examination Type the profile uses.';
+            }
+        }
+        $unmapped = array_map(fn($i) => $i->id, $columns['untyped']);
+        if ($blockers !== []) {
+            return ['earned' => null, 'possible' => null, 'percentage' => null, 'ws' => null, 'scored' => 0,
+                'roles' => [], 'method' => 'blocked', 'unscored_roles' => [], 'unmapped' => $unmapped, 'blockers' => $blockers];
+        }
 
-        $weightedSum = 0.0;
-        $totalShare = 0.0;
-
-        foreach ($presentRoles as $role) {
-            $earned = 0.0;
-            $max = 0.0;
-            foreach ($itemIdsByRole[$role] as $itemId) {
-                if (isset($studentValues[$itemId])) {
-                    $earned += $studentValues[$itemId];
-                    $max += $maxByItem[$itemId];
+        $shareTotal = 0;
+        foreach ($shares as $share) {
+            $shareTotal += self::cents($share);
+        }
+        $roles = [];
+        $sumAg = 0; // hundredths
+        $any = false;
+        $unscored = [];
+        foreach (self::EXAM_ROLES as $role) {
+            if (!isset($shares[$role])) {
+                continue;
+            }
+            $share = $shares[$role];
+            $regular = $columns['roles'][$role];
+            $score = null; // hundredths
+            $hps = 0;      // hundredths
+            if ($regular !== null) {
+                $hps += self::cents($evidence['max'][$regular->id]);
+                if (isset($values[$regular->id])) {
+                    $score = self::cents($values[$regular->id]);
                 }
             }
-
-            if ($max <= 0) {
-                // This role's exam exists but the student has no score
-                // for it yet — missing for this student, not renormalised
-                // away (that's only for a role with no item at all).
-                return null;
+            foreach ($columns['support'][$role] ?? [] as $support) {
+                if (isset($values[$support->id])) {
+                    $hps += self::cents($evidence['max'][$support->id]);
+                    $score = ($score ?? 0) + self::cents($values[$support->id]);
+                }
             }
-
-            $rolePercentage = ($earned / $max) * 100;
-            $share = (float) ($shareRows[$role] ?? $equalShare);
-
-            $weightedSum += $rolePercentage * $share;
-            $totalShare += $share;
+            if ($regular === null && $score === null) {
+                $roles[$role] = ['percentage' => null, 'share' => $share, 'weighted' => null, 'item_id' => null];
+                continue;
+            }
+            if ($score === null) {
+                $unscored[] = $role;
+            }
+            // AG17 = ROUND(AD17 / AD14 × share, 2), in hundredths: score × shareC / hps.
+            $weighted = $score !== null && $hps > 0 ? self::divRound($score * self::cents($share), $hps) : null;
+            if ($weighted !== null) {
+                $sumAg += $weighted;
+                $any = true;
+            }
+            $roles[$role] = [
+                'percentage' => $score !== null && $hps > 0 ? self::divRound($score * 10000, $hps) / 100.0 : null,
+                'share'      => $share,
+                'weighted'   => $weighted === null ? null : $weighted / 100.0,
+                'item_id'    => $regular?->id,
+            ];
         }
 
-        return $totalShare > 0 ? round($weightedSum / $totalShare, 2) : null;
+        // AJ17 = ΣAG / Σshares × 100 (exact rational); shown to 2 dp.
+        // AK17 = ROUND(AJ17 × weight/100, 2) = ΣAGc × W / ΣsharesC, in hundredths.
+        return [
+            'earned'         => null,
+            'possible'       => null,
+            'percentage'     => $any ? self::divRound($sumAg * 10000, $shareTotal) / 100.0 : null,
+            'ws'             => $any ? self::divRound($sumAg * self::cents($weight), $shareTotal) / 100.0 : null,
+            'scored'         => count(array_filter($roles, fn($r) => $r['weighted'] !== null)),
+            'roles'          => $roles,
+            'method'         => $method,
+            'unscored_roles' => $unscored,
+            'unmapped'       => $unmapped,
+            'blockers'       => [],
+        ];
+    }
+
+    /** role => configured share: the catalog row's own shares when it has any, else the scheme's exam_role_shares. */
+    private function examRoleShareRows(string $scheme, ?DepedSubjectCatalog $catalog): mixed
+    {
+        $catalogShares = $catalog?->examRoleShares() ?? [];
+
+        return !empty($catalogShares)
+            ? $catalogShares
+            : $this->memo('exam_role_shares|' . $scheme, fn() => ExamRoleShare::where('scheme', $scheme)->pluck('share', 'exam_role'));
+    }
+
+    /**
+     * The configured share of each Examination Type for this class — the
+     * Class Record's HPS row under "WS ST1 / WS ST2 / WS TE" (workbook
+     * HELPER!AA:AC). A type with no configured share is absent (the engine
+     * then splits equally among the types present; nothing is invented).
+     *
+     * @return array<string, float> st1|st2|term_exam => share
+     */
+    public function examRoleShares(Section $section, Subject $subject): array
+    {
+        $profile = $this->resolveWeightProfile($section, $subject);
+        $rows = $this->examRoleShareRows($profile['scheme'], $profile['catalog']);
+        $shares = [];
+        foreach (self::EXAM_ROLES as $role) {
+            if (isset($rows[$role]) && $rows[$role] !== null) {
+                $shares[$role] = (float) $rows[$role];
+            }
+        }
+
+        return $shares;
+    }
+
+    /**
+     * Class Record LIVE PREVIEW (2026-10-04): replaces, in THIS instance's
+     * in-memory evidence only, the scores of the given cells — [assessment
+     * id][student id] => score, null = no score (blank, which a save turns
+     * into Missing; the engine never reads Missing either way). Nothing is
+     * written; a fresh engine instance is unaffected. Cells of items outside
+     * the loaded scope are ignored. Re-applied if the evidence reloads.
+     *
+     * @param array<int, array<int, ?float>> $cells
+     */
+    public function overlayScores(Section $section, int $gradingPeriod, string $schoolYear, array $cells): static
+    {
+        $key = $section->id . '|' . $gradingPeriod . '|' . $schoolYear;
+        $this->overlays[$key] = $cells;
+        unset($this->evidence[$key]);
+
+        return $this;
     }
 
     /**
@@ -609,6 +792,28 @@ class GradingEngine
             ? $this->memo('catalog|' . $subject->catalog_id, fn() => DepedSubjectCatalog::find($subject->catalog_id))
             : null;
 
+        if ($catalog && $catalog->teacher_supplied) {
+            // "OTHER ELECTIVE / SPECIAL CURRICULAR PROGRAM" (HELPER rows 93 / 147):
+            // the workbook reads this row's weights and shares from what the
+            // teacher types in INPUT DATA!F43:F48. The system stores no such
+            // per-subject figures and never takes a teacher-typed weight, so
+            // this profile is UNCONFIGURED: no figure, no official grade —
+            // never a 0 weight or another profile's weights.
+            return [
+                'scheme'              => $scheme,
+                'source'              => 'unconfigured',
+                'source_label'        => 'Not configured — DepEd "Other elective / special curricular program" (weights supplied per subject)',
+                'group_key'           => null,
+                'ww_weight'           => null,
+                'pt_weight'           => null,
+                'ex_weight'           => null,
+                'catalog'             => $catalog,
+                'configuration_error' => $subject->name . ' is linked to the DepEd "Other elective / special curricular program" catalog row, whose weights and '
+                    . 'Examination shares are supplied per subject. The system has no configured weights for it, so no grade is computed and none can be verified. '
+                    . 'Ask the Admin to link this subject to its own DepEd catalog subject, or to record the school\'s decision on its weights.',
+            ];
+        }
+
         if ($catalog) {
             return [
                 'scheme'       => $scheme,
@@ -619,6 +824,7 @@ class GradingEngine
                 'pt_weight'    => (float) $catalog->pt_weight,
                 'ex_weight'    => $catalog->ex_weight !== null ? (float) $catalog->ex_weight : null,
                 'catalog'      => $catalog,
+                'configuration_error' => null,
             ];
         }
 
@@ -638,6 +844,7 @@ class GradingEngine
             'pt_weight'    => (float) $weights->pt_weight,
             'ex_weight'    => $weights->ex_weight !== null ? (float) $weights->ex_weight : null,
             'catalog'      => null,
+            'configuration_error' => null,
         ];
     }
 

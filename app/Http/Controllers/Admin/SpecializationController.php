@@ -92,6 +92,8 @@ class SpecializationController extends Controller
 
         $specialization->delete();
 
+        \App\Helpers\LogActivity::log('delete_specialization', 'Deleted specialization ' . $specialization->name, 'specializations', (int) $id);
+
         return redirect()->route('admin.specializations')
             ->with('success', 'Specialization deleted successfully!');
     }

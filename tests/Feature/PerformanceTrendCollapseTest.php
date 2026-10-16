@@ -28,7 +28,7 @@ class PerformanceTrendCollapseTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_performance_trend_renders_with_real_values_while_risk_charts_stay_collapsed(): void
+    public function test_performance_trend_renders_with_real_values_and_no_risk_charts_exist(): void
     {
         $principal = User::factory()->principal()->create();
         $section = Section::factory()->create(['grade_level' => 11, 'school_year' => '2026-2027']);
@@ -63,11 +63,10 @@ class PerformanceTrendCollapseTest extends TestCase
         $response->assertDontSee('No student/subject yet has scored evidence', false);
         $response->assertSee((string) $expected, false);
 
-        // Risk Distribution and At-Risk per Section are still collapsed,
-        // with their existing explanation — no risk_results exist at all.
+        // The classifier charts no longer exist at all.
         $response->assertDontSee('riskDonutChart', false);
         $response->assertDontSee('sectionRiskChart', false);
-        $response->assertSee('Risk Level appears once advisers submit their term reports');
+        $response->assertDontSee('Risk Level');
     }
 
     public function test_performance_trend_only_counts_students_with_evidence_in_all_three_components(): void

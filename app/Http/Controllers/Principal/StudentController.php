@@ -9,13 +9,10 @@ use App\Models\Assessment;
 use App\Models\AssessmentScore;
 use App\Models\Grade;
 use App\Models\Intervention;
-use App\Models\RiskResult;
 use App\Models\Section;
 use App\Models\Student;
 use App\Models\Subject;
-use App\Services\DashboardAnalyticsService;
 use App\Services\InTermStatusService;
-use App\Services\InterventionRecommender;
 use App\Services\PerformanceAnalysisService;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -45,7 +42,7 @@ class StudentController extends Controller
      * but both live in the same flat query param since a row can only
      * ever be filtered to one bucket at a time.
      */
-    private const STATUS_FILTER_OPTIONS = ['On Track', 'Needs Attention', 'At Risk', 'Failing'];
+    private const STATUS_FILTER_OPTIONS = ['On Track', 'Needs Attention', 'At Risk', InTermStatusService::NO_EVIDENCE, 'Failing'];
 
     private const COMPONENT_LABELS = [
         'written_work'     => 'Written Work',
@@ -67,8 +64,6 @@ class StudentController extends Controller
 
     public function __construct(
         private PerformanceAnalysisService $analysis = new PerformanceAnalysisService(),
-        private DashboardAnalyticsService $dashboardAnalytics = new DashboardAnalyticsService(),
-        private InterventionRecommender $recommender = new InterventionRecommender(),
         private InTermStatusService $inTermStatus = new InTermStatusService()
     ) {
     }
@@ -321,6 +316,13 @@ class StudentController extends Controller
             // this method.
             $pageItems = $this->attachInterventionContext($pageItems, $subject, $gradingPeriod);
 
+            // Overall Monitoring for the selected term (open Academic
+            // Concerns, any subject) — one query for the page, separate
+            // from the subject's academic performance in the same row.
+            $monitoring = app(\App\Services\MonitoringClassificationService::class)
+                ->forStudents($pageItems->map(fn($row) => $row['student']->id), $schoolYear, $gradingPeriod);
+            $pageItems = $pageItems->map(fn($row) => $row + ['monitoring' => $monitoring->get($row['student']->id)]);
+
             $students = new LengthAwarePaginator(
                 $pageItems,
                 $rows->count(),
@@ -341,8 +343,7 @@ class StudentController extends Controller
             'focusLabel'    => $focus ? self::COMPONENT_LABELS[$focus] : null,
             'sortKey'       => $sortKey,
             'sortDir'       => $sortDir,
-            'interventionTypes' => Intervention::TYPES,
-            'staleRiskTerms' => AcademicTerm::staleRiskTerms($schoolYear),
+            'interventionTypes' => Intervention::SELECTABLE_TYPES,
             'schoolYear'    => $schoolYear,
             'schoolYears'   => AcademicYear::selectableSchoolYears(),
             'isHistoricalYear' => $isHistoricalYear,
@@ -505,68 +506,18 @@ class StudentController extends Controller
             return $pageItems;
         }
 
-        $studentIds = $pageItems->pluck('student.id');
-
-        $riskResultsByStudent = RiskResult::whereIn('student_id', $studentIds)->get()->groupBy('student_id');
-
-        // "Correctness and interface pass" TASK 1b — same term-scoping fix
-        // as buildBulkInterventionCandidates(): $gradingPeriod was already
-        // a parameter here but this query ignored it, so the modal could
-        // show "already has an open intervention" for a DIFFERENT term's
-        // intervention.
+        // Term-scoped: an intervention belongs to one subject AND one term.
         $existingByStudentId = Intervention::where('subject_id', $subject->id)
             ->where('grading_period', $gradingPeriod)
-            ->whereIn('student_id', $studentIds)
+            ->whereIn('student_id', $pageItems->pluck('student.id'))
             ->whereIn('status', Intervention::OPEN_STATUSES)
             ->latest()
             ->get()
             ->unique('student_id')
             ->keyBy('student_id');
 
-        return $pageItems->map(function ($row) use ($riskResultsByStudent, $existingByStudentId, $gradingPeriod) {
-            $student = $row['student'];
-            $schoolYear = $row['section']->school_year;
-
-            $history = $riskResultsByStudent->get($student->id, collect())
-                ->where('school_year', $schoolYear)
-                ->sortBy('grading_period')
-                ->values();
-
-            $termRisk = $history->firstWhere('grading_period', $gradingPeriod);
-
-            $recommendation = null;
-            if ($termRisk) {
-                $weakestComponent = $row['weakest_component'] ? [
-                    'key'        => $row['weakest_component'],
-                    'status'     => $row['components'][$row['weakest_component']]['status'],
-                    'percentage' => $row['components'][$row['weakest_component']]['percentage'],
-                    'gap'        => $row['components'][$row['weakest_component']]['gap'],
-                ] : null;
-
-                // Shaped like DashboardAnalyticsService::getAtRiskStudentsData()'s
-                // per-row array, since InterventionRecommender::recommend()
-                // expects that shape — but built from THIS subject's own
-                // evidence (weakest_component above), not the student's
-                // overall weakest subject, since the intervention being
-                // recorded here is scoped to the subject selected on this page.
-                $recommendation = $this->recommender->recommend([
-                    'risk_level'                => $termRisk->risk_level,
-                    'weakest_subject'           => $termRisk->weakest_subject,
-                    'failing_subjects'          => $termRisk->failing_subjects ?? [],
-                    'consecutive_decline'       => $this->dashboardAnalytics->computeConsecutiveDecline($history),
-                    'weakest_subject_component' => $weakestComponent,
-                ]);
-            }
-
-            $row['risk_result_exists'] = (bool) $termRisk;
-            // The classifier Risk Level — school-year-wide, term-over-term
-            // trend, from the submitted term report. Shown ALONGSIDE
-            // in_term_status (subject-scoped, evidence-only, available
-            // before any report is submitted), never merged into one
-            // value — see the "live in-term risk + stale data guard" prompt.
-            $row['risk_level'] = $termRisk?->risk_level;
-            $row['recommendation'] = $recommendation;
-            $row['existing_intervention'] = $existingByStudentId->get($student->id);
+        return $pageItems->map(function ($row) use ($existingByStudentId) {
+            $row['existing_intervention'] = $existingByStudentId->get($row['student']->id);
 
             return $row;
         });
@@ -600,17 +551,8 @@ class StudentController extends Controller
         $section = $student->sectionFor($schoolYear);
         $isHistoricalYear = $schoolYear !== Section::activeSchoolYear();
 
-        // Every risk result the learner has ever received, newest year
-        // first, so the Principal can see WHEN each classification was
-        // made (PART 11); $riskHistory below is the selected year only.
-        $riskHistoryAllYears = RiskResult::where('student_id', $student->id)
-            ->with('section:id,name,grade_level,school_year')
-            ->orderByDesc('school_year')->orderBy('grading_period')->get();
-
-        $latestRisk = RiskResult::where('student_id', $student->id)
-            ->where('school_year', $schoolYear)
-            ->orderByDesc('grading_period')->first();
-        $period = (int) $request->input('period', $latestRisk?->grading_period ?? 1);
+        // Default to the year's open term (Term 1 when none is open).
+        $period = (int) $request->input('period', AcademicTerm::currentOpenTerm($schoolYear) ?? 1);
 
         // The selected term's offerings — a subject the learner took in
         // Term 1 only is shown under Term 1, not under every term.
@@ -641,37 +583,29 @@ class StudentController extends Controller
             return array_merge(['subject' => $subject, 'evidence' => $evidence], $result);
         });
 
-        $riskHistory = RiskResult::where('student_id', $student->id)
-            ->where('school_year', $schoolYear)
-            ->orderBy('grading_period')->get();
         // All years, each labelled with its own stored year/section
         // (PART 12) — the learner's full intervention record.
         $interventions = Intervention::where('student_id', $student->id)
             ->with('section:id,name,grade_level,school_year')
             ->latest()->get();
 
-        $dssStatus = $latestRisk
-            ? $this->dashboardAnalytics->dssStatusLabel(
-                $latestRisk->risk_level,
-                $this->dashboardAnalytics->computeTrend($riskHistory),
-                $this->dashboardAnalytics->computeConsecutiveDecline($riskHistory)
-            )
-            : null;
+        // Overall Monitoring for the selected term — the same derivation
+        // every other page uses; resolved concerns are history only.
+        $monitoring = app(\App\Services\MonitoringClassificationService::class)->forStudent($student->id, $schoolYear, $period);
+        $resolvedConcernCount = \App\Models\AcademicConcern::where('student_id', $student->id)
+            ->forSchoolYear($schoolYear)->forTerm($period)
+            ->where('status', \App\Models\AcademicConcern::STATUS_RESOLVED)->count();
 
-        // "Student identity and term-specific subject offerings" pass, STEP
-        // K — two separate signals, never merged: the OVERALL term trend
-        // (term averages, even when the subject mix changed) and the
-        // SAME-SUBJECT trend (only subjects graded in both terms), plus
-        // the exact subject-set difference so the page can say which.
-        $termTrend = [
-            'overall'     => $this->dashboardAnalytics->computeTrend($riskHistory),
-            'composition' => $this->dashboardAnalytics->subjectCompositionBetween($student->id, $riskHistory),
-            'same_subject' => $this->dashboardAnalytics->computeSameSubjectTrend($student->id, $riskHistory),
-        ];
+        // Subject first: the term's OFFICIAL grades evaluated one subject at
+        // a time; the overall average is summary only.
+        $subjectResults = \App\Services\SubjectResultSummary::fromGrades(
+            \App\Models\Grade::with('subject:id,name')->where('student_id', $student->id)
+                ->where('school_year', $schoolYear)->where('grading_period', $period)->get()
+        );
 
         return view('principal.student-detail', compact(
-            'student', 'section', 'period', 'subjectAnalysis', 'riskHistory', 'interventions', 'latestRisk', 'dssStatus',
-            'schoolYear', 'isHistoricalYear', 'enrollmentYears', 'riskHistoryAllYears', 'termTrend'
+            'student', 'section', 'period', 'subjectAnalysis', 'interventions',
+            'schoolYear', 'isHistoricalYear', 'enrollmentYears', 'monitoring', 'resolvedConcernCount', 'subjectResults'
         ));
     }
 }

@@ -43,6 +43,49 @@ class Grade extends Model
     ];
 
     // =============================================
+    // MONITORING HOOK
+    // =============================================
+
+    /**
+     * Subject-first monitoring: every official-grade write re-evaluates the
+     * Subject Performance Concern for its section and term after commit
+     * (App\Monitoring\OfficialGradeSync). Grading itself is untouched.
+     */
+    protected static function booted(): void
+    {
+        static::saved(fn(Grade $grade) => \App\Monitoring\OfficialGradeSync::queue($grade));
+        static::deleted(fn(Grade $grade) => \App\Monitoring\OfficialGradeSync::queue($grade));
+    }
+
+    /**
+     * Audit for a typed/imported change to an ALREADY-OFFICIAL grade
+     * (Encode Grades store/import). Existing policy is unchanged — the row
+     * stays official — but the change is now recorded with both values,
+     * where before only "Encoded N grade(s)" was logged. Call with the row
+     * as it was BEFORE the write; does nothing for a new or unverified row
+     * or an unchanged value.
+     */
+    public static function logOfficialCorrection(?self $before, $newValue, string $via): void
+    {
+        if (!$before || !$before->is_verified || $newValue === null || $newValue === '') {
+            return;
+        }
+        if (round((float) $before->grade, 2) === round((float) $newValue, 2)) {
+            return;
+        }
+        $before->loadMissing(['student', 'subject']);
+        \App\Helpers\LogActivity::log(
+            'correct_official_grade',
+            'Changed an official (verified) grade via ' . $via . ' from ' . number_format((float) $before->grade, 2)
+                . ' to ' . number_format((float) $newValue, 2) . ' for ' . ($before->student?->last_name . ', ' . $before->student?->first_name)
+                . ' — ' . ($before->subject?->name ?? 'subject #' . $before->subject_id) . ', Term ' . $before->grading_period . ' ' . $before->school_year
+                . '. It remains marked official (existing behaviour); computed evidence grade ' . ($before->computed_grade !== null ? number_format((float) $before->computed_grade, 2) : '—') . '.',
+            'grades',
+            $before->id
+        );
+    }
+
+    // =============================================
     // RELATIONSHIPS
     // =============================================
 

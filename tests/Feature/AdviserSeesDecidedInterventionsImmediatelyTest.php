@@ -28,6 +28,7 @@ class AdviserSeesDecidedInterventionsImmediatelyTest extends TestCase
         $section = Section::factory()->create(['adviser_id' => $adviser->id]);
         $student = Student::factory()->create(['section_id' => $section->id, 'last_name' => 'BulkDecided']);
         $subject = Subject::factory()->create();
+        $this->interventionReady($student, $subject);
 
         $this->actingAs($principal)->post('/principal/interventions/bulk', [
             'subject_id'     => $subject->id,

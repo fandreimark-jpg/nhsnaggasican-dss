@@ -28,6 +28,7 @@ use Tests\TestCase;
 class XssEscapingAcrossRolePagesTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
 
     public function test_names_and_notes_with_markup_are_escaped_on_every_role_page(): void
     {
@@ -50,7 +51,7 @@ class XssEscapingAcrossRolePagesTest extends TestCase
             [$admin, '/admin/dashboard'], [$admin, '/admin/users'], [$admin, '/admin/students'], [$admin, '/admin/subjects'],
             [$admin, '/admin/sections'], [$admin, '/admin/activity-logs'], [$admin, "/admin/sections/{$section->id}/subjects"],
             [$adviser, '/adviser/dashboard'], [$adviser, '/adviser/students'],
-            [$adviser, '/adviser/assessments?period=1&subject_id=' . $subject->id],
+            [$adviser, '/adviser/grades?period=1&subject_id=' . $subject->id],
             [$adviser, '/adviser/grades?period=1&subject_id=' . $subject->id],
             [$adviser, '/adviser/interventions'], [$adviser, '/adviser/submit-report'],
             [$principal, '/principal/dashboard'], [$principal, '/principal/students'], [$principal, "/principal/students/{$student->id}"],

@@ -28,6 +28,9 @@
         <env name="RAILWAY_ENVIRONMENT_NAME" value=""/>
         <env name="RAILWAY_PUBLIC_DOMAIN" value=""/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
+        <!-- Deliberate error-path tests must not write "testing.ERROR" entries
+             into the operational storage/logs/laravel.log (release pass). -->
+        <env name="LOG_CHANNEL" value="null"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>
         <env name="CACHE_STORE" value="array"/>
@@ -40,5 +43,6 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <env name="SEED_ACCOUNT_PASSWORD" value=""/>
     </php>
 </phpunit>

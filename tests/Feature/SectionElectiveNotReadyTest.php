@@ -78,7 +78,7 @@ class SectionElectiveNotReadyTest extends TestCase
         $response->assertOk();
         $response->assertSee('Electives not yet assigned');
 
-        $submit = $this->actingAs($adviser)->post('/adviser/submit-report', ['grading_period' => 1]);
+        $submit = $this->actingAs($adviser)->post('/adviser/submit-report', ['grading_period' => 1, 'expected_version' => 0]);
         $submit->assertSessionHas('error');
         $this->assertStringContainsString('electives have not been assigned yet', session('error'));
     }

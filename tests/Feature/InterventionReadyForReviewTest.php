@@ -21,14 +21,11 @@ use Tests\TestCase;
 class InterventionReadyForReviewTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\SharesClassAssessments;
 
     private function score(Section $section, Subject $subject, Student $student, string $component, float $earned, float $max = 20): void
     {
-        $assessment = Assessment::factory()->create([
-            'subject_id' => $subject->id, 'section_id' => $section->id, 'grading_period' => 1,
-            'school_year' => $section->school_year, 'name' => $component . '-' . uniqid(),
-            'component' => $component, 'max_score' => $max,
-        ]);
+        $assessment = $this->sharedAssessment($section, $subject, $student, $component, $max);
         AssessmentScore::factory()->create(['assessment_id' => $assessment->id, 'student_id' => $student->id, 'score' => $earned]);
     }
 
@@ -111,11 +108,12 @@ class InterventionReadyForReviewTest extends TestCase
         }
 
         $intervention = Intervention::factory()->create([
-            'student_id' => $student->id, 'subject_id' => $subject->id, 'grading_period' => 1,
+            'student_id' => $student->id, 'subject_id' => $subject->id, 'grading_period' => 1, 'section_id' => $section->id,
             'status' => 'approved', 'delivered_at' => now(), 'delivered_by' => $principal->id,
         ]);
+        $this->interventionReady($student, $subject); // deciding an undecided row needs the section adviser (2026-10-07)
 
-        $this->actingAs($principal)->put("/principal/interventions/{$intervention->id}", ['status' => 'completed']);
+        $this->actingAs($principal)->put("/principal/interventions/{$intervention->id}", ['status' => 'completed'])->assertSessionHas('success');
 
         $intervention->refresh();
         $this->assertSame('completed', $intervention->status);

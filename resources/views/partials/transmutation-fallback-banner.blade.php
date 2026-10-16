@@ -6,8 +6,8 @@
     array<int>], passed in by the calling controller — see
     TransmutationService::fallbackActiveFor().
 
-    Deliberately loud (amber) and NEVER dismissible, same convention as
-    partials.stale-risk-warning — a fallback that can be hidden will be
+    Deliberately loud (amber) and NEVER dismissible — a fallback that can
+    be hidden will be
     forgotten, and these grades stop being provisional only once the real
     table is entered and a recompute is run.
 --}}

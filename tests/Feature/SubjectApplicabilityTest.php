@@ -16,7 +16,6 @@ use App\Models\Student;
 use App\Models\Subject;
 use App\Models\Track;
 use App\Models\User;
-use App\Services\RiskFeatureExtractor;
 use App\Services\SectionElectiveStatus;
 use App\Services\SubjectAnalysisService;
 use App\Services\SubjectApplicabilityService;
@@ -50,6 +49,7 @@ use Tests\TestCase;
 class SubjectApplicabilityTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
     use BuildsEcrFixture;
 
     private User $admin;
@@ -302,11 +302,11 @@ class SubjectApplicabilityTest extends TestCase
 
     public function test_adviser_sees_only_the_selected_terms_applicable_subjects(): void
     {
-        $termOne = $this->actingAs($this->adviser)->get('/adviser/assessments?period=1');
+        $termOne = $this->actingAs($this->adviser)->get('/adviser/grades?period=1');
         $termOne->assertOk();
         $termOne->assertViewHas('subjects', fn($s) => $s->pluck('name')->sort()->values()->all() === ['Effective Communication', 'General Mathematics', 'General Science']);
 
-        $termTwo = $this->actingAs($this->adviser)->get('/adviser/assessments?period=2');
+        $termTwo = $this->actingAs($this->adviser)->get('/adviser/grades?period=2');
         $termTwo->assertViewHas('subjects', fn($s) => $s->pluck('name')->sort()->values()->all() === ['Basic Calculus', 'Effective Communication', 'Entrepreneurship', 'General Science']);
 
         $grades = $this->actingAs($this->adviser)->get('/adviser/grades?period=2');
@@ -316,7 +316,7 @@ class SubjectApplicabilityTest extends TestCase
         $gradesOne->assertOk()->assertSee('General Mathematics')->assertDontSee('Entrepreneurship');
 
         // Curie's adviser never sees Shakespeare's elective choice.
-        $this->actingAs($this->curieAdviser)->get('/adviser/assessments?period=2')
+        $this->actingAs($this->curieAdviser)->get('/adviser/grades?period=2')
             ->assertViewHas('subjects', fn($s) => !$s->contains('name', 'Basic Calculus'));
     }
 
@@ -325,23 +325,18 @@ class SubjectApplicabilityTest extends TestCase
         $this->openTerm(1);
         $student = Student::factory()->create(['section_id' => $this->shakespeare->id, 'lrn' => '100000000021']);
 
-        // Upload path — refused before the file is read.
-        $upload = $this->actingAs($this->adviser)->post('/adviser/assessments/detect', [
-            'subject_id'     => $this->entrep->id,
-            'grading_period' => 1,
-            'file'           => UploadedFile::fake()->createWithContent('a.csv', "lrn,last_name,first_name,Quiz 1\n100000000021,X,Y,10\n"),
-        ]);
-        $upload->assertRedirect();
-        $upload->assertSessionHas('error', 'Entrepreneurship is not applicable to Shakespeare in Term 1.');
-        $this->assertDatabaseCount('assessments', 0);
-
-        // Manual item path.
-        $item = $this->actingAs($this->adviser)->post('/adviser/assessments/item', [
-            'subject_id' => $this->entrep->id, 'grading_period' => 1, 'item_name' => 'Quiz 1',
-            'component' => 'written_work', 'max_score' => 10, 'scores' => [$student->id => 8],
+        // Add Assessment (details only) — refused for a subject not taught in the term.
+        $item = $this->actingAs($this->adviser)->post(route('teacher.assessments.store'), [
+            'section_id' => $this->shakespeare->id, 'subject_id' => $this->entrep->id, 'grading_period' => 1, 'item_name' => 'Quiz 1',
+            'component' => 'written_work', 'max_score' => 10,
         ]);
         $item->assertSessionHasErrors(['item_name'], null, 'addItem');
+        $this->assertSame('Entrepreneurship is not applicable to Shakespeare in Term 1.', session('errors')->getBag('addItem')->first('item_name'));
         $this->assertDatabaseCount('assessments', 0);
+
+        // The Class Record will not open it for Term 1 either.
+        $this->actingAs($this->adviser)->get(route('teacher.class-record', ['section_id' => $this->shakespeare->id, 'subject_id' => $this->entrep->id, 'period' => 1]))
+            ->assertForbidden();
 
         // Official grade path — the foreign subject_id is skipped, never saved.
         $this->actingAs($this->adviser)->post('/adviser/grades', [
@@ -380,83 +375,6 @@ class SubjectApplicabilityTest extends TestCase
         // It is still fully VIEWABLE for Term 1.
         $this->actingAs($this->adviser)->get('/adviser/grades?period=1')->assertOk()->assertSee('General Mathematics');
     }
-
-    public function test_adviser_cannot_reach_another_sections_elective_choice_through_the_request(): void
-    {
-        $this->openTerm(2);
-        $response = $this->actingAs($this->curieAdviser)->post('/adviser/assessments/detect', [
-            'subject_id'     => $this->basicCalc->id,
-            'grading_period' => 2,
-            'file'           => UploadedFile::fake()->createWithContent('a.csv', "lrn,last_name,first_name,Quiz 1\n"),
-        ]);
-        $response->assertSessionHas('error', 'Basic Calculus is not applicable to Curie in Term 2.');
-    }
-
-    // -----------------------------------------------------------------
-    // 10, 13 — the prescribed ECR
-    // -----------------------------------------------------------------
-
-    public function test_a_prescribed_ecr_for_a_term_2_only_subject_is_refused_for_term_1_and_changes_nothing(): void
-    {
-        $this->openTerm(1);
-        Student::factory()->create(['section_id' => $this->shakespeare->id, 'lrn' => '110000000001', 'last_name' => 'Agbayani', 'first_name' => 'Rhea Mae', 'gender' => 'female']);
-
-        $path = $this->buildFilledEcrCopy(
-            sectionName: 'Shakespeare', courseTitle: 'Entrepreneurship',
-            roster: [['lrn' => '110000000001', 'name' => 'Agbayani, Rhea Mae', 'gender' => 'female']],
-            scores: ['D' => [$this->femaleTermRow(0) => 18]], maxScores: ['D' => 20],
-            gradingPeriod: 1, schoolYearStart: '2026', termBlockLabel: 'SECOND TERM',
-        );
-        $this->tempFiles[] = $path;
-
-        $termsBefore = DB::table('subject_terms')->count();
-        $choicesBefore = SectionSubject::count();
-
-        $response = $this->actingAs($this->adviser)->post('/adviser/assessments/detect', [
-            'subject_id' => $this->entrep->id, 'grading_period' => 1,
-            'file' => new UploadedFile($path, 'ecr.xlsx', null, null, true),
-        ]);
-
-        $response->assertRedirect()->assertSessionHas('error', 'Entrepreneurship is not applicable to Shakespeare in Term 1.');
-        $this->assertDatabaseCount('assessments', 0);
-        $this->assertSame($termsBefore, DB::table('subject_terms')->count());
-        $this->assertSame($choicesBefore, SectionSubject::count());
-        $this->assertSame([2, 3], $this->entrep->fresh()->termNumbers(), 'an upload never rewrites Terms Taught');
-    }
-
-    // -----------------------------------------------------------------
-    // 11, 12 — ECR wrong-section / wrong-subject validation still works
-    // (the file's own metadata is checked AFTER applicability)
-    // -----------------------------------------------------------------
-
-    public function test_an_ecr_naming_another_section_or_subject_is_still_refused(): void
-    {
-        $this->openTerm(1);
-        Student::factory()->create(['section_id' => $this->shakespeare->id, 'lrn' => '110000000001', 'last_name' => 'Agbayani', 'first_name' => 'Rhea Mae', 'gender' => 'female']);
-        $roster = [['lrn' => '110000000001', 'name' => 'Agbayani, Rhea Mae', 'gender' => 'female']];
-
-        $wrongSection = $this->buildFilledEcrCopy(sectionName: 'Curie', courseTitle: 'General Mathematics', roster: $roster, scores: ['D' => [$this->femaleTermRow(0) => 18]], maxScores: ['D' => 20], gradingPeriod: 1, schoolYearStart: '2026');
-        $wrongSubject = $this->buildFilledEcrCopy(sectionName: 'Shakespeare', courseTitle: 'General Science', roster: $roster, scores: ['D' => [$this->femaleTermRow(0) => 18]], maxScores: ['D' => 20], gradingPeriod: 1, schoolYearStart: '2026');
-        $this->tempFiles[] = $wrongSection;
-        $this->tempFiles[] = $wrongSubject;
-
-        $this->actingAs($this->adviser)->post('/adviser/assessments/detect', [
-            'subject_id' => $this->genMath->id, 'grading_period' => 1,
-            'file' => new UploadedFile($wrongSection, 'ecr.xlsx', null, null, true),
-        ])->assertRedirect()->assertSessionHas('error', fn($m) => str_contains($m, 'Curie') && str_contains($m, 'Shakespeare'));
-
-        $this->actingAs($this->adviser)->post('/adviser/assessments/detect', [
-            'subject_id' => $this->genMath->id, 'grading_period' => 1,
-            'file' => new UploadedFile($wrongSubject, 'ecr.xlsx', null, null, true),
-        ])->assertRedirect()->assertSessionHas('error', fn($m) => str_contains($m, 'General Science') && str_contains($m, 'General Mathematics'));
-
-        $this->assertDatabaseCount('assessments', 0);
-    }
-
-    // -----------------------------------------------------------------
-    // 16, 17 — history: visible, and protected against an edit
-    // -----------------------------------------------------------------
-
     public function test_historical_term_1_records_remain_visible_after_term_2_opens(): void
     {
         $student = Student::factory()->create(['section_id' => $this->shakespeare->id]);
@@ -562,10 +480,10 @@ class SubjectApplicabilityTest extends TestCase
     }
 
     // -----------------------------------------------------------------
-    // 19, 20, 21 — Submit Report / risk features use the term's universe
+    // 19, 20, 21 — Submit Report uses the term's universe
     // -----------------------------------------------------------------
 
-    public function test_future_term_subjects_do_not_contaminate_current_term_expectations_or_risk_features(): void
+    public function test_future_term_subjects_do_not_contaminate_current_term_expectations(): void
     {
         $this->openTerm(1);
         $students = Student::factory()->count(2)->create(['section_id' => $this->shakespeare->id]);
@@ -594,11 +512,6 @@ class SubjectApplicabilityTest extends TestCase
         $this->assertSame(6, $readiness['complete']);
         $this->assertTrue($readiness['ready'], 'a Term-2-only subject must not hold Term 1 back');
 
-        $features = (new RiskFeatureExtractor())->extract($students[0], $this->shakespeare, 1, '2026-2027', 90.0);
-        $this->assertSame(0, $features['missing_assessment_count'], 'nothing is missing — the future subjects have no Term 1 items to be missing');
-        $this->assertSame(0, $features['weak_component_count']);
-        $this->assertEquals(100.0, $features['ww_mean']);
-
         // Submit Report's own failing-subject count comes from the term's
         // grades — Entrepreneurship, ungraded because it is not taught yet,
         // is not a failing subject. Built the way submit() builds it.
@@ -608,33 +521,24 @@ class SubjectApplicabilityTest extends TestCase
         $this->assertSame(3, $termGrades->get($students[0]->id)->count(), 'exactly the three Term 1 subjects');
     }
 
-    public function test_submit_report_evaluates_only_the_terms_applicable_subjects_end_to_end(): void
+    public function test_submit_report_needs_only_the_terms_applicable_subjects_and_runs_no_classifier(): void
     {
-        $python = config('services.python_path');
-        $probe = new \Symfony\Component\Process\Process([$python, '-c', 'import sklearn']);
-        $probe->run();
-        if (!$probe->isSuccessful()) {
-            $this->markTestSkipped("Python interpreter '{$python}' with scikit-learn is not runnable in this environment.");
-        }
-
         $this->openTerm(1);
         $student = Student::factory()->create(['section_id' => $this->shakespeare->id]);
-        // General Mathematics failing, the other two Term 1 subjects fine;
-        // Entrepreneurship and Basic Calculus have no Term 1 grade and must
-        // neither block submission nor appear as failing.
+        // Only the three Term 1 subjects are graded; Entrepreneurship and
+        // Basic Calculus have no Term 1 grade and must not block submission.
         foreach ([[$this->genMath, 60], [$this->genSci, 85], [$this->effComm, 88]] as [$subject, $grade]) {
             Grade::create(['student_id' => $student->id, 'subject_id' => $subject->id, 'section_id' => $this->shakespeare->id, 'grading_period' => 1, 'grade' => $grade, 'school_year' => '2026-2027', 'is_verified' => true]);
         }
 
-        $this->actingAs($this->adviser)->post('/adviser/submit-report', ['grading_period' => 1])
-            ->assertRedirect(route('adviser.submit.report'))->assertSessionHas('success');
+        // An interpreter that cannot exist: submission must not depend on one.
+        config(['services.python_path' => 'this-python-binary-does-not-exist-xyz']);
 
-        $risk = RiskResult::where('student_id', $student->id)->where('grading_period', 1)->firstOrFail();
-        $this->assertSame(1, count($risk->failing_subjects));
-        $this->assertSame('General Mathematics', $risk->failing_subjects[0]['name']);
-        $this->assertSame('General Mathematics', $risk->weakest_subject);
-        $this->assertEquals(77.67, (float) $risk->average_grade, 'the average of the THREE Term 1 grades, not five subjects');
-        $this->assertContains($risk->risk_level, ['moderate', 'high'], 'one failing subject floors the level at moderate');
+        $this->actingAs($this->adviser)->post('/adviser/submit-report', ['grading_period' => 1, 'expected_version' => 0])
+            ->assertRedirect(route('adviser.submit.report'))->assertSessionHas('success')->assertSessionMissing('warning');
+
+        $this->assertDatabaseHas('report_submissions', ['section_id' => $this->shakespeare->id, 'grading_period' => 1, 'school_year' => '2026-2027', 'status' => 'submitted']);
+        $this->assertSame(0, RiskResult::count(), 'Submit Report generates no risk classification');
     }
 
     // -----------------------------------------------------------------
@@ -666,7 +570,8 @@ class SubjectApplicabilityTest extends TestCase
             $this->assertFalse(Route::has($name), "{$name} must be gone");
         }
         $this->assertTrue(Route::has('admin.students.import'), 'the learner roster import is a supported format and stays');
-        $this->assertTrue(Route::has('adviser.assessments.detect'), 'the prescribed ECR upload stays');
+        // Retired 2026-09-28: teachers no longer upload assessment files (scores are entered in the Class Record).
+        $this->assertFalse(Route::has('adviser.assessments.detect'), 'the teacher assessment-file upload is retired');
 
         $this->actingAs($this->admin)->get(route('admin.tracks'))->assertOk()->assertDontSee('Import Tracks');
         $this->actingAs($this->admin)->get(route('admin.specializations'))->assertOk()->assertDontSee('Import Specializations');

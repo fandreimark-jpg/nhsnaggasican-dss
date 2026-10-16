@@ -40,9 +40,11 @@ class AdviserOverallInTermStatusTest extends TestCase
         $response = $this->actingAs($adviser)->get('/adviser/dashboard');
 
         $response->assertOk();
-        $response->assertSee('Overall In-Term Status');
+        // Renamed 2026-09-27: the aggregate is Academic Performance, shown
+        // beside (never merged with) the learner's Overall Monitoring.
+        $response->assertSee('Academic Performance');
         $response->assertSee('combining every subject this section takes', false);
-        $response->assertSee(route('adviser.assessments', [], false), false);
+        $response->assertSee(route('adviser.grades', [], false), false);
     }
 
     public function test_principal_students_page_labels_the_column_for_this_subject(): void
@@ -57,7 +59,7 @@ class AdviserOverallInTermStatusTest extends TestCase
         $response = $this->actingAs($principal)->get('/principal/students?subject_id=' . $subject->id . '&period=1');
 
         $response->assertOk();
-        $response->assertSee('In-Term Status (this subject)');
+        $response->assertSee('Academic Performance (this subject)');
     }
 
     /**
@@ -108,6 +110,6 @@ class AdviserOverallInTermStatusTest extends TestCase
         $principalB = $this->actingAs($principal)->get('/principal/students?subject_id=' . $subjectB->id . '&period=1');
         $principalB->assertOk();
         $rowB = substr($principalB->getContent(), strpos($principalB->getContent(), 'Reyes'), 6000);
-        $this->assertStringContainsString('At Risk', $rowB);
+        $this->assertStringContainsString('Below Target: 2+ Components', $rowB);
     }
 }

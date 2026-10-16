@@ -108,14 +108,14 @@ class AdminStudentManagementTest extends TestCase
 
     public function test_adviser_import_students_route_no_longer_exists(): void
     {
-        // '/adviser/students/import' matches the '/adviser/students/{id}'
-        // PUT route's URI shape ("import" as the {id}), so POSTing here
-        // 405s rather than 404s — same outcome: no import action exists.
+        // Until 2026-09-27 this URI matched the adviser '/adviser/students/{id}'
+        // PUT route's shape and answered 405; that edit route is gone too, so
+        // nothing matches now — same outcome: no import action exists.
         $adviser = User::factory()->create();
         Section::factory()->create(['adviser_id' => $adviser->id]);
 
         $this->actingAs($adviser)->post('/adviser/students/import', [])
-            ->assertStatus(405);
+            ->assertNotFound();
     }
 
     public function test_admin_can_import_students_into_a_chosen_section(): void

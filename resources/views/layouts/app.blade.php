@@ -34,6 +34,7 @@
                 ['admin.subjects', 'admin.subjects*', 'bi-book', 'Subjects'],
                 ['admin.sections', 'admin.sections*', 'bi-grid', 'Sections'],
                 ['admin.students', 'admin.students*', 'bi-mortarboard', 'Students'],
+                ['admin.teaching-assignments', 'admin.teaching-assignments*', 'bi-person-workspace', 'Teaching Assignments'],
             ],
             'Academic' => [
                 ['admin.academic-terms', 'admin.academic-terms*', 'bi-calendar-check', 'Academic Terms'],
@@ -48,6 +49,7 @@
                 ['principal.dashboard', 'principal.dashboard', 'bi-speedometer2', 'Dashboard'],
             ],
             'Monitoring' => [
+                ['principal.academic-monitoring', 'principal.academic-monitoring*', 'bi-flag', 'Academic Monitoring'],
                 ['principal.students', 'principal.students*', 'bi-mortarboard', 'Students'],
                 ['principal.reports', 'principal.reports*', 'bi-file-earmark-text', 'Reports'],
                 ['principal.subject-analysis', 'principal.subject-analysis*', 'bi-bar-chart', 'Subject Analysis'],
@@ -56,16 +58,26 @@
                 ['principal.interventions', 'principal.interventions*', 'bi-clipboard2-pulse', 'Interventions'],
             ],
         ],
+        'subject_teacher' => [
+            'Teaching' => [
+                ['teacher.classes', 'teacher.classes', 'bi-journal-bookmark', 'My Classes'],
+                ['teacher.class-record', 'teacher.class-record*', 'bi-table', 'Class Record'],
+            ],
+        ],
         default => [
             'Overview' => [
                 ['adviser.dashboard', 'adviser.dashboard', 'bi-speedometer2', 'Dashboard'],
             ],
             'Learners' => [
                 ['adviser.students', 'adviser.students*', 'bi-mortarboard', 'My Students'],
+                ['adviser.advisory-overview', 'adviser.advisory-overview*', 'bi-people', 'Advisory Overview'],
             ],
             'Academic' => [
-                ['adviser.grades', 'adviser.grades*', 'bi-pencil-square', 'Encode Grades'],
-                ['adviser.assessments', 'adviser.assessments*', 'bi-clipboard-data', 'Assessments'],
+                ['teacher.classes', 'teacher.classes', 'bi-journal-bookmark', 'My Classes'],
+                ['teacher.class-record', 'teacher.class-record*', 'bi-table', 'Class Record'],
+                // Two pages, two exact patterns: never both active at once.
+                ['adviser.grades', 'adviser.grades', 'bi-pencil-square', 'Encode Grades'],
+                ['adviser.verify-grades', 'adviser.verify-grades', 'bi-patch-check', 'Verify Grades'],
                 ['adviser.submit.report', 'adviser.submit*', 'bi-file-earmark-arrow-up', 'Submit Report'],
             ],
             'Support' => [
@@ -79,15 +91,8 @@
     $hour = (int) now()->format('G');
     $greeting = $hour < 12 ? 'Good morning' : ($hour < 18 ? 'Good afternoon' : 'Good evening');
     $firstName = auth()->user()->first_name ?: \Illuminate\Support\Str::of(auth()->user()->name)->before(' ');
-    $roleLabel = ['admin' => 'Administrator', 'adviser' => 'Adviser', 'principal' => 'Principal'][$role] ?? ucfirst($role);
+    $roleLabel = ['admin' => 'Administrator', 'adviser' => 'Adviser', 'subject_teacher' => 'Subject Teacher', 'principal' => 'Principal'][$role] ?? ucfirst($role);
 @endphp
-
-    {{-- Hamburger button — mobile only (hidden on desktop via md:hidden).
-         Fixed at top-left so it's always reachable even while scrolling. --}}
-    <button type="button" onclick="toggleSidebar()" aria-label="Open menu" aria-controls="sidebar"
-            class="md:hidden fixed top-4 left-4 z-50 bg-brand-900 text-white p-2.5 rounded-lg shadow-lg">
-        <i class="bi bi-list text-xl" aria-hidden="true"></i>
-    </button>
 
     {{-- Dark overlay behind the sidebar on mobile — tapping it closes
          the menu, same pattern as clicking outside any other modal. --}}
@@ -161,8 +166,27 @@
              every authenticated page, not just a dedicated route. --}}
         @include('profile._modal')
 
-        <main id="main" class="flex-1 p-6 overflow-y-auto">
-            <div class="max-w-6xl mx-auto pt-10 md:pt-0">
+        {{-- Content column ("mobile header" fix, 2026-09-28). Below md a
+             compact header in normal flow carries the menu trigger, and
+             <main> scrolls underneath it; the old fixed floating button
+             covered the top-left of scrolled content on every page. --}}
+        <div id="appContent" class="flex-1 min-w-0 flex flex-col h-screen">
+        <header class="md:hidden shrink-0 flex items-center gap-3 px-4 h-14 bg-brand-900 text-white shadow-sm z-20" data-mobile-header>
+            <button type="button" id="sidebarToggle" onclick="toggleSidebar()" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false"
+                    class="inline-flex items-center justify-center w-11 h-11 -ml-2 rounded-lg hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white">
+                <i class="bi bi-list text-2xl" aria-hidden="true"></i>
+            </button>
+            <span class="text-sm font-semibold truncate">Naggasican NHS</span>
+            <span class="ml-auto text-[11px] text-brand-200/90 truncate">@yield('title')</span>
+        </header>
+        {{-- `relative`: <main> must be the containing block of absolutely
+             positioned descendants (e.g. .sr-only link text). Without it they
+             are placed against the viewport, escape main's overflow clip and
+             make the DOCUMENT scroll too: a second scrollbar and blank space
+             below the footer (2026-10-07). --}}
+        <main id="main" class="relative flex-1 p-6 overflow-y-auto">
+            {{-- A wide data grid (the Class Record) opts into the full width with @section('wide_content', '1'). --}}
+            <div class="@hasSection('wide_content') max-w-[112rem] @else max-w-6xl @endif mx-auto">
                 <div class="page-header">
                     <div class="min-w-0">
                         <p class="page-eyebrow">{{ $greeting }}, {{ $firstName }}</p>
@@ -185,38 +209,40 @@
                 @include('partials.footer')
             </div>
         </main>
+        </div>
     </div>
 
     {{-- ===================== TOAST NOTIFICATION ===================== --}}
-    @if(session('success') || session('error') || session('warning'))
+    @php $toastError = session('error_inline') ? null : session('error'); @endphp
+    @if(session('success') || $toastError || session('warning'))
     <div id="flashToast"
          role="status" aria-live="polite"
          class="fixed top-4 right-4 md:top-6 md:right-6 z-[9999] flex items-start gap-3 px-5 py-4 rounded-xl shadow-modal border w-80 max-w-[calc(100vw-2rem)]
                 opacity-0 translate-y-3 transition-all duration-500
                 {{ session('success') ? 'bg-white border-green-300' : '' }}
-                {{ session('error')   ? 'bg-white border-red-300'   : '' }}
+                {{ $toastError   ? 'bg-white border-red-300'   : '' }}
                 {{ session('warning') ? 'bg-white border-yellow-300': '' }}">
         <div class="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl
             {{ session('success') ? 'bg-green-500' : '' }}
-            {{ session('error')   ? 'bg-red-500'   : '' }}
+            {{ $toastError   ? 'bg-red-500'   : '' }}
             {{ session('warning') ? 'bg-yellow-400': '' }}">
         </div>
         <div class="ml-2 mt-0.5 text-lg shrink-0
             {{ session('success') ? 'text-green-500' : '' }}
-            {{ session('error')   ? 'text-red-500'   : '' }}
+            {{ $toastError   ? 'text-red-500'   : '' }}
             {{ session('warning') ? 'text-yellow-500': '' }}">
             @if(session('success')) <i class="bi bi-check-circle-fill"></i> @endif
-            @if(session('error'))   <i class="bi bi-x-circle-fill"></i>     @endif
+            @if($toastError)   <i class="bi bi-x-circle-fill"></i>     @endif
             @if(session('warning')) <i class="bi bi-exclamation-circle-fill"></i> @endif
         </div>
         <div class="flex-1 min-w-0">
             <p class="text-sm font-semibold text-gray-800">
                 @if(session('success')) Success @endif
-                @if(session('error'))   Error   @endif
+                @if($toastError)   Error   @endif
                 @if(session('warning')) Warning @endif
             </p>
             <p class="text-xs text-gray-500 mt-0.5 leading-relaxed">
-                {{ session('success') ?? session('error') ?? session('warning') }}
+                {{ session('success') ?? $toastError ?? session('warning') }}
             </p>
         </div>
         <button onclick="dismissToast()" aria-label="Dismiss notification" class="shrink-0 text-gray-300 hover:text-gray-500 text-lg leading-none mt-0.5">
@@ -225,7 +251,7 @@
         <div id="toastProgress"
              class="absolute bottom-0 left-0 right-0 h-0.5 rounded-b-xl
                 {{ session('success') ? 'bg-green-400' : '' }}
-                {{ session('error')   ? 'bg-red-400'   : '' }}
+                {{ $toastError   ? 'bg-red-400'   : '' }}
                 {{ session('warning') ? 'bg-yellow-400': '' }}"
              style="animation: toastShrink 4s linear forwards;">
         </div>
@@ -330,7 +356,7 @@
                 </div>
                 <p id="confirmResubmitMessage" class="text-sm text-gray-600 mb-1"></p>
                 <p class="text-xs text-warning-text mb-5">
-                    <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i> Risk classification will be updated.
+                    <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i> A new version is recorded with the current time; earlier versions are kept.
                 </p>
                 <div class="flex justify-end gap-3">
                     <button type="button" onclick="closeConfirmResubmit()" class="btn btn-outline">

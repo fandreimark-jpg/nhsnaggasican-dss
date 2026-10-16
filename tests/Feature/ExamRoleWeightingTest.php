@@ -90,20 +90,20 @@ class ExamRoleWeightingTest extends TestCase
         $this->assertEquals(79.0, $result['components']['examination']);
     }
 
-    public function test_missing_term_exam_item_renormalises_st1_st2_to_50_50(): void
+    public function test_no_term_exam_item_yet_adds_nothing_and_is_not_rescaled(): void
     {
         $this->fillWrittenWorkAndPerformanceTask();
-        // No Term Examination item exists at all yet — the term is still
-        // in progress. Must NOT read as though the student scored zero
-        // on the missing 40%.
+        // No Term Examination item exists yet. Workbook (D2, 2026-10-04):
+        // AG17 = ROUND(80/100*30,2) = 24, AH17 = 27, AI17 = "" ->
+        // AJ17 = (24 + 27) / (30 + 30 + 40) * 100 = 51 — the configured
+        // shares are the denominator; ST1/ST2 are NOT rescaled to 50/50 (85).
         $this->score($this->examItem('st1', '1'), 80);
         $this->score($this->examItem('st2', '2'), 90);
 
         $result = $this->engine->computeGrade($this->student, $this->subject, $this->section, 1, '2026-2027');
 
-        // (80*30 + 90*30) / 60 = 85 — simple average, not 80*.3+90*.3=51.
-        $this->assertTrue($result['complete']);
-        $this->assertEquals(85.0, $result['components']['examination']);
+        $this->assertTrue($result['complete'], 'no TE item exists, so none is awaited');
+        $this->assertEquals(51.0, $result['components']['examination']);
     }
 
     public function test_a_term_exam_item_that_exists_but_this_student_has_no_score_for_yet_is_incomplete_not_renormalised(): void
@@ -118,8 +118,15 @@ class ExamRoleWeightingTest extends TestCase
 
         $result = $this->engine->computeGrade($this->student, $this->subject, $this->section, 1, '2026-2027');
 
+        // Workbook AJ17 is filled from the scored types (51.00, AK17 = 15.30);
+        // the system shows that as a running figure but keeps the grade out
+        // of computed_grade / verification until the Term Exam is scored.
+        $this->assertEquals(51.0, $result['components']['examination']);
+        $this->assertSame(['term_exam'], $result['component_detail']['examination']['unscored_roles']);
+        $this->assertTrue($result['workbook_complete']);
         $this->assertFalse($result['complete']);
-        $this->assertNull($result['components']['examination']);
+        $this->assertNull($result['computed_grade']);
+        $this->assertSame(20.0 + 50.0 + 15.3, $result['running_grade']);
     }
 
     public function test_no_role_set_at_all_falls_back_to_the_legacy_flat_aggregate(): void
@@ -140,11 +147,11 @@ class ExamRoleWeightingTest extends TestCase
         $this->assertEquals(85.0, $result['components']['examination']);
     }
 
-    public function test_two_items_claiming_the_same_role_combine_equally_within_that_roles_share(): void
+    public function test_a_second_regular_item_of_one_type_blocks_the_examination_figure(): void
     {
         $this->fillWrittenWorkAndPerformanceTask();
-        // Two items both marked st1 — combined via summed earned/max,
-        // same convention as any other multi-item component.
+        // Two REGULAR items both marked st1. The workbook has ONE ST 1 cell
+        // (AD17), so neither is chosen: the class has no Examination figure.
         $st1a = $this->examItem('st1', '1a');
         $st1a->update(['max_score' => 50]);
         $this->score($st1a, 40);
@@ -156,7 +163,32 @@ class ExamRoleWeightingTest extends TestCase
 
         $result = $this->engine->computeGrade($this->student, $this->subject, $this->section, 1, '2026-2027');
 
-        // st1 combined = (40+45)/(50+50) = 85%. Then 85*.30 + 90*.30 + 70*.40 = 25.5+27+28 = 80.5.
-        $this->assertEquals(80.5, $result['components']['examination']);
+        // Two REGULAR ST1 items are ambiguous (the workbook has one ST 1 cell):
+        // no Examination figure, no grade, and a correction message — never "first wins".
+        $this->assertNull($result['components']['examination']);
+        $this->assertSame('blocked', $result['component_detail']['examination']['method']);
+        $this->assertStringContainsString('More than one regular ST1', $result['blockers'][0]);
+        $this->assertFalse($result['complete']);
+        $this->assertNull($result['computed_grade']);
+        $this->assertArrayNotHasKey('examination', $result['partial_contributions'], 'no Examination WS in the running grade');
+
+        // Verify Grades names the blocker; a direct verify POST is refused and writes nothing.
+        \App\Models\AcademicYear::firstOrCreate(['school_year' => '2026-2027'], ['is_active' => true]);
+        \App\Models\AcademicTerm::ensureExistFor('2026-2027');
+        \App\Models\AcademicTerm::where('school_year', '2026-2027')->where('term', 1)->update(['is_open' => true]);
+        $adviser = \App\Models\User::factory()->create(['role' => 'adviser']);
+        $this->section->update(['adviser_id' => $adviser->id]);
+        $this->subject->update(['grade_level' => 11, 'type' => 'core']);
+        $this->subject->syncTerms([1, 2, 3]);
+        $row = (new \App\Services\GradeVerificationBoard())->build($this->section, $this->subject, 1, null)['performance']
+            ->first(fn($r) => $r['student']->id === $this->student->id);
+        $this->assertSame('incomplete', $row['verify_state']);
+        $this->assertStringContainsString('More than one regular ST1', $row['verify_reason']);
+        $this->assertStringContainsString('Edit the extra item to its correct Examination Type', $row['verify_reason']);
+
+        $this->actingAs($adviser)->postJson(route('adviser.grades.verify'), ['student_id' => $this->student->id, 'subject_id' => $this->subject->id, 'grading_period' => 1])
+            ->assertStatus(422)->assertJsonFragment(['message' => 'Cannot verify ' . $this->subject->name . ' — ' . $result['blockers'][0]]);
+        $this->assertSame(0, \App\Models\Grade::where('is_verified', true)->count(), 'no official grade from ambiguous evidence');
+        $this->assertSame(2, Assessment::where('exam_role', 'st1')->count(), 'both items kept — never deleted');
     }
 }

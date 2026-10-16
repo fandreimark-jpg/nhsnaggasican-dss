@@ -15,6 +15,13 @@
     </div>
 @else
 
+<div class="alert alert-info text-sm mb-4" data-draft-notice>
+    <i class="bi bi-eye-slash" aria-hidden="true"></i>
+    <strong>Draft preview — only you see this page.</strong> The figures below are your section's current grades.
+    The Principal and Admin see a term only after you press <strong>Submit</strong>, and then exactly what you submitted (a frozen version).
+    After that, changing grades does not change the submitted version; recipients keep seeing it until you <strong>Re-submit</strong>, which adds a new version and keeps the earlier one.
+</div>
+
 {{-- Submission Status per Term --}}
 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
     @foreach([1, 2, 3] as $period)
@@ -26,6 +33,8 @@
         $isComplete    = $termInfo['complete'];
         $isSubmitted   = $termInfo['submitted'];
         $evidence      = $termInfo['assessment_evidence'];
+        $versions      = $submission && \App\Models\ReportSubmission::versioningAvailable() ? $submission->versions : collect();
+        $versionCount  = $versions->count();
     @endphp
     <div class="card p-5 border-t-4
         {{ $isSubmitted ? 'border-green-500' : ($isComplete ? 'border-brand-500' : 'border-gray-300') }}">
@@ -50,7 +59,7 @@
             </div>
             @if($isSubmitted)
                 <span class="badge badge-success">
-                    Submitted
+                    Submitted{{ $versionCount ? ' · v' . $versionCount : '' }}
                 </span>
             @else
                 <span class="badge badge-gray">
@@ -60,9 +69,18 @@
         </div>
 
         @if($isSubmitted)
-            <p class="text-xs text-muted mb-3">
+            <p class="text-xs text-muted mb-1">
                 Submitted: {{ $submission->submitted_at->format('M d, Y h:i A') }}
             </p>
+            @if($versionCount)
+                <ul class="text-[11px] text-muted mb-3 space-y-0.5" data-version-history>
+                    @foreach($versions->reverse() as $v)
+                        <li>v{{ $v->version }} — {{ $v->submitted_at->format('M d, Y g:i A') }} by {{ $v->submitter?->name ?? '—' }}{{ $loop->first ? ' (what recipients see)' : '' }}</li>
+                    @endforeach
+                </ul>
+            @else
+                <p class="text-[11px] text-warning-text mb-3" data-legacy-submission>Submitted before report contents were preserved; recipients see the submission date only.</p>
+            @endif
 
             @if($isComplete)
                 <div class="border-t pt-3 mt-1">
@@ -77,9 +95,10 @@
                         <form method="POST"
                               action="{{ route('adviser.submit.report.post') }}"
                               class="flex-1"
-                              data-resubmit="Re-submit Term {{ $period }} report? This will update the risk classification.">
+                              data-resubmit="Re-submit Term {{ $period }} report? This adds version {{ $versionCount + 1 }} with your current grades; the earlier version is kept, and recipients then see the new one.">
                             @csrf
                             <input type="hidden" name="grading_period" value="{{ $period }}">
+                            <input type="hidden" name="expected_version" value="{{ $versionCount }}">
                             <input type="hidden" name="resubmit" value="1">
                             <button type="submit" class="btn btn-warning btn-sm w-full">
                                 Re-submit
@@ -91,9 +110,10 @@
 
         @else
             @if($isComplete)
-                <form method="POST" action="{{ route('adviser.submit.report.post') }}" data-loading="Analyzing learner performance...">
+                <form method="POST" action="{{ route('adviser.submit.report.post') }}" data-loading="Submitting report...">
                     @csrf
                     <input type="hidden" name="grading_period" value="{{ $period }}">
+                    <input type="hidden" name="expected_version" value="0">
                     <button type="submit"
                             class="w-full mt-2 btn btn-primary">
                         Submit Term {{ $period }} Report
@@ -108,6 +128,82 @@
         @endif
     </div>
     @endforeach
+</div>
+
+{{-- Official Term Results — subject by subject. The overall average is
+     summary only; a failed subject is always named, however high the others
+     are. Monitoring is DISPLAYED here (MonitoringClassificationService), never
+     decided by this page. "View details" on My Students lands on a row here. --}}
+<div class="card mb-4" data-official-term-results>
+    <div class="px-5 py-4 border-b border-line flex flex-wrap items-center justify-between gap-3">
+        <div>
+            <h3 class="font-semibold text-ink">Official Term Results — Term {{ $resultsPeriod }}</h3>
+            <p class="text-sm text-muted">Each subject's official grade on its own. Overall Average summarizes performance across subjects; it never hides a failed subject. A grade not yet verified is not an official result.</p>
+        </div>
+        <form method="GET" action="{{ route('adviser.submit.report') }}" class="flex items-center gap-2" data-no-loading>
+            <label for="resultsTerm" class="text-xs text-muted">Term</label>
+            <select id="resultsTerm" name="period" class="form-select-sm" onchange="this.form.submit()">
+                @foreach([1, 2, 3] as $t)
+                    <option value="{{ $t }}" @selected($t === $resultsPeriod)>Term {{ $t }}</option>
+                @endforeach
+            </select>
+        </form>
+    </div>
+    <div class="tbl-scroll">
+        <table class="tbl">
+            <thead>
+                <tr>
+                    <th scope="col">Learner</th>
+                    <th scope="col" class="tbl-num">Overall Average</th>
+                    <th scope="col" class="tbl-num">Passed</th>
+                    <th scope="col" class="tbl-num">Failed</th>
+                    <th scope="col">Failed Subjects</th>
+                    <th scope="col">Monitoring</th>
+                </tr>
+            </thead>
+            <tbody>
+                @forelse($gradeSummary as $row)
+                @php
+                    $student = $row['student'];
+                    $r = $officialResults[$student->id] ?? null;
+                @endphp
+                <tr id="learner-{{ $student->id }}" data-learner-results="{{ $student->id }}">
+                    <td class="font-medium text-ink">{{ $student->last_name }}, {{ $student->first_name }}</td>
+                    @if(!$r || $r['subjects'] === 0)
+                        <td class="tbl-num text-gray-300">—</td>
+                        <td class="tbl-num text-gray-300">—</td>
+                        <td class="tbl-num text-gray-300">—</td>
+                        <td class="text-xs text-gray-300">No grades for Term {{ $resultsPeriod }} yet</td>
+                    @else
+                        <td class="tbl-num">{{ $r['overall_average'] !== null ? number_format($r['overall_average'], 2) : '—' }}</td>
+                        <td class="tbl-num">{{ $r['passed'] }}</td>
+                        <td class="tbl-num {{ $r['failed'] ? 'text-status-failing font-semibold' : '' }}">{{ $r['failed'] }}</td>
+                        <td class="text-xs">
+                            @forelse($r['failed_subjects'] as $f)
+                                <span class="block text-status-failing" data-failed-subject>{{ $f['subject'] }} — {{ number_format($f['grade'], 2) }} — Failed</span>
+                            @empty
+                                <span class="text-muted">None</span>
+                            @endforelse
+                            @if($r['not_official'])
+                                <span class="block text-muted">{{ $r['not_official'] }} not yet official</span>
+                            @endif
+                            @if($r['stale'])
+                                <span class="block font-medium" data-stale-official>Evidence changed since verification — re-verify: {{ implode(', ', $r['stale_subjects']) }}</span>
+                            @endif
+                        </td>
+                    @endif
+                    <td><x-ui.monitoring-status :status="$monitoring->get($student->id)" /></td>
+                </tr>
+                @empty
+                <tr>
+                    <td colspan="6">
+                        <x-empty-state message="No students in this section yet." hint="An Admin adds students and assigns them to your section." />
+                    </td>
+                </tr>
+                @endforelse
+            </tbody>
+        </table>
+    </div>
 </div>
 
 {{-- Grade Summary Table --}}

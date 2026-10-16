@@ -1,22 +1,9 @@
 @extends('layouts.app')
 
 @section('title', 'Reports')
-@section('subtitle', 'Section submission status and grade overview — School Year ' . $schoolYear)
+@section('subtitle', 'Submitted term reports — School Year ' . $schoolYear)
 
 @section('content')
-
-@foreach($staleRiskBySchoolYear ?? [] as $staleYear => $staleRiskTerms)
-<div class="bg-red-50 border border-red-200 text-red-800 text-sm p-4 rounded-lg mb-4">
-    <p class="font-medium">
-        <i class="bi bi-exclamation-triangle-fill"></i>
-        Risk level{{ count($staleRiskTerms) === 1 ? '' : 's' }} may be out of date — School Year {{ $staleYear }}, Term{{ count($staleRiskTerms) === 1 ? '' : 's' }} {{ implode(', ', $staleRiskTerms) }}
-    </p>
-    <p class="mt-1 text-red-700">
-        Risk levels are on record for these terms, but the grades they were computed from no longer exist.
-        These numbers are stale — re-enter the grades and re-submit the term report to regenerate them. Nothing has been deleted automatically.
-    </p>
-</div>
-@endforeach
 
 {{-- Filters — narrows down the list once there are many grade levels
      and sections, instead of always rendering every single one.
@@ -103,7 +90,7 @@
     @endif
     @if($isHistoricalYear)
         <x-ui.status-badge tone="gray" icon="bi-archive" label="Historical Record" />
-        <span class="text-xs text-muted">This is not the active school year. Records are shown as submitted and cannot be changed.</span>
+        <span class="text-xs text-muted">This is not the active school year. Only reports submitted that year are shown.</span>
     @else
         <x-ui.status-badge tone="success" icon="bi-check-circle-fill" label="Active" />
     @endif
@@ -114,8 +101,28 @@
     $periodsShown = $gradingPeriod ? [$gradingPeriod] : [1, 2, 3];
 @endphp
 
+<div class="alert alert-info text-sm mb-4" data-reports-scope>
+    <i class="bi bi-info-circle" aria-hidden="true"></i>
+    Submitted term reports only: every figure below is the version the adviser explicitly submitted, frozen at submission.
+    A term not yet submitted shows no figures here. Current (live) academic information is on
+    @if(auth()->user()->role === 'principal')<a class="underline" href="{{ route('principal.academic-monitoring') }}">Academic Monitoring</a> and <a class="underline" href="{{ route('principal.students') }}">Students</a>@else the Principal's monitoring pages @endif.
+</div>
+
 @forelse($sections as $section)
-<div class="card mb-4">
+@php
+    $subs = $section->reportSubmissions->keyBy(fn($r) => (int) $r->grading_period);
+    // The contents as submitted (latest version), per term; null = not submitted, or submitted before versions existed.
+    $snapshots = collect($periodsShown)->mapWithKeys(fn($p) => [$p => $subs->get($p)?->latestVersion?->snapshot]);
+    $submittedPeriods = $subs->keys()->all();
+    // Rows: this year's roster plus anyone frozen in a shown snapshot (e.g. moved section since).
+    $names = $section->enrolledStudents->mapWithKeys(fn($st) => [$st->id => $st->last_name . ', ' . $st->first_name]);
+    foreach ($snapshots->filter() as $snap) {
+        foreach ($snap['students'] ?? [] as $sid => $entry) {
+            $names[(int) $sid] ??= $entry['name'];
+        }
+    }
+@endphp
+<div class="card mb-4" data-report-section="{{ $section->id }}">
 
     {{-- Section Header --}}
     <div class="card-header items-center">
@@ -140,147 +147,104 @@
         <span class="pill shrink-0"><i class="bi bi-people text-brand-700" aria-hidden="true"></i> <x-count-label :count="$section->enrolledStudents->count()" noun="student" /></span>
     </div>
 
-    {{-- Submission Status — one badge per term: Submitted / Not Submitted
-         (open or closed with grades on file) / Not Started / Locked. --}}
+    {{-- Submission status per term: Submitted (version, date, by) or Not submitted. --}}
     <div class="px-5 py-3 border-b border-line bg-surface/60">
         <div class="flex gap-x-6 gap-y-2 flex-wrap">
             @foreach($periodsShown as $period)
             @php
-                $submission = $section->reportSubmissions->firstWhere('grading_period', $period);
+                $submission = $subs->get($period);
+                $version = $submission?->latestVersion;
                 $termRow = $termRows[$period] ?? null;
-                $hasGrades = $section->enrolledStudents->contains(fn($st) => $st->grades->where('grading_period', $period)->isNotEmpty());
                 if ($submission) {
-                    $termBadge = ['success', 'bi-check-circle-fill', 'Submitted'];
+                    $termBadge = ['success', 'bi-check-circle-fill', 'Submitted' . ($version ? ' · v' . $version->version : '')];
                 } elseif ($termRow && $termRow->is_open) {
                     $termBadge = ['warning', 'bi-unlock', 'Not Submitted'];
-                } elseif ($hasGrades) {
-                    $termBadge = [$isHistoricalYear || ($termRow && $termRow->closed_at) ? 'gray' : 'warning', 'bi-lock', $isHistoricalYear || ($termRow && $termRow->closed_at) ? 'Closed' : 'Not Submitted'];
+                } elseif ($isHistoricalYear || ($termRow && $termRow->closed_at)) {
+                    $termBadge = ['gray', 'bi-lock', 'Not Submitted (term closed)'];
                 } elseif ($termRow && !$termRow->opened_at) {
                     $termBadge = ['gray', 'bi-lock', 'Locked'];
                 } else {
                     $termBadge = ['outline', 'bi-dash-circle', 'Not Started'];
                 }
+                $by = $version?->submitter?->name ?? $submission?->adviser?->name ?? '—';
+                $at = $version?->submitted_at ?? $submission?->submitted_at;
             @endphp
-            <div class="flex items-center gap-2 text-xs">
+            <div class="flex items-center gap-2 text-xs" data-term-status="{{ $period }}">
                 <span class="text-ink font-medium">Term {{ $period }}</span>
                 <x-ui.status-badge :tone="$termBadge[0]" :icon="$termBadge[1]" :label="$termBadge[2]" />
                 @if($submission)
-                    <span class="text-muted" title="Submitted by {{ $submission->adviser->name ?? 'adviser' }} on {{ $submission->submitted_at->format('M d, Y g:i A') }} — School Year {{ $submission->school_year }}">{{ $submission->submitted_at->format('M d, Y') }} · {{ $submission->adviser->name ?? '—' }}</span>
+                    <span class="text-muted" title="Submitted by {{ $by }} on {{ $at->format('M d, Y g:i A') }} — School Year {{ $submission->school_year }}">{{ $at->format('M d, Y') }} · {{ $by }}</span>
+                    @unless($version)
+                        <span class="text-warning-text" data-legacy-submission title="Submitted before report contents were preserved (2026-10-07). Its original figures were not stored, so none are shown.">contents not preserved</span>
+                    @endunless
                 @endif
             </div>
             @endforeach
         </div>
     </div>
 
-    @php
-        // "Decision flow, report scoping, and dashboard pass" TASK 2 —
-        // submission is per SECTION, not per student, so this is computed
-        // once here rather than repeated inside the student loop below.
-        // Every average/qualifier in this table reads from this set, not
-        // from whether a term column merely HAS a value (verified grades
-        // exist before submission too — see AcademicTerm/ReportSubmission).
-        $submittedPeriods = $section->reportSubmissions->pluck('grading_period')->map(fn($p) => (int) $p)->all();
-        $submittedCount = count($submittedPeriods);
-    @endphp
-
-    {{-- Students Table — TASK 7c of "clarity, progress, and visual
-         design pass": sticky header on the scrollable table, same
-         pattern as every other table in this app. --}}
     <div class="tbl-scroll">
         <table class="tbl tbl-sticky">
             <thead>
                 <tr>
                     <th scope="col">Student</th>
                     @foreach($periodsShown as $period)
-                    <th scope="col" class="text-center">
-                        Term {{ $period }}{{ $subject ? ' — ' . $subject->name : '' }}
-                        @unless(in_array($period, $submittedPeriods, true))
-                            <span class="text-gray-400 font-normal" title="Not yet submitted for this section — shown for reference, excluded from the overall average.">
-                                <i class="bi bi-exclamation-circle"></i>
-                            </span>
-                        @endunless
-                    </th>
+                    <th scope="col" class="text-center">Term {{ $period }}{{ $subject ? ' — ' . $subject->name : '' }}
+                        <span class="block text-[10px] font-normal normal-case text-gray-400">{{ in_array($period, $submittedPeriods, true) ? 'as submitted' : 'not submitted' }}</span></th>
                     @endforeach
                     <th scope="col" class="text-center">
                         {{ $subject ? 'Subject Avg' : 'Overall Avg' }}
-                        <span class="block text-[10px] font-normal normal-case text-gray-400">({{ $submittedCount }} of 3 terms submitted)</span>
+                        <span class="block text-[10px] font-normal normal-case text-gray-400">({{ count($submittedPeriods) }} of 3 terms submitted)</span>
                     </th>
-                    <th scope="col" class="text-center">Risk Level</th>
+                    <th scope="col" title="Each subject's OFFICIAL grade on its own, as submitted — a passing overall average never hides a failed subject. A grade not yet verified is not an official result.">
+                        Subject Results
+                        <span class="block text-[10px] font-normal normal-case text-gray-400">official, per subject, as submitted{{ $gradingPeriod ? ', Term ' . $gradingPeriod : '' }}</span>
+                    </th>
                 </tr>
             </thead>
             <tbody>
-                @forelse($section->enrolledStudents as $student)
+                @forelse($names as $studentId => $studentName)
                 @php
-                    $g1 = $student->grades->where('grading_period', 1)->avg('grade');
-                    $g2 = $student->grades->where('grading_period', 2)->avg('grade');
-                    $g3 = $student->grades->where('grading_period', 3)->avg('grade');
-                    // "Decision flow, report scoping, and dashboard pass"
-                    // TASK 2a — the average must never silently include a
-                    // term whose report hasn't been submitted, even though
-                    // the adviser already verified those grades (they're
-                    // real, just not yet part of a submitted report — see
-                    // the marked cells below). Only periods in
-                    // $submittedPeriods count toward this average.
-                    $periodValues = [1 => $g1, 2 => $g2, 3 => $g3];
-                    $filledSubmitted = collect($periodValues)
-                        ->filter(fn($v, $p) => in_array($p, $submittedPeriods, true) && $v !== null);
-                    // With a term filter, the average is that term only.
-                    if ($gradingPeriod) {
-                        $filledSubmitted = $filledSubmitted->only([$gradingPeriod]);
-                    }
-                    $overallAvg = $filledSubmitted->count() ? round($filledSubmitted->avg(), 2) : null;
-                    $latestRisk = $gradingPeriod
-                        ? $student->riskResults->firstWhere('grading_period', $gradingPeriod)
-                        : $student->riskResults->sortByDesc('grading_period')->first();
+                    $figures = $snapshots->filter()->map(fn($snap) => \App\Services\ReportSnapshotService::learnerFigures($snap['students'][$studentId] ?? $snap['students'][(string) $studentId] ?? null, $subject?->id));
+                    $termAverages = $figures->map(fn($f) => $f['average'])->filter(fn($v) => $v !== null);
+                    $overallAvg = $termAverages->isNotEmpty() ? round($termAverages->avg(), 2) : null;
                 @endphp
                 <tr>
                     <td class="font-medium text-ink">
                         @if(auth()->user()->role === 'principal')
-                            <a href="{{ route('principal.students.show', $student->id) }}" class="hover:underline hover:text-brand-700">
-                                {{ $student->last_name }}, {{ $student->first_name }}
-                            </a>
+                            <a href="{{ route('principal.students.show', $studentId) }}" class="hover:underline hover:text-brand-700">{{ $studentName }}</a>
                         @else
-                            {{ $student->last_name }}, {{ $student->first_name }}
+                            {{ $studentName }}
                         @endif
                     </td>
                     @foreach($periodsShown as $period)
-                    @php
-                        $g = $periodValues[$period];
-                        $isSubmitted = in_array($period, $submittedPeriods, true);
-                    @endphp
-                    <td class="tbl-num text-center {{ !$isSubmitted ? 'text-gray-400 italic' : ($g && $g < 75 ? 'text-status-risk font-semibold' : 'text-gray-700') }}"
-                        @unless($isSubmitted) title="Verified by the adviser but not yet part of a submitted term report. Not included in the overall average." @endunless>
-                        {{ $g ? number_format($g, 2) : '—' }}
-                    </td>
+                    @php $g = $figures->get($period)['average'] ?? null; @endphp
+                    @if($figures->has($period))
+                        <td class="tbl-num text-center {{ $g && $g < 75 ? 'text-status-risk font-semibold' : 'text-gray-700' }}">{{ $g !== null ? number_format($g, 2) : '—' }}</td>
+                    @elseif(in_array($period, $submittedPeriods, true))
+                        <td class="text-center text-xs text-muted" title="Submitted before report contents were preserved.">n/a</td>
+                    @else
+                        <td class="text-center text-xs text-gray-400" data-not-submitted>Not submitted</td>
+                    @endif
                     @endforeach
                     <td class="tbl-num text-center font-medium {{ $overallAvg && $overallAvg < 75 ? 'text-status-risk' : 'text-ink' }}">
-                        {{ $overallAvg ? number_format($overallAvg, 2) : '—' }}
+                        {{ $overallAvg !== null ? number_format($overallAvg, 2) : '—' }}
                     </td>
-                    <td class="text-center">
-                        @if($latestRisk)
-                            @if($latestRisk->risk_level === 'high')
-                                <x-ui.status-badge tone="danger" label="High" />
-                            @elseif($latestRisk->risk_level === 'moderate')
-                                <x-ui.status-badge tone="warning" label="Moderate" />
-                            @else
-                                <x-ui.status-badge tone="success" label="Low" />
-                            @endif
-                            {{-- TASK 2d — a Risk Level shown on a row whose
-                                 later term column is populated (submitted
-                                 or not) must not silently imply it
-                                 accounts for that term. --}}
-                            @php
-                                $hasLaterPopulatedTerm = collect($periodValues)
-                                    ->filter(fn($v, $p) => $p > $latestRisk->grading_period && $v !== null)
-                                    ->isNotEmpty();
-                            @endphp
-                            @if($hasLaterPopulatedTerm)
-                                <span class="block text-[10px] text-gray-400 mt-0.5">as of Term {{ $latestRisk->grading_period }}</span>
-                            @endif
+                    <td class="text-xs" data-subject-results>
+                        @php
+                            $subjects = $figures->sum('subjects'); $passed = $figures->sum('passed'); $failed = $figures->sum('failed'); $notOfficial = $figures->sum('not_official');
+                            $stale = $figures->flatMap(fn($f) => $f['stale_subjects'])->unique()->sort()->values();
+                        @endphp
+                        @if($subjects === 0)
+                            <span class="text-gray-300">—</span>
                         @else
-                            <span class="text-xs text-muted" title="Risk levels are generated once the adviser submits this term's report.">
-                                Not yet available
-                            </span>
+                            <span class="block">Passed {{ $passed }} · <span class="{{ $failed ? 'text-status-failing font-semibold' : '' }}">Failed {{ $failed }}</span>@if($notOfficial) · {{ $notOfficial }} not yet official @endif</span>
+                            @if($stale->isNotEmpty())<span class="block font-medium" data-stale-official>Evidence had changed since verification when submitted — re-verify: {{ $stale->implode(', ') }}</span>@endif
+                            @foreach($figures as $period => $f)
+                                @foreach($f['failed_subjects'] as $fs)
+                                    <span class="block text-status-failing" data-failed-subject>{{ $fs['subject'] }} — {{ number_format($fs['grade'], 2) }} (Term {{ $period }})</span>
+                                @endforeach
+                            @endforeach
                         @endif
                     </td>
                 </tr>

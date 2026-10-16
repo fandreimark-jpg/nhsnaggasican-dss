@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Principal;
 
 use App\Http\Controllers\Controller;
 use App\Models\Intervention;
-use App\Models\RiskResult;
 use App\Models\Section;
 use App\Models\Student;
 use App\Helpers\LogActivity;
@@ -15,6 +14,7 @@ use App\Services\InTermStatusService;
 use App\Services\ProgressMonitoringService;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 /**
@@ -37,7 +37,8 @@ class InterventionController extends Controller
 
     public function __construct(
         private ProgressMonitoringService $progress = new ProgressMonitoringService(),
-        private InTermStatusService $inTermStatus = new InTermStatusService()
+        private InTermStatusService $inTermStatus = new InTermStatusService(),
+        private \App\Services\InterventionScheduleService $schedule = new \App\Services\InterventionScheduleService(),
     ) {
     }
 
@@ -81,11 +82,11 @@ class InterventionController extends Controller
                 'section.track',
                 'section.specialization',
                 'subject',
-                'riskResult',
                 'createdBy',
                 'decidedBy',
                 'acknowledgedBy',
                 'deliveredBy',
+                'responsibleUser',
             ])
             ->when($awaitingDecisionOnly, fn($q) => $q->undecided());
 
@@ -147,7 +148,6 @@ class InterventionController extends Controller
             $intervention->deliveryGroupSize = $intervention->delivery_group_id
                 ? ($groupSizes[$intervention->delivery_group_id] ?? null)
                 : null;
-            $intervention->progress = $this->progress->compare($intervention);
             // TASK 3 of "close the delivery loop" — same page-only-cost
             // pattern as compare() above, just a second (also cheap)
             // comparison per row.
@@ -233,7 +233,6 @@ class InterventionController extends Controller
         $status      = $request->input('status');
         $subjectId   = $request->input('subject_id');
         $studentSearch = $request->input('student_search');
-        $riskLevel   = $request->input('risk_level');
         $gradingPeriod = $this->resolveGradingPeriod($request);
 
         $schoolYear = $this->resolveSchoolYear($request);
@@ -261,20 +260,33 @@ class InterventionController extends Controller
                        ->orWhere('first_name', 'like', "%{$studentSearch}%");
                 });
             }))
-            // Risk Level filter — reads the LINKED risk_result's risk_level,
-            // never a copy of it on interventions itself (there is none).
-            // An intervention with no risk result at all (recorded from
-            // in-term evidence, no submitted term report yet — a real,
-            // documented case, see CLAUDE.md's "Term-over-Term Progress
-            // depends on the order a Principal acted in") has no risk
-            // level to match, so it is correctly excluded when this filter
-            // is active, not guessed into a bucket.
-            ->when($riskLevel, fn($q) => $q->whereHas('riskResult', fn($r) => $r->where('risk_level', $riskLevel)))
             // An intervention with no recorded term (nullable on older
             // rows) isn't "about" any particular term, so the Term
             // filter never hides it — only narrows among rows that DO
             // have one — same rule as Adviser\InterventionController.
-            ->when($gradingPeriod, fn($q) => $q->where(fn($q2) => $q2->where('grading_period', $gradingPeriod)->orWhereNull('grading_period')));
+            ->when($gradingPeriod, fn($q) => $q->where(fn($q2) => $q2->where('grading_period', $gradingPeriod)->orWhereNull('grading_period')))
+            // Scheduling follow-up (2026-10-06): approved interventions with no
+            // schedule yet (incl. legacy rows), or expired/overdue ones — an
+            // overdue row counts even before the expiry job has persisted it.
+            ->when(Intervention::schedulingAvailable() && $request->input('schedule') === 'unset', fn($q) => $q
+                ->whereNull('deadline_at')->whereNotNull('decided_by')->whereNull('delivered_at')
+                ->whereIn('status', array_diff(Intervention::OPEN_STATUSES, [Intervention::STATUS_RECOMMENDED])))
+            ->when(Intervention::schedulingAvailable() && $request->input('schedule') === 'expired', fn($q) => $q->where(fn($w) => $w
+                ->where('status', Intervention::STATUS_EXPIRED)
+                ->orWhere(fn($o) => $o->whereIn('status', Intervention::OPEN_STATUSES)->whereNotNull('decided_by')->whereNotNull('deadline_at')
+                    ->where('deadline_at', '<', now())->whereNull('delivered_at')->whereNull('completed_at'))))
+            ->when(Intervention::schedulingAvailable() && $request->input('schedule') === 'requests', fn($q) => $q
+                ->whereHas('scheduleRequests', fn($r) => $r->where('status', 'pending')))
+            // The other schedule states, as SQL twins of Intervention::scheduleState()
+            // (server clock; read only). Covered against the model by the tests.
+            ->when(Intervention::schedulingAvailable() && in_array($request->input('schedule'), ['scheduled', 'ongoing'], true), fn($q) => $q
+                ->whereIn('status', array_diff(Intervention::OPEN_STATUSES, [Intervention::STATUS_RECOMMENDED]))->whereNotNull('decided_by')
+                ->whereNull('delivered_at')->whereNull('completed_at')->whereNotNull('deadline_at')->where('deadline_at', '>=', now())
+                ->when($request->input('schedule') === 'scheduled', fn($w) => $w->where('starts_at', '>', now()), fn($w) => $w->where('starts_at', '<=', now())))
+            ->when(Intervention::schedulingAvailable() && $request->input('schedule') === 'completed', fn($q) => $q
+                ->whereNotNull('deadline_at')->where('status', '!=', Intervention::STATUS_CANCELLED)
+                ->where(fn($w) => $w->whereNotNull('delivered_at')->orWhereNotNull('completed_at')->orWhere('status', 'completed')))
+            ->when(Intervention::schedulingAvailable() && $request->input('schedule') === 'cancelled', fn($q) => $q->where('status', Intervention::STATUS_CANCELLED));
     }
 
     /**
@@ -289,11 +301,14 @@ class InterventionController extends Controller
      */
     public function store(Request $request)
     {
+        // Every intervention belongs to a subject. (The retired Attendance
+        // Concern was the one subject-less case; attendance is no longer
+        // part of monitoring, so a subject is always required again.)
         $request->validate([
             'student_id'             => 'required|exists:students,id',
             'subject_id'             => 'required|exists:subjects,id',
             'grading_period'         => 'required|integer|in:1,2,3',
-            'recommended_type'       => ['required', Rule::in(Intervention::TYPES)],
+            'recommended_type'       => ['required', Rule::in(Intervention::SELECTABLE_TYPES)],
             'recommendation_reason'  => 'nullable|string',
             'principal_notes'        => 'nullable|string',
             // "Decision flow, report scoping, and dashboard pass" TASK 1b
@@ -301,9 +316,35 @@ class InterventionController extends Controller
             // common case is that the Principal just reviewed this
             // student and IS deciding right now.
             'recommendation_only'    => 'nullable|boolean',
+            // Phase 2E — optional: the academic concern this was recorded from.
+            'academic_concern_id'    => 'nullable|integer',
         ]);
 
         $student = Student::findOrFail($request->student_id);
+
+        // Phase 2E — a link is only accepted when it truly describes this
+        // intervention: an OPEN concern about this learner, subject and term
+        // in the active school year. Anything else is refused, never
+        // silently stored. Without academic_concern_id nothing changes.
+        $concernId = null;
+        if ($request->filled('academic_concern_id')) {
+            if (!\App\Models\AcademicConcern::interventionLinkAvailable()) {
+                return back()->with('error', 'Linking an intervention to an academic concern is not available yet on this database. Ask the administrator to apply the pending update.');
+            }
+            // Only a concern of a rule monitoring still runs: a retired
+            // rule's row (a legacy Attendance Concern) is history, never a
+            // basis for a new intervention.
+            $concern = \App\Models\AcademicConcern::activeRules()->find($request->integer('academic_concern_id'));
+            if (!$concern
+                || !$concern->isOpen()
+                || $concern->student_id !== $student->id
+                || (int) $concern->subject_id !== (int) $request->subject_id
+                || $concern->grading_period !== (int) $request->grading_period
+                || $concern->school_year !== Section::activeSchoolYear()) {
+                return back()->with('error', 'That academic concern is not an open concern for this learner, subject and term, so the intervention was not recorded.');
+            }
+            $concernId = $concern->id;
+        }
 
         // "Correctness and interface pass" TASK 1b — BUG FIX: an
         // intervention belongs to one subject AND one term, so this guard
@@ -311,17 +352,6 @@ class InterventionController extends Controller
         // alone. The prior subject-only scope meant an open Term 1
         // intervention silently blocked Term 2 and Term 3 forever for the
         // same student/subject.
-        $existingOpen = Intervention::where('student_id', $student->id)
-            ->where('subject_id', $request->subject_id)
-            ->where('grading_period', (int) $request->grading_period)
-            ->whereIn('status', Intervention::OPEN_STATUSES)
-            ->latest()
-            ->first();
-
-        if ($existingOpen) {
-            return back()->with('error', "An open intervention already exists for this student and subject in Term {$request->grading_period} — see the Interventions page.");
-        }
-
         // "Multi-school-year academic history" work order, PART 12 — an
         // intervention is recorded against the ACTIVE school year and the
         // learner's section in that year, captured now so the record never
@@ -334,11 +364,14 @@ class InterventionController extends Controller
         if (!$sectionNow) {
             return back()->with('error', "{$student->last_name}, {$student->first_name} is not enrolled in School Year {$schoolYear}, so no intervention can be recorded for this year.");
         }
-
-        $riskResult = RiskResult::where('student_id', $student->id)
-            ->where('grading_period', (int) $request->grading_period)
-            ->where('school_year', $schoolYear)
-            ->first();
+        // One context (2026-10-07): the subject must be taught to that section
+        // in that term, and a linked concern must be about that section.
+        if (!Subject::forSection($sectionNow, (int) $request->grading_period)->whereKey($request->subject_id)->exists()) {
+            return back()->with('error', "That subject is not taught to section {$sectionNow->name} in Term {$request->grading_period}, so the intervention was not recorded.");
+        }
+        if ($concernId && ($c = \App\Models\AcademicConcern::find($concernId)) && $c->section_id && (int) $c->section_id !== $sectionNow->id) {
+            return back()->with('error', 'That academic concern belongs to a different section than the learner\'s enrollment this year, so the intervention was not recorded.');
+        }
 
         // "Decision flow, report scoping, and dashboard pass" TASK 1a/1b —
         // recording an intervention here IS the Principal's decision by
@@ -349,7 +382,33 @@ class InterventionController extends Controller
         // see Intervention::awaitingDecision() for what that then blocks.
         $recommendationOnly = $request->boolean('recommendation_only');
 
-        $intervention = Intervention::create([
+        // Final audit (2026-09-27): the open-duplicate check and the insert
+        // used to run with no lock, and six simultaneous submissions for one
+        // learner/subject/term created six open interventions (reproduced on
+        // the isolated audit database). MySQL cannot index this
+        // status-dependent rule, so the check and the insert run inside one
+        // transaction holding a row lock on the learner: a second submission
+        // waits, then sees the first one's row and is refused.
+        $intervention = DB::transaction(function () use ($request, $student, $schoolYear, $sectionNow, $recommendationOnly, $concernId) {
+            Student::whereKey($student->id)->lockForUpdate()->first();
+
+            $existingOpen = Intervention::where('student_id', $student->id)
+                ->where('subject_id', $request->subject_id)
+                ->where('grading_period', (int) $request->grading_period)
+                ->whereIn('status', Intervention::OPEN_STATUSES)
+                ->exists();
+
+            if ($existingOpen) {
+                return null;
+            }
+            // Responsibility (2026-10-07): the section's adviser, resolved
+            // here under a lock on the section — never a submitted id.
+            [$adviser, $problem] = $this->schedule->resolveAdviser($sectionNow, $schoolYear, lock: true);
+            if (!$adviser) {
+                return $problem;
+            }
+
+            $created = Intervention::create([
             'student_id'             => $student->id,
             'subject_id'             => $request->subject_id,
             // Stored now (see the 2026_09_05_000002 migration) so TASK 3's
@@ -358,7 +417,6 @@ class InterventionController extends Controller
             'grading_period'         => (int) $request->grading_period,
             'school_year'            => $schoolYear,
             'section_id'             => $sectionNow->id,
-            'risk_result_id'         => $riskResult?->id,
             'recommended_type'       => $request->recommended_type,
             'recommendation_reason'  => $request->recommendation_reason,
             // TASK 2 of "status clarity and progress consistency" — the
@@ -378,12 +436,23 @@ class InterventionController extends Controller
             'origin'                 => 'principal',
             'decided_by'             => $recommendationOnly ? null : auth()->id(),
             'decided_at'             => $recommendationOnly ? null : now(),
-        ]);
+            ] + ($concernId ? ['academic_concern_id' => $concernId] : []));
+            $this->schedule->recordAutoAssignment($created, $adviser, $request->user());
+
+            return $created;
+        });
+
+        if (is_string($intervention)) {
+            return back()->with('error', $intervention . ' The intervention was not recorded.');
+        }
+        if (!$intervention) {
+            return back()->with('error', "An open intervention already exists for this student and subject in Term {$request->grading_period} — see the Interventions page.");
+        }
 
         LogActivity::log(
             'create_intervention',
             'Recorded intervention (' . $request->recommended_type . ') for ' . $student->last_name . ', ' . $student->first_name .
-                ($riskResult ? '' : ' (no submitted term report for this term yet — recorded from assessment evidence)') .
+                ($concernId ? ' from academic concern #' . $concernId : ' from current assessment evidence') .
                 ($recommendationOnly ? ' — recorded as a recommendation only, awaiting decision' : ' — approved on creation'),
             'interventions',
             $intervention->id
@@ -391,7 +460,7 @@ class InterventionController extends Controller
 
         return redirect()->back()->with('success', $recommendationOnly
             ? 'Intervention recorded as a recommendation, awaiting your decision.'
-            : 'Intervention recorded and approved — the adviser can now act on it.');
+            : 'Intervention recorded and approved. ' . $intervention->responsibleUser?->name . ' (section adviser) is responsible and sets the schedule.');
     }
 
     /**
@@ -421,7 +490,7 @@ class InterventionController extends Controller
             'included'       => 'required|array|min:1',
             'included.*'     => 'required|exists:students,id',
             'types'          => 'required|array',
-            'types.*'        => ['required', Rule::in(Intervention::TYPES)],
+            'types.*'        => ['required', Rule::in(Intervention::SELECTABLE_TYPES)],
             // TASK 2 of "subject scoping and bulk threshold" — which
             // threshold each row was recorded under, so the reason text
             // below can say so accurately instead of hardcoding one
@@ -456,12 +525,13 @@ class InterventionController extends Controller
 
         $created = 0;
         $skipped = 0;
+        $noAdviser = [];
 
         foreach ($request->input('included') as $studentId) {
             $studentId = (int) $studentId;
             $type = $types[$studentId] ?? null;
 
-            if (!$type || !in_array($type, Intervention::TYPES, true)) {
+            if (!$type || !in_array($type, Intervention::SELECTABLE_TYPES, true)) {
                 $skipped++;
                 continue;
             }
@@ -471,17 +541,6 @@ class InterventionController extends Controller
             // and could be stale by the time this request arrives.
             // "Correctness and interface pass" TASK 1b — same term-scoping
             // fix as store()'s guard and buildBulkInterventionCandidates().
-            $existingOpen = Intervention::where('student_id', $studentId)
-                ->where('subject_id', $subjectId)
-                ->where('grading_period', $gradingPeriod)
-                ->whereIn('status', Intervention::OPEN_STATUSES)
-                ->exists();
-
-            if ($existingOpen) {
-                $skipped++;
-                continue;
-            }
-
             $student = Student::find($studentId);
             if (!$student) {
                 $skipped++;
@@ -491,15 +550,10 @@ class InterventionController extends Controller
             // PART 12 — same active-year/section capture as store().
             $schoolYear = Section::activeSchoolYear();
             $sectionNow = $student->sectionFor($schoolYear);
-            if (!$sectionNow) {
+            if (!$sectionNow || !Subject::forSection($sectionNow, $gradingPeriod)->whereKey($subjectId)->exists()) {
                 $skipped++;
                 continue;
             }
-
-            $riskResult = RiskResult::where('student_id', $studentId)
-                ->where('grading_period', $gradingPeriod)
-                ->where('school_year', $schoolYear)
-                ->first();
 
             $componentKey = $focusToComponent[$type] ?? null;
             // "The Failing layer" TASK 3d — no silent 'At Risk' fallback:
@@ -510,34 +564,66 @@ class InterventionController extends Controller
             // tampered or malformed request) is surfaced honestly rather
             // than guessed.
             $studentStatus = $statuses[$studentId] ?? 'Unspecified';
-            $triggerLabel = $studentStatus === 'Failing' ? 'Official Grade: Failing' : "In-Term Status: {$studentStatus}";
+            $triggerLabel = $studentStatus === 'Failing' ? 'Official Grade: Failing' : 'In-Term Status: ' . InTermStatusService::label($studentStatus);
             $reason = $componentKey
                 ? "Recorded in bulk — Focus Area: " . ($componentLabels[$componentKey] ?? $componentKey) . " ({$triggerLabel})."
                 : "Recorded in bulk — {$triggerLabel}.";
 
-            $intervention = Intervention::create([
-                'student_id'            => $studentId,
-                'subject_id'            => $subjectId,
-                'grading_period'        => $gradingPeriod,
-                'school_year'           => $schoolYear,
-                'section_id'            => $sectionNow->id,
-                'risk_result_id'        => $riskResult?->id,
-                'recommended_type'      => $type,
-                'recommendation_reason' => $reason,
-                // TASK 2 of "status clarity and progress consistency" —
-                // $componentKey is already known precisely here (it's what
-                // $reason itself was built from), so it's persisted
-                // directly rather than re-derived from the reason text.
-                'focus_component'       => $componentKey,
-                'status'                => $recommendationOnly ? Intervention::STATUS_RECOMMENDED : 'approved',
-                'principal_notes'       => $request->input('notes'),
-                'created_by'            => auth()->id(),
-                // "Master pass" PART 1 — same as store(): this route is
-                // reached only from the Principal's bulk dialog.
-                'origin'                => 'principal',
-                'decided_by'            => $recommendationOnly ? null : auth()->id(),
-                'decided_at'            => $recommendationOnly ? null : now(),
-            ]);
+            // Same lock as store(): the open-duplicate check and the insert
+            // run under a row lock on the learner, so a concurrent single or
+            // bulk submission cannot slip a second open intervention in.
+            $intervention = DB::transaction(function () use ($studentId, $subjectId, $gradingPeriod, $schoolYear, $sectionNow, $type, $reason, $componentKey, $recommendationOnly, $request) {
+                Student::whereKey($studentId)->lockForUpdate()->first();
+
+                $existingOpen = Intervention::where('student_id', $studentId)
+                    ->where('subject_id', $subjectId)
+                    ->where('grading_period', $gradingPeriod)
+                    ->whereIn('status', Intervention::OPEN_STATUSES)
+                    ->exists();
+
+                if ($existingOpen) {
+                    return null;
+                }
+                [$adviser, $problem] = $this->schedule->resolveAdviser($sectionNow, $schoolYear, lock: true);
+                if (!$adviser) {
+                    return $problem;
+                }
+
+                $new = Intervention::create([
+                    'student_id'            => $studentId,
+                    'subject_id'            => $subjectId,
+                    'grading_period'        => $gradingPeriod,
+                    'school_year'           => $schoolYear,
+                    'section_id'            => $sectionNow->id,
+                    'recommended_type'      => $type,
+                    'recommendation_reason' => $reason,
+                    // TASK 2 of "status clarity and progress consistency" —
+                    // $componentKey is already known precisely here (it's what
+                    // $reason itself was built from), so it's persisted
+                    // directly rather than re-derived from the reason text.
+                    'focus_component'       => $componentKey,
+                    'status'                => $recommendationOnly ? Intervention::STATUS_RECOMMENDED : 'approved',
+                    'principal_notes'       => $request->input('notes'),
+                    'created_by'            => auth()->id(),
+                    // "Master pass" PART 1 — same as store(): this route is
+                    // reached only from the Principal's bulk dialog.
+                    'origin'                => 'principal',
+                    'decided_by'            => $recommendationOnly ? null : auth()->id(),
+                    'decided_at'            => $recommendationOnly ? null : now(),
+                ]);
+                $this->schedule->recordAutoAssignment($new, $adviser, $request->user());
+
+                return $new;
+            });
+
+            if (is_string($intervention)) {
+                $noAdviser[$sectionNow->name] = $intervention;
+                continue;
+            }
+            if (!$intervention) {
+                $skipped++;
+                continue;
+            }
 
             $created++;
 
@@ -556,8 +642,9 @@ class InterventionController extends Controller
         if ($skipped > 0) {
             $message .= " {$skipped} student(s) already had an open intervention or were invalid and were skipped.";
         }
+        $redirect = redirect()->back()->with('success', $message);
 
-        return redirect()->back()->with('success', $message);
+        return $noAdviser ? $redirect->with('error', 'Not recorded — no valid section adviser: ' . implode(' ', array_unique($noAdviser))) : $redirect;
     }
 
     /**
@@ -589,16 +676,39 @@ class InterventionController extends Controller
     public function update(Request $request, Intervention $intervention)
     {
         $request->validate([
-            'status'           => ['required', Rule::in(Intervention::STATUSES)],
+            // 'expired'/'cancelled' are never set by an ordinary status edit —
+            // only by the expiry job and Cancel (with a reason), and left only
+            // through Extend-and-reopen / an approved late-completion request.
+            'status'           => ['required', Rule::in(Intervention::EDITABLE_STATUSES)],
             'principal_notes'  => 'nullable|string',
         ]);
 
-        $intervention->update([
-            'status'          => $request->status,
-            'principal_notes' => $request->principal_notes ?? $intervention->principal_notes,
-            'decided_by'      => auth()->id(),
-            'decided_at'      => now(),
-        ]);
+        $state = $intervention->lifecycle();
+        if (in_array($state, ['expired', 'cancelled'], true)) {
+            return back()->with('error', 'This intervention is ' . strtolower(Intervention::LIFECYCLE_LABELS[$state])
+                . '. Its status changes only through its own actions (open the intervention: Extend and reopen, or review a request).');
+        }
+        if ($request->status === 'completed' && $intervention->isScheduled() && !in_array($state, ['completed'], true)) {
+            return back()->with('error', 'This scheduled intervention has no recorded completion yet. The responsible staff records completion, or cancel it with a reason.');
+        }
+
+        try {
+            DB::transaction(function () use ($request, $intervention) {
+                // Approving a recommendation needs a valid section adviser to
+                // act on it (re-checked here, inside the write).
+                if ($intervention->decided_by === null && $request->status !== Intervention::STATUS_RECOMMENDED) {
+                    $this->approvalResponsibility($intervention, $request->user());
+                }
+                $intervention->update([
+                    'status'          => $request->status,
+                    'principal_notes' => $request->principal_notes ?? $intervention->principal_notes,
+                    'decided_by'      => auth()->id(),
+                    'decided_at'      => now(),
+                ]);
+            });
+        } catch (\App\Services\InterventionTransitionException $e) {
+            return back()->with('error', $e->getMessage() . ' The intervention was not approved.');
+        }
 
         LogActivity::log(
             'update_intervention',
@@ -607,7 +717,9 @@ class InterventionController extends Controller
             $intervention->id
         );
 
-        return redirect()->route('principal.interventions')
+        // From the intervention's own page, return there (same record, one workflow).
+        return redirect()->route($request->input('return_to') === 'show' && Intervention::schedulingAvailable() ? 'principal.interventions.show' : 'principal.interventions',
+            $request->input('return_to') === 'show' ? $intervention : [])
             ->with('success', 'Intervention updated.');
     }
 
@@ -639,8 +751,15 @@ class InterventionController extends Controller
             ->undecided()
             ->get();
 
-        \DB::transaction(function () use ($interventions) {
+        $blocked = [];
+        \DB::transaction(function () use ($interventions, $request, &$blocked) {
             foreach ($interventions as $intervention) {
+                try {
+                    $this->approvalResponsibility($intervention, $request->user());
+                } catch (\App\Services\InterventionTransitionException $e) {
+                    $blocked[] = $e->getMessage();
+                    continue;
+                }
                 $intervention->update([
                     'status'     => 'approved',
                     'decided_by' => auth()->id(),
@@ -656,7 +775,18 @@ class InterventionController extends Controller
             }
         });
 
-        return redirect()->route('principal.interventions')
-            ->with('success', $interventions->count() . ' intervention(s) approved.');
+        $redirect = redirect()->route('principal.interventions')
+            ->with('success', ($interventions->count() - count($blocked)) . ' intervention(s) approved.');
+
+        return $blocked ? $redirect->with('error', count($blocked) . ' not approved — ' . implode(' ', array_unique($blocked))) : $redirect;
+    }
+
+    /** Approval needs the section's current adviser as the responsible staff; refuses (exception) when there is none. */
+    private function approvalResponsibility(Intervention $intervention, \App\Models\User $principal): void
+    {
+        if (!Intervention::schedulingAvailable() || in_array($intervention->lifecycle(), ['completed', 'cancelled'], true)) {
+            return; // nothing left to manage: historical responsibility stays as recorded
+        }
+        $this->schedule->transferToSectionAdviser($intervention, $principal, 'Assigned on approval: the section adviser is responsible.');
     }
 }

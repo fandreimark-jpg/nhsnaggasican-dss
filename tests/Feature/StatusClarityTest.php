@@ -76,7 +76,7 @@ class StatusClarityTest extends TestCase
         $this->assertLessThan(75, $grade['computed_grade']);
         $this->assertGreaterThanOrEqual(75, $grade['transmuted_grade'], 'Fixture must actually reproduce the passing-on-paper case.');
 
-        $response = $this->actingAs($adviser)->get('/adviser/assessments?subject_id=' . $subject->id . '&period=1');
+        $response = $this->actingAs($adviser)->get('/adviser/verify-grades?subject_id=' . $subject->id . '&period=1');
 
         $response->assertOk();
         $response->assertSee('At Risk', false);
@@ -129,7 +129,7 @@ class StatusClarityTest extends TestCase
             AssessmentScore::factory()->create(['assessment_id' => $assessment->id, 'student_id' => $student->id, 'score' => $earned]);
         }
 
-        $response = $this->actingAs($adviser)->get('/adviser/assessments?subject_id=' . $subject->id . '&period=1');
+        $response = $this->actingAs($adviser)->get('/adviser/verify-grades?subject_id=' . $subject->id . '&period=1');
 
         $response->assertOk();
         $response->assertSee('On Track', false);

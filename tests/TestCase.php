@@ -45,4 +45,42 @@ REFUSING TO RUN TESTS: database connection is '{$connection}' ('{$database}'), n
         // test) and away from the real private upload directories.
         Storage::fake('local');
     }
+
+    /**
+     * A term report as an adviser's explicit submission leaves it (2026-10-07):
+     * the submitted marker plus a new immutable version whose snapshot is
+     * built by the same ReportSnapshotService the Submit action uses.
+     * Recipients' Reports pages show only such versions.
+     */
+    protected function submittedReport(\App\Models\Section $section, int $term, ?\App\Models\User $by = null): \App\Models\ReportSubmission
+    {
+        $by ??= \App\Models\User::find($section->adviser_id) ?? \App\Models\User::factory()->create(['role' => 'adviser']);
+        $row = \App\Models\ReportSubmission::updateOrCreate(
+            ['section_id' => $section->id, 'grading_period' => $term, 'school_year' => $section->school_year],
+            ['submitted_by' => $by->id, 'submitted_at' => now(), 'status' => 'submitted']
+        );
+        $row->versions()->create(['version' => (int) $row->versions()->max('version') + 1, 'submitted_by' => $by->id, 'submitted_at' => now(),
+            'snapshot' => (new \App\Services\ReportSnapshotService())->build($section, $term)]);
+
+        return $row;
+    }
+
+    /**
+     * Recording an intervention needs a valid context (2026-10-07): the
+     * learner's section has an active adviser (assigned automatically as the
+     * responsible staff) and is taught the subject. Older fixtures built from
+     * random factory grade levels call this to state that context explicitly.
+     */
+    protected function interventionReady(\App\Models\Student $student, \App\Models\Subject ...$subjects): \App\Models\User
+    {
+        $section = $student->section;
+        if (!$section->adviser_id) {
+            $section->forceFill(['adviser_id' => \App\Models\User::factory()->create(['role' => 'adviser'])->id])->save();
+        }
+        foreach ($subjects as $subject) {
+            $subject->forceFill(['grade_level' => $section->grade_level])->save();
+        }
+
+        return \App\Models\User::find($section->adviser_id);
+    }
 }

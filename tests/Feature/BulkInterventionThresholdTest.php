@@ -66,7 +66,7 @@ class BulkInterventionThresholdTest extends TestCase
         $content = $response->getContent();
 
         // Banner names both counts.
-        $response->assertSee('2 At Risk, 2 Needs Attention', false);
+        $response->assertSee('2 below target in 2+ components, 2 below target in 1 component', false);
         // Default summary reflects At Risk only.
         $response->assertSee('2 match, 0 skipped', false);
         $response->assertSee('Record 2 intervention', false);
@@ -100,7 +100,7 @@ class BulkInterventionThresholdTest extends TestCase
         $response->assertSessionHas('success');
         $this->assertDatabaseHas('interventions', ['student_id' => $student->id, 'subject_id' => $subject->id]);
         $intervention = Intervention::where('student_id', $student->id)->first();
-        $this->assertStringContainsString('Needs Attention', $intervention->recommendation_reason);
+        $this->assertStringContainsString('In-Term Status: Below Target: 1 Component', $intervention->recommendation_reason);
     }
 
     /** The default (narrow) path never submits a Needs Attention student — confirmed by the dialog's own rendering. */

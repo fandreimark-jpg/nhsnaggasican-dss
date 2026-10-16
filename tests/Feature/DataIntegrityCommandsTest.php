@@ -55,6 +55,24 @@ class DataIntegrityCommandsTest extends TestCase
             ->assertExitCode(0);
     }
 
+    public function test_check_integrity_reports_duplicate_examination_types_without_deleting_them(): void
+    {
+        $section = Section::factory()->create(['name' => 'Agila', 'school_year' => '2026-2027']);
+        $subject = Subject::factory()->create(['name' => 'General Mathematics']);
+        foreach (['ST 1', 'ST 1 (copy)'] as $name) {
+            \App\Models\Assessment::factory()->create(['section_id' => $section->id, 'subject_id' => $subject->id, 'school_year' => '2026-2027',
+                'grading_period' => 1, 'name' => $name, 'component' => 'examination', 'exam_role' => 'st1', 'max_score' => 30]);
+        }
+        // A support item sharing the type is NOT a duplicate.
+        \App\Models\Assessment::factory()->create(['section_id' => $section->id, 'subject_id' => $subject->id, 'school_year' => '2026-2027',
+            'grading_period' => 1, 'name' => 'ST 1 retake', 'component' => 'examination', 'exam_role' => 'st1', 'max_score' => 30, 'is_additional_support' => true]);
+
+        $this->artisan('dss:check-integrity')
+            ->expectsOutputToContain('Agila / General Mathematics (2026-2027, Term 1): 2 × ST1')
+            ->assertExitCode(1);
+        $this->assertSame(3, \App\Models\Assessment::count(), 'reported, never deleted');
+    }
+
     public function test_check_integrity_detects_a_risk_result_with_no_surviving_grades(): void
     {
         $student = Student::factory()->create();

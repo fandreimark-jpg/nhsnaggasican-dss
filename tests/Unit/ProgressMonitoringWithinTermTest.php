@@ -36,9 +36,70 @@ class ProgressMonitoringWithinTermTest extends TestCase
     {
         $row = AssessmentScore::factory()->create(['assessment_id' => $assessment->id, 'student_id' => $student->id, 'score' => $score]);
         $row->timestamps = false;
+        // A score recorded at $createdAt and never edited: both timestamps
+        // are that moment (Eloquent sets them together on insert).
         $row->created_at = $createdAt;
+        $row->updated_at = $createdAt;
         $row->save();
         return $row;
+    }
+
+    /**
+     * Final release pass (2026-09-27): support recorded BEFORE delivery is
+     * part of "Before"; only evidence recorded after delivery is "new"; and
+     * the numbers add up — Now = Before + the new items, change = Now% − Before%.
+     */
+    public function test_support_before_delivery_and_new_evidence_after_it_add_up(): void
+    {
+        $section = Section::factory()->create();
+        $student = Student::factory()->create(['section_id' => $section->id]);
+        $subject = Subject::factory()->create();
+        $deliveredAt = Carbon::parse('2026-09-10 12:00:00');
+
+        $original = $this->makeAssessment($section, $subject, 'performance_task');
+        $this->scoreAt($original, $student, 6, $deliveredAt->copy()->subDays(3));   // 6/20
+        $support = $this->makeAssessment($section, $subject, 'performance_task');
+        $support->update(['is_additional_support' => true]);
+        $this->scoreAt($support, $student, 14, $deliveredAt->copy()->subHour());    // before delivery
+        $intervention = $this->makeIntervention($student, $subject, $deliveredAt);
+        foreach ([17, 19] as $i => $score) {
+            $this->scoreAt($this->makeAssessment($section, $subject, 'performance_task'), $student, $score, $deliveredAt->copy()->addDays($i + 1));
+        }
+
+        $r = $this->service->compareWithinTerm($intervention);
+
+        $this->assertSame([20.0, 40.0, 2], [$r['before_earned'], $r['before_max'], $r['before_item_count']], 'the pre-delivery support item is part of Before');
+        $this->assertSame([56.0, 80.0, 4], [$r['after_earned'], $r['after_max'], $r['after_item_count']]);
+        $this->assertSame(2, $r['new_item_count'], 'only the two post-delivery items are new');
+        $this->assertSame(50.0, $r['before_percentage']);
+        $this->assertSame(70.0, $r['after_percentage']);
+        $this->assertSame(20.0, $r['change']);
+        $this->assertSame(0, $r['before_scores_changed_since_delivery']);
+    }
+
+    /**
+     * Final release pass: scores are edited in place and no history is kept,
+     * so a pre-delivery score corrected afterwards is counted in Before at its
+     * CURRENT value. The result must say so instead of passing it off as the
+     * evidence at delivery.
+     */
+    public function test_a_pre_delivery_score_edited_after_delivery_is_flagged(): void
+    {
+        $section = Section::factory()->create();
+        $student = Student::factory()->create(['section_id' => $section->id]);
+        $subject = Subject::factory()->create();
+        $deliveredAt = Carbon::now()->subDays(2);
+
+        $pt = $this->makeAssessment($section, $subject, 'performance_task');
+        $row = $this->scoreAt($pt, $student, 6, $deliveredAt->copy()->subDay());
+        $intervention = $this->makeIntervention($student, $subject, $deliveredAt);
+
+        $row->fresh()->update(['score' => 18]); // corrected today, after delivery (a normal timestamped save)
+
+        $r = $this->service->compareWithinTerm($intervention);
+        $this->assertSame(1, $r['before_scores_changed_since_delivery']);
+        $this->assertSame(18.0, $r['before_earned'], 'Before carries the current value — which is exactly why it is flagged');
+        $this->assertSame(0, $r['new_item_count']);
     }
 
     private function makeAssessment(Section $section, Subject $subject, string $component, int $term = 1): Assessment

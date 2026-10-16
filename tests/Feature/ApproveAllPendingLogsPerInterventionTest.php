@@ -21,15 +21,24 @@ class ApproveAllPendingLogsPerInterventionTest extends TestCase
     public function test_one_log_entry_is_created_per_approved_intervention(): void
     {
         $principal = User::factory()->principal()->create();
-        $a = Intervention::factory()->create(['status' => 'recommended', 'decided_by' => null]);
-        $b = Intervention::factory()->create(['status' => 'recommended', 'decided_by' => null]);
-        $c = Intervention::factory()->create(['status' => 'recommended', 'decided_by' => null]);
+        // Approval needs the learner's section adviser (2026-10-07), so each row has a section that has one.
+        $pending = function () {
+            $student = \App\Models\Student::factory()->create();
+            $this->interventionReady($student);
+
+            return Intervention::factory()->create(['status' => 'recommended', 'decided_by' => null, 'student_id' => $student->id, 'section_id' => $student->section_id]);
+        };
+        [$a, $b, $c] = [$pending(), $pending(), $pending()];
 
         $this->actingAs($principal)->post('/principal/interventions/approve-pending', [
             'ids' => [$a->id, $b->id, $c->id],
         ])->assertSessionHas('success', '3 intervention(s) approved.');
 
-        $this->assertDatabaseCount('activity_logs', 3);
+        // One decision log per approved intervention, plus one responsibility log
+        // each (the section adviser assigned on approval, 2026-10-07).
+        $this->assertSame(3, \App\Models\ActivityLog::where('action', 'update_intervention')->count());
+        $this->assertSame(3, \App\Models\ActivityLog::where('action', 'assign_intervention_staff')->count());
+        $this->assertDatabaseCount('activity_logs', 6);
         foreach ([$a, $b, $c] as $intervention) {
             $this->assertDatabaseHas('activity_logs', [
                 'action' => 'update_intervention', 'user_id' => $principal->id, 'record_id' => $intervention->id,

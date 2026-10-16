@@ -201,18 +201,51 @@ class SectionController extends Controller
             ])->withInput();
         }
 
-        $section->update([
-            'name'              => $request->name,
-            'grade_level'       => $request->grade_level,
-            'curriculum'        => $request->curriculum ?: null,
-            'track_id'          => $request->track_id,
-            'specialization_id' => $request->specialization_id,
-            'school_year'       => $request->school_year,
-            'adviser_id'        => $request->adviser_id ?: null,
-        ]);
+        $previousAdviser = $section->adviser_id;
+        [$moved, $blocked] = \Illuminate\Support\Facades\DB::transaction(function () use ($section, $request, $previousAdviser, $adviserId) {
+            $section->update([
+                'name'              => $request->name,
+                'grade_level'       => $request->grade_level,
+                'curriculum'        => $request->curriculum ?: null,
+                'track_id'          => $request->track_id,
+                'specialization_id' => $request->specialization_id,
+                'school_year'       => $request->school_year,
+                'adviser_id'        => $request->adviser_id ?: null,
+            ]);
 
-        return redirect()->route('admin.sections')
-            ->with('success', 'Section updated successfully!');
+            return (int) $previousAdviser !== (int) $adviserId ? $this->reconcileInterventions($section, $request->user()) : [0, 0];
+        });
+
+        $redirect = redirect()->route('admin.sections')
+            ->with('success', 'Section updated successfully!' . ($moved ? " {$moved} open intervention(s) moved to the new adviser (history kept)." : ''));
+
+        return $blocked ? $redirect->with('warning', "{$blocked} open intervention(s) of this section have no valid adviser now; no one can manage them until an active adviser is assigned here.") : $redirect;
+    }
+
+    /**
+     * The section's adviser changed (2026-10-07): its actionable interventions
+     * move to the new adviser — an explicit, audited write in the same
+     * transaction as the change, so the former adviser's access ends at once.
+     * Completed/cancelled ones keep their historical responsibility.
+     *
+     * @return array{0: int, 1: int} [moved, blocked]
+     */
+    private function reconcileInterventions(Section $section, \App\Models\User $admin): array
+    {
+        if (!\App\Models\Intervention::schedulingAvailable()) {
+            return [0, 0];
+        }
+        $service = new \App\Services\InterventionScheduleService();
+        $moved = $blocked = 0;
+        foreach ($service->needingTransfer($section->id) as $iv) {
+            try {
+                $moved += $service->transferToSectionAdviser($iv, $admin, 'Section adviser changed in Admin › Sections.') ? 1 : 0;
+            } catch (\App\Services\InterventionTransitionException) {
+                $blocked++;
+            }
+        }
+
+        return [$moved, $blocked];
     }
 
     private function sectionHasAcademicHistory(Section $section): bool
@@ -240,6 +273,8 @@ class SectionController extends Controller
         }
 
         $section->delete();
+
+        \App\Helpers\LogActivity::log('delete_section', 'Deleted section ' . $section->name . ' (' . $section->school_year . ')', 'sections', (int) $id);
 
         return redirect()->route('admin.sections')
             ->with('success', 'Section deleted successfully!');

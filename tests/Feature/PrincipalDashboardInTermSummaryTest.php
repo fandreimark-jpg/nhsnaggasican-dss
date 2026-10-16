@@ -23,14 +23,11 @@ use Tests\TestCase;
 class PrincipalDashboardInTermSummaryTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\SharesClassAssessments;
 
     private function score(Section $section, Subject $subject, Student $student, string $component, float $earned, float $max = 100): void
     {
-        $assessment = Assessment::factory()->create([
-            'subject_id' => $subject->id, 'section_id' => $section->id,
-            'grading_period' => 1, 'school_year' => $section->school_year,
-            'name' => $component . '-' . uniqid(), 'component' => $component, 'max_score' => $max,
-        ]);
+        $assessment = $this->sharedAssessment($section, $subject, $student, $component, $max);
         AssessmentScore::factory()->create(['assessment_id' => $assessment->id, 'student_id' => $student->id, 'score' => $earned]);
     }
 
@@ -117,8 +114,8 @@ class PrincipalDashboardInTermSummaryTest extends TestCase
         $response->assertOk();
         $response->assertSee('In-Term Status');
         $response->assertSee('On Track');
-        $response->assertSee('Needs Attention');
-        $response->assertSee('At Risk');
+        $response->assertSee('Below Target: 1 Component');
+        $response->assertSee('Below Target: 2+ Components');
     }
 
     /**
@@ -140,7 +137,7 @@ class PrincipalDashboardInTermSummaryTest extends TestCase
         $response->assertOk();
         // No risk results at all -> the single consolidated block, not
         // the three individual per-chart messages.
-        $response->assertSee('Risk Level appears once advisers submit their term reports');
+        $response->assertDontSee('Risk Level appears once advisers submit their term reports');
         $response->assertDontSee('this fills in once an adviser submits a term report');
     }
 
@@ -219,30 +216,20 @@ class PrincipalDashboardInTermSummaryTest extends TestCase
 
         $response = $this->actingAs($principal)->get('/principal/dashboard');
 
-        $response->assertSee('OT = On Track, NA = Needs Attention, AR = At Risk');
+        $response->assertSee('OT = On Track, B1 = Below Target: 1 Component, B2 = Below Target: 2+ Components');
         $response->assertSee('1 OT', false);
     }
 
     public function test_in_term_summary_never_appears_under_a_risk_heading(): void
     {
         $principal = User::factory()->principal()->create();
-        $section = Section::factory()->create(['grade_level' => 11, 'school_year' => '2026-2027']);
-        $subject = Subject::factory()->create(['grade_level' => 11, 'type' => 'core']);
-        $student = Student::factory()->create(['section_id' => $section->id]);
-        $this->score($section, $subject, $student, 'written_work', 50);
-        $this->score($section, $subject, $student, 'performance_task', 50);
 
-        $response = $this->actingAs($principal)->get('/principal/dashboard');
-        $content = $response->getContent();
+        $content = $this->actingAs($principal)->get('/principal/dashboard')->assertOk()->getContent();
 
-        // The In-Term Status heading must appear strictly before the Risk
-        // Level heading — i.e. its own section, not folded into the Risk
-        // cards' heading or numbers.
-        $posInTerm = strpos($content, 'In-Term Status — Term');
-        $posRisk = strpos($content, 'Risk Level — submitted term reports');
-
-        $this->assertNotFalse($posInTerm);
-        $this->assertNotFalse($posRisk);
-        $this->assertLessThan($posRisk, $posInTerm);
+        // In-Term Status has its own panel, and there is no classifier Risk
+        // Level section left for it to be folded into.
+        $this->assertStringContainsString('In-Term Status', $content);
+        $this->assertStringNotContainsString('Risk Level — submitted term reports', $content);
+        $this->assertStringNotContainsString('riskDonutChart', $content);
     }
 }

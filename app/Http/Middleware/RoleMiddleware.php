@@ -14,10 +14,11 @@ use Illuminate\Http\Request;
  * Usage in routes:
  * Route::middleware(['auth', 'role:admin'])->group(...)
  * Route::middleware(['auth', 'role:adviser'])->group(...)
+ * Route::middleware(['auth', 'role:adviser,subject_teacher'])->group(...)  // any of the listed roles
  */
 class RoleMiddleware
 {
-    public function handle(Request $request, Closure $next, string $role): mixed
+    public function handle(Request $request, Closure $next, string ...$roles): mixed
     {
         // Redirect to login if not authenticated
         if (!auth()->check()) {
@@ -26,7 +27,7 @@ class RoleMiddleware
 
         // Block access if role does not match
         // Returns 403 Forbidden instead of redirecting
-        if (auth()->user()->role !== $role) {
+        if (!in_array(auth()->user()->role, $roles, true)) {
             abort(403, 'Unauthorized.');
         }
 

@@ -19,22 +19,24 @@ use Tests\TestCase;
 class AssessmentsEmptyStateTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
 
-    public function test_adviser_assessments_empty_state_does_not_duplicate_the_header_upload_button(): void
+    public function test_the_verification_empty_state_points_to_the_class_record_and_the_old_page_redirects(): void
     {
         $adviser = User::factory()->create();
         $section = Section::factory()->create(['adviser_id' => $adviser->id, 'school_year' => '2026-2027']);
         $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
         AcademicTerm::ensureExistFor($section->school_year);
 
-        $response = $this->actingAs($adviser)->get('/adviser/assessments?period=1&subject_id=' . $subject->id);
-
+        $response = $this->actingAs($adviser)->get('/adviser/verify-grades?period=1&subject_id=' . $subject->id);
         $response->assertOk();
-        $response->assertSee('No assessment items uploaded yet');
-        $response->assertSee('Upload Assessment Form', false);
-        // Exactly one control opens the upload modal — the header button —
-        // not a second one duplicated inside the empty state.
-        $this->assertSame(1, substr_count($response->getContent(), 'openAssessmentUploadModal()'));
+        $response->assertSee('No assessment evidence yet');
+        $this->assertStringContainsString(e(route('teacher.class-record', ['section_id' => $section->id, 'subject_id' => $subject->id, 'period' => 1])), $response->getContent());
+        $this->assertStringNotContainsString('Upload Assessment Form', $response->getContent());
+
+        // The retired page is no longer a destination.
+        $this->actingAs($adviser)->get('/adviser/assessments?period=1&subject_id=' . $subject->id)
+            ->assertRedirect(route('teacher.class-record', ['school_year' => $section->school_year, 'section_id' => $section->id, 'subject_id' => $subject->id, 'period' => 1]));
     }
 
     public function test_admin_crud_pages_render_exactly_one_control_per_action_when_empty(): void

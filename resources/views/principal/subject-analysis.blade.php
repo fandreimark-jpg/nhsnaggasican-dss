@@ -1,7 +1,7 @@
 @extends('layouts.app')
 
 @section('title', 'Subject Analysis')
-@section('subtitle', 'Assessment component performance, failure rate, and at-risk count by subject — read-only')
+@section('subtitle', 'Assessment component performance, failure rate, and open academic concerns by subject — read-only')
 
 @section('content')
 
@@ -69,7 +69,7 @@
 </div>
 
 <x-panel title="Subject Analysis" :padded="false"
-    subtitle="Average score per assessment component, failure rate, and at-risk count, across every student with evidence in the selected scope. A subject can look fine overall while one component quietly needs attention.">
+    subtitle="Average score per assessment component, failure rate, and open academic concerns, across every student with evidence in the selected scope. A subject can look fine overall while one component quietly needs attention.">
 
     <div class="tbl-scroll">
     <table class="tbl tbl-sticky">
@@ -80,8 +80,8 @@
                 <th scope="col">Performance Task</th>
                 <th scope="col">Examination</th>
                 <th scope="col">Weakest Component</th>
-                <th scope="col" class="tbl-num">Failure Rate</th>
-                <th scope="col" class="tbl-num">At-Risk Count</th>
+                <th scope="col" class="tbl-num">Official Results <span class="block normal-case font-normal text-gray-400 text-[10px] tracking-normal">Failure Rate</span></th>
+                <th scope="col" class="tbl-num">Open Concerns</th>
             </tr>
         </thead>
         <tbody>
@@ -125,13 +125,18 @@
                         <span class="font-semibold {{ $row['failure_rate'] > 0 ? 'text-status-failing' : 'text-status-ontrack' }}">
                             {{ number_format($row['failure_rate'], 1) }}%
                         </span>
-                        <span class="block text-xs text-muted">{{ $row['failing_count'] }} of {{ $row['graded_count'] }}</span>
+                        <span class="block text-xs text-muted" data-official-results>Failed {{ $row['failing_count'] }} · Passed {{ $row['graded_count'] - $row['failing_count'] }} of {{ $row['graded_count'] }} official</span>
                     @endif
                 </td>
                 <td class="tbl-num">
-                    @if($row['at_risk_count'] > 0)
-                        <a href="{{ route('principal.students', ['subject_id' => $row['subject']->id]) }}"
-                           class="badge badge-danger hover:opacity-80">{{ $row['at_risk_count'] }}</a>
+                    @if($row['open_concern_count'] > 0)
+                        <a href="{{ route('principal.academic-monitoring', array_filter([
+                                'school_year' => $schoolYear, 'term' => $selectedTerm, 'grade_level' => $selectedGradeLevel,
+                                'section_id' => $selectedSection, 'subject_id' => $row['subject']->id,
+                            ])) }}"
+                           class="badge badge-warning hover:opacity-80" title="Open concerns — see Academic Monitoring">{{ $row['open_concern_count'] }}</a>
+                        <span class="block text-xs text-muted">{{ $row['open_concern_learners'] }} {{ $row['open_concern_learners'] === 1 ? 'learner' : 'learners' }}</span>
+                        <span class="block text-[11px] text-muted" data-concern-split>Subject Performance {{ $row['open_subject_performance'] }} · Missing {{ $row['open_missing'] }}</span>
                     @else
                         <span class="text-muted">0</span>
                     @endif
@@ -157,7 +162,7 @@
     @if(($offeredWithoutData ?? null) !== null)
         <div class="px-5 py-3 border-t border-line text-xs text-muted">
             @if($offeredWithoutData->isEmpty())
-                <i class="bi bi-check2-circle"></i> Every subject assigned to this section for Term {{ $selectedTerm }} has evidence, grades, or risk results above.
+                <i class="bi bi-check2-circle"></i> Every subject assigned to this section for Term {{ $selectedTerm }} has evidence, grades, or open concerns above.
             @else
                 <i class="bi bi-journal"></i> Assigned to this section for Term {{ $selectedTerm }} but with nothing recorded yet:
                 <strong>{{ $offeredWithoutData->pluck('name')->implode(', ') }}</strong>.

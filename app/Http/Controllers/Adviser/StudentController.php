@@ -3,17 +3,19 @@
 namespace App\Http\Controllers\Adviser;
 
 use App\Http\Controllers\Controller;
+use App\Models\AcademicTerm;
 use App\Models\Student;
 use App\Models\Section;
-use App\Helpers\LogActivity;
+use App\Services\MonitoringClassificationService;
 use Illuminate\Http\Request;
 
 /**
  * StudentController (Adviser)
  *
- * Allows the adviser to view and edit students in their own section.
- * Advisers CANNOT add, import, or remove students — those are Admin-only
- * master-data actions (see Admin\StudentController).
+ * The adviser's roster of their own section — VIEW ONLY. Adding,
+ * importing, editing and removing learners are Admin-only master-data
+ * actions (see Admin\StudentController); the adviser edit action was
+ * removed 2026-09-27.
  * Scoped to the adviser's section for security.
  */
 class StudentController extends Controller
@@ -31,7 +33,7 @@ class StudentController extends Controller
      * page changes, same convention as every other paginated table here
      * (Principal\StudentController, Principal\InterventionController).
      */
-    public function index()
+    public function index(Request $request)
     {
         // Get only the section assigned to this adviser
         $section  = Section::forAdviser(auth()->id());
@@ -42,49 +44,24 @@ class StudentController extends Controller
             // unconditionally either way, same shape either branch.
             : new \Illuminate\Pagination\LengthAwarePaginator([], 0, self::PER_PAGE);
 
-        return view('adviser.students', compact('students', 'section'));
-    }
-
-    /**
-     * Update a student's basic information.
-     * Advisers can only update personal info — not LRN or section.
-     */
-    public function update(Request $request, $id)
-    {
-        $section = Section::forAdviser(auth()->id());
-
-        // BUG FIX: without this check, an adviser with no assigned section
-        // would crash here trying to read ->id from null.
-        if (!$section) {
-            return redirect()->route('adviser.students')
-                ->with('error', 'No section assigned to you yet. Contact the admin.');
+        // A concise monitoring overview per learner — the SAME service the
+        // Principal's pages read (MonitoringClassificationService). The
+        // official Term results and the full evidence are on Submit Report
+        // ("View details"); nothing here changes a concern or a grade.
+        $terms = AcademicTerm::termNumbers();
+        $period = $section ? (int) $request->input('period', AcademicTerm::currentOpenTerm($section->school_year) ?? 1) : 1;
+        if (!in_array($period, $terms, true)) {
+            $period = $terms[0] ?? 1;
+        }
+        $monitoring = collect();
+        $forReviewCount = 0;
+        if ($section) {
+            $classifier = app(MonitoringClassificationService::class);
+            $all = $classifier->forStudents(Student::enrolledIn($section)->pluck('students.id'), $section->school_year, $period);
+            $forReviewCount = $all->filter(fn($m) => $m->isForReview())->count();
+            $monitoring = $all->only($students->pluck('id')->all());
         }
 
-        // Security check — ensure student belongs to adviser's section
-        $student = Student::where('id', $id)
-            ->enrolledIn($section)
-            ->firstOrFail();
-
-        $request->validate([
-            'last_name'   => 'required|string|max:255',
-            'first_name'  => 'required|string|max:255',
-            'middle_name' => 'nullable|string|max:255',
-            'gender'      => 'required|in:male,female',
-        ]);
-
-        $student->update($request->only([
-            'last_name', 'first_name', 'middle_name', 'gender'
-        ]));
-
-        // Record this action in the Activity Logs so the Admin can see it.
-        LogActivity::log(
-            action:      'edit_student',
-            description: 'Edited student: ' . $student->last_name . ', ' . $student->first_name,
-            tableName:   'students',
-            recordId:    $student->id
-        );
-
-        return redirect()->route('adviser.students')
-            ->with('success', 'Student updated successfully!');
+        return view('adviser.students', compact('students', 'section', 'terms', 'period', 'monitoring', 'forReviewCount'));
     }
 }

@@ -161,7 +161,11 @@ table {
 
     /* ---------- TABLES ------------------------------------------------- */
     .tbl-wrap  { @apply card overflow-hidden; }
-    .tbl-scroll{ @apply overflow-x-auto overflow-y-auto max-h-[32rem]; }
+    .tbl-scroll{ @apply overflow-x-auto overflow-y-auto max-h-[32rem]; container-type: inline-size; }
+    /* An empty state inside a wide table's full-width cell stays within the
+       visible scroll box instead of centring across the whole table (it was
+       clipped at tablet/phone width — final audit, 2026-09-28). */
+    .tbl-scroll td > .empty-state { position: sticky; left: 0; max-width: calc(100cqw - 2rem); }
     .tbl       { @apply w-full text-sm text-left; }
     .tbl thead { @apply bg-surface text-muted text-[12px] uppercase tracking-[0.06em]; }
     .tbl thead th { @apply px-4 py-3 font-semibold whitespace-nowrap; }
@@ -187,4 +191,111 @@ table {
     .kbd-num { @apply tabular-nums; }
     .link    { @apply text-brand-700 hover:text-brand-900 hover:underline; }
     .action-card { @apply card p-4 flex items-start gap-3 card-hover; }
+
+    /* ---------- CLASS RECORD (UI refinement pass, 2026-09-28) ------------
+       One workspace card: toolbar, legend, selected-cell actions, the grid
+       (its own two-axis scroll, height capped to the viewport so the page
+       and the grid rarely both scroll), and a save bar that is sticky to
+       the bottom of <main> while the workspace is on screen. */
+    .cr-filter-label { @apply block text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5; }
+    .cr-context { @apply flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-700; }
+    .cr-context-label { @apply text-[11px] uppercase tracking-wide text-gray-500 mr-0.5; }
+    .cr-flash { @apply items-center; }
+    .cr-dismiss { @apply ml-2 rounded p-1 text-current opacity-70 hover:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500; }
+
+    .cr-workspace { @apply overflow-visible; }
+    .cr-toolbar { @apply flex flex-wrap items-center gap-2 px-4 py-2.5 border-b border-line; }
+    .cr-copy { @apply inline-flex items-center gap-1.5 max-w-full min-w-0; }
+    .cr-copy-label { @apply text-xs text-gray-500; }
+    .cr-copy-select { @apply w-auto min-w-0 max-w-full pr-8 sm:min-w-[12rem]; }
+    .cr-help { @apply px-4 py-3 border-b border-line bg-surface text-xs text-gray-700; }
+    .cr-help ul { @apply list-disc pl-4 space-y-0.5; }
+    .cr-help-title { @apply text-xs font-semibold text-ink mb-1; }
+    .cr-legend { @apply flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 text-xs text-gray-700 border-b border-line; }
+    .cr-chip { @apply inline-flex items-center justify-center min-w-[1.5rem] h-5 px-1 rounded border border-gray-300 bg-white text-[11px] font-semibold tabular-nums mr-1; }
+    .cr-chip-blank { @apply border-dashed; }
+    .cr-chip-missing { @apply bg-red-50 border-red-300 text-red-800; }
+    .cr-chip-dirty { @apply bg-amber-50 border-amber-400 text-amber-900; }
+    .cr-selection { @apply flex flex-wrap items-center gap-2 px-4 py-2 border-b border-line bg-brand-50/40 text-sm; }
+    .cr-selection-text { @apply flex-1 min-w-[14rem]; }
+    .cr-selection-target { @apply block text-gray-800; }
+    .cr-selection-note { @apply block text-xs text-amber-900; }
+    .cr-selection-actions { @apply flex flex-wrap gap-1.5; }
+    .cr-empty { @apply px-6 py-10 text-center; }
+
+    .cr-scroll { @apply overflow-auto relative; max-height: max(20rem, calc(100dvh - 13rem)); }
+    .cr-table { @apply w-max min-w-full text-sm border-separate; border-spacing: 0; }
+    /* The whole header block is sticky (not each row at a guessed offset). */
+    .cr-table thead { @apply sticky top-0 z-20; }
+    .cr-table thead th { @apply bg-white px-2 py-1.5 text-xs font-semibold text-gray-700 border-b border-line align-bottom; }
+    .cr-table thead tr.cr-hps-row th { @apply text-[11px] font-medium text-gray-600 bg-gray-50 whitespace-nowrap text-center; }
+    .cr-table tbody td, .cr-table tbody th { @apply border-b border-line px-1 py-1 bg-white; }
+    .cr-table tbody tr:hover td, .cr-table tbody tr:hover th { @apply bg-gray-50; }
+    .cr-table tbody tr.cr-row-active td, .cr-table tbody tr.cr-row-active th { background-color: #EEF7EF; }
+    .cr-sticky { @apply sticky left-0 z-10 bg-white text-left; box-shadow: 1px 0 0 #E6EAF0; }
+    .cr-table thead th.cr-sticky { @apply z-30; }
+    .cr-name-col { @apply min-w-[7.5rem] max-w-[9rem] px-2 sm:min-w-[10rem] sm:max-w-[13rem] sm:px-3; }
+    .cr-name-head { @apply align-bottom; }
+    .cr-band { @apply text-left text-[11px] uppercase tracking-wide; }
+    /* The label stays beside the learner column while a wide band scrolls. */
+    .cr-band-label { @apply sticky inline-block px-1; left: 8rem; }
+    @media (min-width: 640px) { .cr-band-label { left: 11rem; } }
+    .cr-band-ww { @apply bg-blue-50 text-blue-900; }
+    .cr-band-pt { @apply bg-purple-50 text-purple-900; }
+    .cr-band-ex { @apply bg-orange-50 text-orange-900; }
+    .cr-band-grade { @apply bg-gray-100 text-gray-800; }
+    /* Component boundaries: a firm left rule at the start of each group. */
+    .cr-table .cr-gs { border-left: 2px solid #CBD5E1; }
+    .cr-item-head { @apply min-w-[5.25rem] max-w-[7.5rem] text-center whitespace-normal; }
+    .cr-item-head.cr-col-active { @apply bg-brand-50; }
+    .cr-item-name { @apply block font-semibold text-ink leading-tight; overflow-wrap: anywhere; }
+    .cr-item-meta { @apply block text-[10px] font-normal text-gray-600; }
+    .cr-item-edit { @apply inline-block mt-0.5 text-[11px] font-medium text-brand-700 underline rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500; }
+    .cr-new { @apply bg-brand-100 ring-2 ring-inset ring-brand-500; }
+    .cr-cell-td { @apply p-1 text-center relative; }
+    /* Editable cells look like inputs even when empty (no placeholder text). */
+    .cr-cell { @apply w-[4.5rem] h-9 rounded-md border border-gray-300 bg-white px-1.5 text-center text-sm tabular-nums text-ink shadow-sm focus:outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-400; scroll-margin: 6.5rem 1rem 4.5rem 10rem; }
+    @media (min-width: 640px) { .cr-cell { scroll-margin-left: 13.5rem; } }
+    .cr-cell[readonly] { @apply border-transparent bg-transparent shadow-none text-gray-700 cursor-default focus:ring-gray-300; }
+    .cr-cell.cr-missing { @apply bg-red-50 border-red-300 text-red-800 font-semibold; }
+    .cr-cell.cr-dirty { @apply bg-amber-50 border-amber-500; }
+    .cr-cell.cr-invalid { @apply bg-red-100 border-red-600 text-red-900; }
+    .cr-cell.cr-conflict { @apply bg-orange-100 border-orange-600; }
+    /* Non-colour cue for an unsaved cell: a corner mark on the cell. */
+    .cr-cell-td.cr-td-dirty::after { content: ""; position: absolute; top: 3px; right: 3px; border-style: solid; border-width: 0 7px 7px 0; border-color: transparent #B45309 transparent transparent; pointer-events: none; }
+    .cr-cell-td.cr-td-invalid::after { content: "!"; position: absolute; top: 1px; right: 4px; font-size: 10px; font-weight: 700; color: #B91C1C; pointer-events: none; }
+    .cr-sum { @apply min-w-[4.5rem] text-center text-xs tabular-nums whitespace-nowrap text-gray-800; background-color: #F8FAFC !important; }
+    .cr-table thead th.cr-sum-head { @apply min-w-[4.5rem] text-center bg-gray-50 whitespace-nowrap; }
+    .cr-table abbr { @apply no-underline cursor-help; }
+    .cr-legend-missing { @apply inline-block rounded bg-red-50 px-1 font-semibold text-red-700; }
+    /* SSHS E-Class Record template layout (2026-10-04) */
+    .cr-table thead tr.cr-hps-row td, .cr-table thead tr.cr-hps-row th { @apply px-1 py-1 text-[11px] font-medium text-gray-700 bg-gray-50 whitespace-nowrap text-center border-b border-line; }
+    .cr-table thead tr.cr-hps-row th.cr-name-col { @apply text-left uppercase tracking-wide text-[10px]; }
+    .cr-slot-label { @apply block text-[11px] font-bold text-gray-800; }
+    .cr-table .cr-slot-empty { @apply min-w-[2.25rem] text-gray-400; background-image: repeating-linear-gradient(135deg, transparent 0 6px, #F1F5F9 6px 7px); }
+    .cr-table thead th.cr-slot-empty { @apply min-w-[2.25rem] align-bottom; }
+    .cr-rowno { @apply inline-block w-6 text-right mr-1.5 text-[11px] text-gray-500 tabular-nums; }
+    .cr-table tbody tr.cr-group-row th, .cr-table tbody tr.cr-group-row td { @apply bg-gray-100 py-0.5 text-[11px] font-bold tracking-wide text-gray-700; }
+    .cr-table .cr-grade { @apply font-semibold; }
+    .cr-table thead th.cr-grade-head { @apply align-middle; }
+    .cr-chip-pending { @apply border-dashed border-red-300 text-red-400; }
+    .cr-chip-slot { background-image: repeating-linear-gradient(135deg, transparent 0 4px, #E2E8F0 4px 5px); }
+    .cr-cell.cr-pending-missing { @apply border-dashed border-red-300; }
+    .cr-cell.cr-pending-missing::placeholder { @apply text-red-400; }
+    .cr-table tbody tr.cr-row-preview td.cr-sum { @apply italic text-amber-900; background-color: #FFFBEB !important; }
+    .cr-table tbody tr.cr-preview-stale td.cr-sum { @apply text-gray-400 line-through; }
+    .cr-savebar-preview { @apply text-xs font-medium text-amber-900; }
+    .cr-savebar-preview[data-state="stale"] { @apply text-red-800; }
+    .cr-savebar-notice { @apply basis-full text-xs text-gray-700; }
+    .cr-savebar-scope { @apply font-medium text-ink; }
+
+    /* Save bar: sticky to the bottom of <main>'s scroll area, in normal flow. */
+    .cr-savebar { @apply sticky bottom-0 z-40 flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 border-t border-line bg-white/95 rounded-b-xl; box-shadow: 0 -4px 12px rgba(24,33,47,.08); padding-bottom: calc(.625rem + env(safe-area-inset-bottom)); backdrop-filter: blur(4px); }
+    .cr-savebar-count { @apply text-sm font-medium text-gray-800; }
+    .cr-savebar-status { @apply text-sm flex-1 min-w-[10rem]; }
+    .cr-savebar-status[data-state="saved"] { @apply text-green-800; }
+    .cr-savebar-status[data-state="saving"] { @apply text-gray-700; }
+    .cr-savebar-status[data-state="unsaved"] { @apply text-amber-900; }
+    .cr-savebar-status[data-state="invalid"], .cr-savebar-status[data-state="offline"],
+    .cr-savebar-status[data-state="forbidden"], .cr-savebar-status[data-state="conflict"] { @apply text-red-800 font-medium; }
 }

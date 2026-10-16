@@ -36,7 +36,7 @@ class Do015TransmutationSeededTest extends TestCase
 
         $this->assertTrue($result['available']);
         $this->assertNotEquals(79.0, $result['value'], 'do8_2015\'s band for 67.22 is 79 — do015_2026 must resolve to its OWN band, not fall back to do8_2015\'s.');
-        // 67.22 falls in do015_2026's [65.34, 69.99] -> 74 band.
+        // 67.22 falls in do015_2026's [65.34, 69.98] -> 74 band (workbook lookup, 2026-10-04).
         $this->assertEquals(74.0, $result['value']);
     }
 }

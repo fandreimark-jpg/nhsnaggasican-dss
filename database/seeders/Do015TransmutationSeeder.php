@@ -28,6 +28,18 @@ use Illuminate\Support\Facades\DB;
  * This is DepEd's own operational instrument, not the signed PDF of the
  * order itself — that distinction still belongs in the thesis.
  *
+ * LOOKUP-EFFECTIVE BANDS (2026-10-04). The workbook does not read these
+ * minima at all: AM17 = XLOOKUP(AL17, HELPER!C7:C47, HELPER!D7:D47, , 1)
+ * ("exact match or next larger") over the STORED maxima. Two of them are
+ * stored a hair below their printed value — C33 = 69.9899999999999 (prints
+ * 69.99) and C32 = 71.1699999999999 (prints 71.17) — so an Initial Grade
+ * of exactly 69.99 finds 71.1699999999999 -> 75, and 71.17 finds 72.35 ->
+ * 76. Initial Grades are 2-decimal values, so the bands below are the
+ * workbook formula's own result written at 2 dp: 65.34-69.98 -> 74,
+ * 69.99-71.16 -> 75, 71.17-72.35 -> 76 (printed: 69.99 / 70.00-71.17 /
+ * 71.18). Every other band is unchanged. Pinned by WorkbookParityTest and
+ * Do015BandsMatchOfficialEcrTest (derived from the workbook file itself).
+ *
  * Run with:  php artisan db:seed --class=Do015TransmutationSeeder
  */
 class Do015TransmutationSeeder extends Seeder
@@ -60,9 +72,9 @@ class Do015TransmutationSeeder extends Seeder
         [74.72,  75.89,  79],
         [73.54,  74.71,  78],
         [72.36,  73.53,  77],
-        [71.18,  72.35,  76],
-        [70.00,  71.17,  75],   // <- the passing anchor
-        [65.34,  69.99,  74],
+        [71.17,  72.35,  76],   // workbook lookup: 71.17 -> 76 (see note above)
+        [69.99,  71.16,  75],   // <- the passing anchor (70.00 -> 75); 69.99 -> 75 by the workbook lookup
+        [65.34,  69.98,  74],
         [60.67,  65.33,  73],
         [56.01,  60.66,  72],
         [51.34,  56.00,  71],

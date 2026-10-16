@@ -45,6 +45,8 @@ class GradeController extends Controller
                 'grades'         => collect(),
                 'selectedPeriod' => 1,
                 'openTerm'       => null,
+                'editableSubjectIds' => [],
+                'verifyUrl'      => route('adviser.verify-grades'),
             ]);
         }
 
@@ -73,9 +75,90 @@ class GradeController extends Controller
         // refuses every write, so the page must not offer one either.
         $openTerm = $section->isInActiveSchoolYear() ? AcademicTerm::currentOpenTerm($section->school_year) : null;
 
+        // Typed grades need a teaching assignment (TeachingAccess); the page
+        // still SHOWS every subject of the advisory section.
+        $editableSubjectIds = (new \App\Services\TeachingAccess())->editableSubjectIds(auth()->user(), $section, $selectedPeriod);
+
+        // Verification lives on its own page ("Encode / Verify split",
+        // 2026-09-28). A subject_id carried here (an old #verify bookmark)
+        // is passed on only if it is applicable to this section and term.
+        $verifyUrl = route('adviser.verify-grades', array_filter([
+            'period'     => $selectedPeriod,
+            'subject_id' => $subjects->firstWhere('id', (int) request('subject_id'))?->id,
+        ]));
+
         return view('adviser.grades', compact(
-            'section', 'students', 'subjects', 'grades', 'selectedPeriod', 'openTerm'
+            'section', 'students', 'subjects', 'grades', 'selectedPeriod', 'openTerm', 'editableSubjectIds', 'verifyUrl'
         ));
+    }
+
+    /**
+     * Verify Grades — the official-grade verification workspace (one
+     * subject and term of an ADVISORY section at a time). Read-only page;
+     * the verify endpoints below re-check everything. School Year and
+     * Section offer only sections this adviser advises; an unknown value
+     * falls back to the adviser's current section, never widens scope.
+     * Anything but the adviser's current advisory section in a term that
+     * accepts writes is shown read-only (historical viewing grants no write).
+     */
+    public function verification(Request $request)
+    {
+        $request->validate([
+            'school_year'   => ['nullable', 'string', 'max:9'],
+            'section_id'    => ['nullable', 'integer'],
+            'period'        => ['nullable', 'integer'],
+            'subject_id'    => ['nullable', 'integer'],
+            'status_filter' => ['nullable', 'string', 'max:40'],
+        ]);
+
+        $userId = auth()->id();
+        $current = Section::forAdviser($userId);
+        $advised = Section::where('adviser_id', $userId)->with(['track', 'specialization'])
+            ->orderByDesc('school_year')->orderBy('name')->get();
+        $schoolYears = $advised->pluck('school_year')->unique()->values();
+
+        $schoolYear = $schoolYears->contains($request->input('school_year')) ? $request->input('school_year') : $current?->school_year;
+        $sections = $advised->where('school_year', $schoolYear)->values();
+        $section = $sections->firstWhere('id', (int) $request->input('section_id'))
+            ?? ($current ? $sections->firstWhere('id', $current->id) : null)
+            ?? $sections->first();
+
+        $terms = AcademicTerm::termNumbers();
+        $selectedPeriod = in_array((int) $request->input('period'), $terms, true)
+            ? (int) $request->input('period')
+            : ($section ? (int) (AcademicTerm::currentOpenTerm($section->school_year) ?? $terms[0] ?? 1) : (int) ($terms[0] ?? 1));
+
+        $subjects = $section ? Subject::forSection($section, $selectedPeriod)->orderBy('type')->orderBy('name')->get() : collect();
+        $selectedSubject = $subjects->firstWhere('id', (int) $request->input('subject_id')) ?? $subjects->first();
+
+        // Writable only for the section the verify endpoints act on (the
+        // adviser's current advisory section) in a term that accepts writes.
+        $isCurrentSection = $section && $current && $section->id === $current->id;
+        $termAcceptsWrites = $section && AcademicTerm::acceptsWrites($section->school_year, $selectedPeriod);
+        $isTermOpen = $isCurrentSection && $termAcceptsWrites;
+        $lockReason = !$section ? null : (!$isCurrentSection
+            ? 'Read-only — this is not your current advisory section, so its grades cannot be verified here.'
+            : (!$termAcceptsWrites ? 'Read-only — ' . AcademicTerm::writeRefusalReason($section->school_year, $selectedPeriod) : null));
+
+        $verification = $section && $selectedSubject
+            ? (new \App\Services\GradeVerificationBoard())->build($section, $selectedSubject, $selectedPeriod, $request->input('status_filter'))
+            : ['performance' => collect(), 'itemCount' => 0, 'statusFilter' => null, 'monitoringByStudentId' => collect(),
+               'counts' => ['learners' => 0, 'verified' => 0, 'eligible' => 0, 'incomplete' => 0]];
+
+        return view('adviser.verify-grades', array_merge(compact(
+            'schoolYears', 'schoolYear', 'sections', 'section', 'terms', 'selectedPeriod', 'subjects', 'selectedSubject',
+            'isTermOpen', 'lockReason'
+        ), $verification));
+    }
+
+    /** Verify Grades URL for a class, keeping the filter the adviser was using. */
+    private function verifyPageUrl(int $gradingPeriod, ?int $subjectId, ?string $statusFilter = null, ?int $studentId = null): string
+    {
+        $status = in_array($statusFilter, \App\Services\GradeVerificationBoard::STATUS_FILTERS, true) ? $statusFilter : null;
+
+        return route('adviser.verify-grades', array_filter([
+            'period' => $gradingPeriod, 'subject_id' => $subjectId, 'status_filter' => $status,
+        ])) . ($studentId ? '#learner-' . $studentId : '');
     }
 
     public function store(Request $request)
@@ -108,6 +191,15 @@ class GradeController extends Controller
         // different grade level or track and have it silently accepted.
         $validSubjectIds = Subject::forSection($section, (int) $request->grading_period)->pluck('id')->toArray();
 
+        // "Subject Teacher and Class Record" pass — a typed grade is an
+        // edit, so it needs a teaching assignment for that subject in this
+        // section and term. Advising the section is not enough; a row for
+        // any other subject is refused exactly like a foreign subject.
+        $validSubjectIds = array_values(array_intersect(
+            $validSubjectIds,
+            (new \App\Services\TeachingAccess())->editableSubjectIds(auth()->user(), $section, (int) $request->grading_period)
+        ));
+
         // Final pre-demo audit (2026-09-20) — a row for a learner outside
         // this section or a subject not applicable in this term is still
         // REFUSED (never written), but it used to be skipped silently while
@@ -128,6 +220,10 @@ class GradeController extends Controller
             }
 
             $saved++;
+            Grade::logOfficialCorrection(Grade::where([
+                'student_id' => $gradeData['student_id'], 'subject_id' => $gradeData['subject_id'], 'section_id' => $section->id,
+                'grading_period' => $request->grading_period, 'school_year' => $section->school_year,
+            ])->first(), $gradeData['grade'], 'Encode Grades');
             Grade::updateOrCreate(
                 [
                     'student_id'     => $gradeData['student_id'],
@@ -157,7 +253,7 @@ class GradeController extends Controller
             return $redirect->with(
                 $saved > 0 ? 'warning' : 'error',
                 'Saved ' . $saved . ' grade(s) for Term ' . $request->grading_period . '. ' . $refused
-                    . ' row(s) were not saved because the learner is not in your section or the subject is not applicable to it in this term.'
+                    . ' row(s) were not saved because the learner is not in your section, the subject is not applicable to it in this term, or you are not assigned to teach that subject.'
             );
         }
 
@@ -183,11 +279,17 @@ class GradeController extends Controller
             'file' => $this->spreadsheetFileRule(),
         ]);
 
-        $subjects = Subject::forSection($section, $gradingPeriod)->orderBy('type')->orderBy('name')->get();
+        // Only subjects this user is assigned to teach here and this term —
+        // a column for any other subject is reported as not applicable.
+        $subjects = Subject::forSection($section, $gradingPeriod)
+            ->whereIn('id', (new \App\Services\TeachingAccess())->editableSubjectIds(auth()->user(), $section, $gradingPeriod))
+            ->orderBy('type')->orderBy('name')->get();
         $students = Student::enrolledIn($section)->get();
 
         $import = new GradesImport($section->id, $gradingPeriod, $section->school_year, $subjects, $students);
-        Excel::import($import, $request->file('file'));
+        if ($unreadable = $this->importSpreadsheetOrRefuse($import, $request->file('file'))) {
+            return redirect()->route('adviser.grades', ['period' => $gradingPeriod])->with('error', $unreadable);
+        }
 
         LogActivity::log(
             action:      'import_grades',
@@ -218,15 +320,19 @@ class GradeController extends Controller
         $subjects = Subject::forSection($section, $gradingPeriod)->orderBy('type')->orderBy('name')->get();
         $students = Student::enrolledIn($section)->orderBy('last_name')->get();
 
-        $headers = array_merge(['lrn', 'last_name', 'first_name'], $subjects->pluck('name')->toArray());
+        // Names are free text: a leading = + - @ is neutralised exactly as
+        // the Class Record export does, so Excel never runs it as a formula.
+        // GradesImport accepts the escaped subject header on the way back.
+        $safe = fn($text) => \App\Services\ClassRecordService::safeText((string) $text);
+        $headers = array_merge(['lrn', 'last_name', 'first_name'], $subjects->pluck('name')->map($safe)->toArray());
 
-        return response()->streamDownload(function () use ($headers, $students, $subjects) {
+        return response()->streamDownload(function () use ($headers, $students, $subjects, $safe) {
             $handle = fopen('php://output', 'w');
             fputcsv($handle, $headers);
 
             foreach ($students as $student) {
                 $row = array_merge(
-                    [$student->lrn, $student->last_name, $student->first_name],
+                    [$student->lrn, $safe($student->last_name), $safe($student->first_name)],
                     array_fill(0, $subjects->count(), '') // blank grade cells to fill in
                 );
                 fputcsv($handle, $row);
@@ -239,7 +345,7 @@ class GradeController extends Controller
     /**
      * The missing half of CLAUDE.md's pipeline: "computed_grade ->
      * Adviser verification -> official grade." GradingEngine and the
-     * Performance Analysis table (adviser.assessments) could already
+     * verification table on Encode Grades (formerly adviser.assessments) could already
      * COMPUTE and DISPLAY a grade from assessment evidence, but nothing
      * ever turned that into an action — this is that action. The
      * adviser explicitly accepts a specific computed value; it is never
@@ -276,7 +382,30 @@ class GradeController extends Controller
             return $this->verifyFailureResponse($request, AcademicTerm::writeRefusalReason($section->school_year, $gradingPeriod));
         }
 
-        $outcome = $this->verifyOneGrade($student, $subject, $section, $gradingPeriod);
+        // One learner at a time, under a row lock, so a double-submitted or
+        // repeated request cannot write a second verification: a grade that
+        // is already verified with exactly the figures the evidence gives
+        // now is reported unchanged, with no write and no second log entry.
+        // A verified grade whose evidence CHANGED can still be re-verified
+        // individually (unchanged behaviour).
+        $outcome = DB::transaction(function () use ($student, $subject, $section, $gradingPeriod) {
+            Student::whereKey($student->id)->lockForUpdate()->first();
+            $existing = Grade::where('student_id', $student->id)->where('subject_id', $subject->id)
+                ->where('section_id', $section->id)->where('grading_period', $gradingPeriod)
+                ->where('school_year', $section->school_year)->first();
+            if ($existing && $existing->is_verified) {
+                $result = $this->gradingEngine->computeGrade($student, $subject, $section, $gradingPeriod, $section->school_year);
+                if ($result['complete'] && $result['transmuted_grade'] !== null
+                    && round((float) $existing->grade, 2) === round((float) $result['transmuted_grade'], 2)
+                    && round((float) $existing->computed_grade, 2) === round((float) $result['computed_grade'], 2)
+                    && (bool) $existing->is_provisional === (bool) $result['transmutation_provisional']) {
+                    return ['success' => true, 'unchanged' => true, 'result' => $result, 'is_provisional' => (bool) $existing->is_provisional, 'grade' => $existing,
+                        'message' => 'Already verified — the official grade for ' . $student->last_name . ', ' . $student->first_name . ' is ' . number_format((float) $existing->grade, 2) . '. Nothing changed.'];
+                }
+            }
+
+            return $this->verifyOneGrade($student, $subject, $section, $gradingPeriod);
+        }, 3); // a deadlock with a simultaneous verification is retried, never shown as an error
 
         if (!$outcome['success']) {
             return $this->verifyFailureResponse($request, $outcome['message']);
@@ -295,11 +424,12 @@ class GradeController extends Controller
                 'computed_grade' => $outcome['result']['computed_grade'],
                 'provisional'    => $outcome['is_provisional'],
                 'is_failing'     => \App\Services\InTermStatusService::isFailing($outcome['grade']),
+                'unchanged'      => $outcome['unchanged'] ?? false,
                 'message'        => $outcome['message'],
             ]);
         }
 
-        return redirect()->route('adviser.assessments', ['period' => $gradingPeriod, 'subject_id' => $subject->id])
+        return redirect()->to($this->verifyPageUrl($gradingPeriod, $subject->id, $request->input('status_filter'), $student->id))
             ->with('success', $outcome['message']);
     }
 
@@ -329,7 +459,9 @@ class GradeController extends Controller
         if (!$result['complete']) {
             return [
                 'success' => false,
-                'message' => 'Cannot verify — assessment evidence for ' . $subject->name . ' is not complete yet (a component has no scores).',
+                'message' => !empty($result['blockers'])
+                    ? 'Cannot verify ' . $subject->name . ' — ' . implode(' ', $result['blockers'])
+                    : 'Cannot verify — assessment evidence for ' . $subject->name . ' is not complete yet (a component has no scores).',
             ];
         }
 
@@ -488,8 +620,13 @@ class GradeController extends Controller
 
         return response()->json([
             'eligible_count'   => $classification['eligible']->count(),
+            // The exact target set shown in the confirmation; the batch
+            // refuses to run if the set it recomputes differs from it.
+            'eligible_student_ids' => $classification['eligible']->pluck('id')->map(fn($id) => (int) $id)->sort()->values()->all(),
+            'eligible_names'   => $this->namesOf($classification['eligible']),
             'subject_name'     => $subject->name,
             'section_name'     => $section->name,
+            'school_year'      => $section->school_year,
             'grading_period'   => $gradingPeriod,
             'term_open'        => AcademicTerm::acceptsWrites($section->school_year, $gradingPeriod),
             'excluded'         => [
@@ -526,17 +663,48 @@ class GradeController extends Controller
             return response()->json(['message' => AcademicTerm::writeRefusalReason($section->school_year, $gradingPeriod)], 422);
         }
 
-        $classification = $this->classifyForVerifyAll($section, $subject, $gradingPeriod);
-        $eligible = $classification['eligible'];
-
-        if ($eligible->isEmpty()) {
-            return response()->json(['message' => 'No students are currently eligible to verify.'], 422);
-        }
+        $request->validate([
+            'expected_student_ids'   => ['nullable', 'array'],
+            'expected_student_ids.*' => ['integer'],
+        ]);
+        // The confirmed target set (from the preview). It is never used to
+        // SELECT learners — only compared with the set recomputed under the
+        // lock, so a changed set stops the batch instead of silently
+        // growing or shrinking it. A caller that sends none keeps the old
+        // behaviour (verify whatever is eligible now).
+        $expected = $request->has('expected_student_ids')
+            ? collect($request->input('expected_student_ids', []))->map(fn($id) => (int) $id)->unique()->sort()->values()->all()
+            : null;
 
         $verifiedRows = [];
+        // Read the roster BEFORE the transaction: under MySQL's REPEATABLE
+        // READ the first plain read inside a transaction fixes its snapshot,
+        // so reading anything before the lock let a second, simultaneous
+        // batch wait for the lock and then still see "no grades yet" (final
+        // audit, 2026-09-28: a duplicate-key error reached the adviser).
+        $rosterIds = Student::enrolledIn($section)->pluck('id')->all();
 
         try {
-            DB::transaction(function () use ($eligible, $subject, $section, $gradingPeriod, &$verifiedRows) {
+            // 3 attempts: InnoDB can pick this batch as a deadlock victim against a
+            // simultaneous individual verify (pre-demo audit 2026-10-06,
+            // verify-race: 2 of 4 runs showed "database error"). The rollback
+            // is total, so a retry re-locks and re-classifies from scratch.
+            $refusal = DB::transaction(function () use ($subject, $section, $gradingPeriod, $expected, $rosterIds, &$verifiedRows) {
+                $verifiedRows = [];
+                // Serialise concurrent batches for this class: the lock is the
+                // transaction's FIRST read, then classify fresh under it.
+                Student::whereIn('id', $rosterIds)->lockForUpdate()->get();
+                $eligible = $this->classifyForVerifyAll($section, $subject, $gradingPeriod)['eligible'];
+
+                if ($eligible->isEmpty()) {
+                    return ['message' => 'No students are currently eligible to verify.', 'status' => 422];
+                }
+                $now = $eligible->pluck('id')->map(fn($id) => (int) $id)->sort()->values()->all();
+                if ($expected !== null && $now !== $expected) {
+                    return ['message' => 'The eligible learners changed since the confirmation was shown (' . count($expected) . ' then, '
+                        . count($now) . ' now). Nothing was verified — review the updated confirmation.', 'status' => 409, 'changed' => true];
+                }
+
                 foreach ($eligible as $student) {
                     $outcome = $this->verifyOneGrade($student, $subject, $section, $gradingPeriod);
 
@@ -555,7 +723,20 @@ class GradeController extends Controller
                         'is_failing'     => \App\Services\InTermStatusService::isFailing($outcome['grade']),
                     ];
                 }
-            });
+
+                return null;
+            }, 3);
+        } catch (\Illuminate\Database\UniqueConstraintViolationException $e) {
+            // Another verification of the same learners committed first.
+            // Everything this request wrote was rolled back; say so plainly.
+            return response()->json([
+                'message' => 'The eligible learners changed while verifying (another verification finished first). Nothing was verified by this request — review the updated confirmation.',
+                'changed' => true,
+            ], 409);
+        } catch (\Illuminate\Database\QueryException $e) {
+            report($e);
+
+            return response()->json(['message' => 'Verification stopped and nothing was saved because of a database error. Please try again.'], 422);
         } catch (\RuntimeException $e) {
             // 1e: a half-verified section is worse than an unverified one
             // — the transaction above already rolled back every write
@@ -563,6 +744,10 @@ class GradeController extends Controller
             return response()->json([
                 'message' => 'Verification stopped and nothing was saved — ' . $e->getMessage(),
             ], 422);
+        }
+
+        if ($refusal !== null) {
+            return response()->json(['message' => $refusal['message'], 'changed' => $refusal['changed'] ?? false], $refusal['status']);
         }
 
         return response()->json([
@@ -579,6 +764,10 @@ class GradeController extends Controller
             return response()->json(['message' => $message], 422);
         }
 
-        return back()->with('error', $message);
+        return redirect()->to($this->verifyPageUrl(
+            (int) $request->input('grading_period', 1),
+            $request->filled('subject_id') ? (int) $request->input('subject_id') : null,
+            $request->input('status_filter')
+        ))->with('error', $message);
     }
 }

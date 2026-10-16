@@ -10,10 +10,11 @@ class LogActivity
         string $action,
         string $description,
         ?string $tableName = null,
-        ?int $recordId = null
+        ?int $recordId = null,
+        ?int $userId = null,   // the acting user when it is not the logged-in one (a service called with an explicit actor)
     ): void {
         ActivityLog::create([
-            'user_id'    => auth()->id(),
+            'user_id'    => $userId ?? auth()->id(),
             'action'     => $action,
             'table_name' => $tableName,
             'record_id'  => $recordId,

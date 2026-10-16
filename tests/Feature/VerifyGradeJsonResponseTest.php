@@ -27,6 +27,7 @@ use Tests\TestCase;
 class VerifyGradeJsonResponseTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
 
     protected function setUp(): void
     {

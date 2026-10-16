@@ -3,7 +3,7 @@
 namespace App\Services;
 
 use App\Models\Grade;
-use App\Models\RiskResult;
+use App\Models\AcademicConcern;
 use App\Models\Section;
 use App\Models\Subject;
 use Illuminate\Support\Facades\DB;
@@ -33,7 +33,7 @@ class SubjectAnalysisService
      * @param ?int $term Grading period (1-3) — a subject's Term 1 numbers
      *        can look very different from Term 3's; null means every term
      *        this school year combined.
-     * @return array<int, array{subject: Subject, components: array, weakest_component: ?string, student_count: int, failure_rate: ?float, failing_count: int, graded_count: int, at_risk_count: int}>
+     * @return array<int, array{subject: Subject, components: array, weakest_component: ?string, student_count: int, failure_rate: ?float, failing_count: int, graded_count: int, open_concern_count: int, open_concern_learners: int}>
      */
     public function getSubjectSummaries(?string $schoolYear = null, ?int $sectionId = null, ?int $term = null, ?int $gradeLevel = null): array
     {
@@ -51,6 +51,9 @@ class SubjectAnalysisService
             ->where('assessments.school_year', $schoolYear)
             ->when($sectionIds !== null, fn($q) => $q->whereIn('assessments.section_id', $sectionIds))
             ->when($term, fn($q) => $q->where('assessments.grading_period', $term))
+            // A legacy item with no positive HPS has no percentage (x / 0 is
+            // NULL in SQL, which a cast would turn into a fabricated 0%).
+            ->where('assessments.max_score', '>', 0)
             ->select(
                 'assessments.subject_id',
                 'assessments.component',
@@ -65,14 +68,14 @@ class SubjectAnalysisService
             ->groupBy('assessments.subject_id', 'assessments.component')
             ->get();
 
-        // failure_rate/at_risk_count are computed from Grade/RiskResult, not
-        // assessment_scores — a subject can have failure/at-risk data even
-        // in a term with no component evidence rows above, so this must not
-        // bail out just because $rows is empty. Only the component-average
-        // half of the page is empty in that case.
+        // failure_rate and the open-concern counts are computed from Grade /
+        // academic_concerns, not assessment_scores — a subject can have
+        // either even in a term with no component evidence rows above, so
+        // this must not bail out just because $rows is empty. Only the
+        // component-average half of the page is empty in that case.
         $subjectIdsWithData = $rows->pluck('subject_id')
             ->merge($this->subjectIdsWithGrades($schoolYear, $sectionIds, $term))
-            ->merge($this->subjectIdsAtRisk($schoolYear, $sectionIds, $term))
+            ->merge($this->subjectIdsWithOpenConcerns($schoolYear, $sectionIds, $term))
             ->unique();
 
         if ($subjectIdsWithData->isEmpty()) {
@@ -82,12 +85,12 @@ class SubjectAnalysisService
         $bySubject = $rows->groupBy('subject_id');
         $belowTargetCounts = $this->getBelowTargetCounts($schoolYear, $sectionIds, $term);
         $failureStats = $this->getFailureStats($schoolYear, $sectionIds, $term);
-        $atRiskCounts = $this->getAtRiskCountsBySubject($schoolYear, $sectionIds, $term);
+        $openConcerns = $this->getOpenConcernCountsBySubject($schoolYear, $sectionIds, $term);
 
         return Subject::whereIn('id', $subjectIdsWithData)
             ->orderBy('name')
             ->get()
-            ->map(function ($subject) use ($bySubject, $belowTargetCounts, $failureStats, $atRiskCounts) {
+            ->map(function ($subject) use ($bySubject, $belowTargetCounts, $failureStats, $openConcerns) {
                 $componentRows = $bySubject->get($subject->id, collect())->keyBy('component');
 
                 $components = [];
@@ -125,13 +128,14 @@ class SubjectAnalysisService
                     'failure_rate'       => $stats['graded_count'] > 0
                         ? round(($stats['failing_count'] / $stats['graded_count']) * 100, 1)
                         : null,
-                    // How many students are at Moderate/High risk with THIS
-                    // subject as their weakest — same "latest risk result
-                    // per student this school year" query
-                    // DashboardAnalyticsService::getSummaryData() uses, so
-                    // this can't silently disagree with the Principal
-                    // dashboard's own risk distribution.
-                    'at_risk_count'      => $atRiskCounts[$subject->id] ?? 0,
+                    // Open Academic Concerns (approved monitoring rules —
+                    // today the explicit Missing requirement) in this
+                    // subject and scope, and how many learners they cover.
+                    // Observable evidence, never a prediction.
+                    'open_concern_count'    => $openConcerns[$subject->id]['concerns'] ?? 0,
+                    'open_concern_learners' => $openConcerns[$subject->id]['learners'] ?? 0,
+                    'open_subject_performance' => $openConcerns[$subject->id]['subject_performance'] ?? 0,
+                    'open_missing'             => $openConcerns[$subject->id]['missing'] ?? 0,
                 ];
             })
             ->values()
@@ -140,7 +144,7 @@ class SubjectAnalysisService
 
     /**
      * Subjects OFFERED in the selected scope that have no evidence, grades,
-     * or risk results yet — listed so the Principal can tell "offered but
+     * or open concerns yet — listed so the Principal can tell "offered but
      * nothing recorded" apart from "not offered this term". Only
      * answerable for one section and one term (an offering is per section
      * per term); null otherwise.
@@ -198,12 +202,10 @@ class SubjectAnalysisService
             ->pluck('subject_id');
     }
 
-    /** Subject ids that are some student's weakest-subject this scope. */
-    private function subjectIdsAtRisk(string $schoolYear, ?array $sectionIds, ?int $term): \Illuminate\Support\Collection
+    /** Subject ids with at least one OPEN academic concern in this scope. */
+    private function subjectIdsWithOpenConcerns(string $schoolYear, ?array $sectionIds, ?int $term): \Illuminate\Support\Collection
     {
-        return $this->latestRiskResultsQuery($schoolYear, $sectionIds, $term)
-            ->whereNotNull('weakest_subject_id')
-            ->pluck('weakest_subject_id');
+        return $this->openConcernsQuery($schoolYear, $sectionIds, $term)->distinct()->pluck('subject_id');
     }
 
     /**
@@ -237,47 +239,46 @@ class SubjectAnalysisService
         return $stats;
     }
 
-    /** @return array<int, int> [subject_id => count of students at moderate/high risk with this subject weakest] */
-    private function getAtRiskCountsBySubject(string $schoolYear, ?array $sectionIds, ?int $term): array
+    /**
+     * @return array<int, array{concerns: int, learners: int, subject_performance: int, missing: int}>
+     *         [subject_id => open concern and learner counts, split by concern type]
+     */
+    private function getOpenConcernCountsBySubject(string $schoolYear, ?array $sectionIds, ?int $term): array
     {
-        return $this->latestRiskResultsQuery($schoolYear, $sectionIds, $term)
-            ->whereNotNull('weakest_subject_id')
-            ->whereIn('risk_level', ['moderate', 'high'])
-            ->select('weakest_subject_id', DB::raw('COUNT(*) as at_risk_count'))
-            ->groupBy('weakest_subject_id')
-            ->pluck('at_risk_count', 'weakest_subject_id')
-            ->map(fn($count) => (int) $count)
+        return $this->openConcernsQuery($schoolYear, $sectionIds, $term)
+            ->select('subject_id', DB::raw('COUNT(*) as concerns'), DB::raw('COUNT(DISTINCT student_id) as learners'))
+            ->selectRaw('SUM(CASE WHEN rule_key = ? THEN 1 ELSE 0 END) as subject_performance', [\App\Monitoring\Rules\OfficialFailingSubjectRule::KEY])
+            ->selectRaw('SUM(CASE WHEN rule_key = ? THEN 1 ELSE 0 END) as missing', [\App\Monitoring\Rules\MissingRequirementRule::KEY])
+            ->groupBy('subject_id')
+            ->get()
+            ->mapWithKeys(fn($row) => [(int) $row->subject_id => [
+                'concerns' => (int) $row->concerns, 'learners' => (int) $row->learners,
+                'subject_performance' => (int) $row->subject_performance, 'missing' => (int) $row->missing,
+            ]])
             ->all();
     }
 
     /**
-     * Latest risk result per student this school year — same pattern as
-     * DashboardAnalyticsService::getSummaryData(), so the Principal
-     * dashboard's own risk distribution and this page's at-risk-by-subject
-     * counts read from the same underlying rows, not two independent
-     * queries that could silently disagree. $term filters by
-     * grading_period directly (a RiskResult IS scoped to one term); a
-     * section filter reads risk_results.section_id — the section the
-     * learner was in when the result was generated ("Multi-school-year
-     * academic history", PART 11) — never students.section_id, which is
-     * only the learner's CURRENT placement and would mis-scope a
-     * historical year after promotion.
+     * OPEN academic concerns in the selected scope — the rule-based
+     * monitoring source of truth. Each concern stores the section, term and
+     * year it was raised in, so a historical year stays correctly scoped
+     * after promotion.
      */
-    private function latestRiskResultsQuery(string $schoolYear, ?array $sectionIds, ?int $term)
+    private function openConcernsQuery(string $schoolYear, ?array $sectionIds, ?int $term)
     {
-        $latestIds = RiskResult::where('school_year', $schoolYear)
-            ->when($term, fn($q) => $q->where('grading_period', $term))
-            ->selectRaw('MAX(id) as id')
-            ->groupBy('student_id')
-            ->pluck('id');
-
-        return RiskResult::whereIn('id', $latestIds)
-            ->when($sectionIds !== null, fn($q) => $q->whereIn('section_id', $sectionIds));
+        // Active rules only (a retired rule's rows — the legacy Attendance
+        // Concern — are history), and only concerns tied to a subject.
+        return AcademicConcern::where('status', AcademicConcern::STATUS_OPEN)
+            ->activeRules()
+            ->whereNotNull('subject_id')
+            ->where('school_year', $schoolYear)
+            ->when($sectionIds !== null, fn($q) => $q->whereIn('section_id', $sectionIds))
+            ->when($term, fn($q) => $q->where('grading_period', $term));
     }
 
     /**
-     * Per-student, per-component totals (SUM earned / SUM max — the same
-     * aggregation GradingEngine uses, unlike getSubjectSummaries()'s own
+     * Per-student, per-component totals (SUM earned / SUM of every item's
+     * HPS — the same aggregation GradingEngine uses for WW/PT, unlike getSubjectSummaries()'s own
      * AVG-of-item-percentages above, which is a subject-wide summary
      * only) — grouped down to one query so counting "how many students
      * are below target" never turns into a per-student loop.
@@ -294,15 +295,38 @@ class SubjectAnalysisService
             ->select(
                 'assessments.subject_id',
                 'assessments.component',
+                'assessments.section_id',
+                'assessments.grading_period',
                 'assessment_scores.student_id',
                 DB::raw('SUM(assessment_scores.score) as earned'),
-                DB::raw('SUM(assessments.max_score) as max_total')
+                DB::raw('SUM(CASE WHEN assessments.is_additional_support THEN assessments.max_score ELSE 0 END) as support_hps')
             )
-            ->groupBy('assessments.subject_id', 'assessments.component', 'assessment_scores.student_id')
+            ->groupBy('assessments.subject_id', 'assessments.component', 'assessments.section_id', 'assessments.grading_period', 'assessment_scores.student_id')
             ->get();
 
-        $counts = [];
+        // The workbook denominator (D1, 2026-10-04): the HPS of EVERY item in
+        // the learner's class/term/component, scored or not — as GradingEngine.
+        $hpsTotals = DB::table('assessments')->where('school_year', $schoolYear)->where('is_additional_support', false)
+            ->when($sectionIds !== null, fn($q) => $q->whereIn('section_id', $sectionIds))
+            ->when($term, fn($q) => $q->where('grading_period', $term))
+            ->selectRaw('subject_id, section_id, grading_period, component, SUM(max_score) as hps')
+            ->groupBy('subject_id', 'section_id', 'grading_period', 'component')->get()
+            ->mapWithKeys(fn($r) => ["{$r->subject_id}|{$r->section_id}|{$r->grading_period}|{$r->component}" => (float) $r->hps]);
+
+        $totals = [];
         foreach ($perStudentTotals as $row) {
+            $key = "{$row->subject_id}|{$row->component}|{$row->student_id}";
+            $totals[$key]['subject_id'] = $row->subject_id;
+            $totals[$key]['component'] = $row->component;
+            $totals[$key]['earned'] = ($totals[$key]['earned'] ?? 0.0) + (float) $row->earned;
+            $totals[$key]['max_total'] = ($totals[$key]['max_total'] ?? 0.0)
+                + ($hpsTotals["{$row->subject_id}|{$row->section_id}|{$row->grading_period}|{$row->component}"] ?? 0.0)
+                + (float) $row->support_hps; // support items: only for the learners scored on them
+        }
+
+        $counts = [];
+        foreach ($totals as $row) {
+            $row = (object) $row;
             if ($row->max_total <= 0) {
                 continue;
             }

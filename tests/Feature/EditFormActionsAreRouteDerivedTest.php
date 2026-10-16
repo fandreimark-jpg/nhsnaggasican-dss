@@ -19,6 +19,7 @@ use Tests\TestCase;
 class EditFormActionsAreRouteDerivedTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
 
     public function test_every_admin_edit_form_carries_a_route_derived_update_url(): void
     {
@@ -39,14 +40,18 @@ class EditFormActionsAreRouteDerivedTest extends TestCase
         }
     }
 
-    public function test_the_adviser_edit_student_form_carries_a_route_derived_update_url(): void
+    /**
+     * The adviser Edit Student form was REMOVED 2026-09-27 (learner records
+     * are Admin-owned master data) — there is no update URL left to derive.
+     */
+    public function test_the_adviser_students_page_has_no_edit_form_or_update_route(): void
     {
+        $this->assertFalse(\Illuminate\Support\Facades\Route::has('adviser.students.update'));
         $adviser = User::factory()->create();
         $html = $this->actingAs($adviser)->get('/adviser/students')->assertOk()->getContent();
-        $this->assertStringContainsString(
-            'data-update-url="' . route('adviser.students.update', ['id' => '__ID__']) . '"',
-            $html
-        );
+        $this->assertStringNotContainsString('editStudentForm', $html);
+        $this->assertStringNotContainsString('data-update-url', $html);
+        $this->assertStringNotContainsString('editStudentForm', file_get_contents(resource_path('js/modal.js')));
     }
 
     public function test_modal_js_no_longer_hardcodes_any_root_relative_form_action(): void
@@ -54,5 +59,95 @@ class EditFormActionsAreRouteDerivedTest extends TestCase
         $js = file_get_contents(resource_path('js/modal.js'));
         $this->assertDoesNotMatchRegularExpression('/\.action\s*=\s*`\//', $js);
         $this->assertStringContainsString('window.updateUrlFor', $js);
+    }
+
+    /**
+     * The Edit Assessment modal was replaced by a full page: the Class Record
+     * links to it, and its form posts to the route-derived update URL — never
+     * a hard-coded path (the old modal's `.action = '/adviser/assessments/item/'`
+     * posted outside the app under the XAMPP sub-directory and 404'd).
+     */
+    public function test_the_adviser_edit_assessment_item_form_carries_a_route_derived_update_url(): void
+    {
+        [$adviser, $subject] = $this->adviserWithAnAssessmentItem();
+        $item = \App\Models\Assessment::where('subject_id', $subject->id)->firstOrFail();
+
+        $record = $this->actingAs($adviser)
+            ->get(route('teacher.class-record', ['section_id' => $item->section_id, 'subject_id' => $subject->id, 'period' => 1]))
+            ->assertOk()
+            ->getContent();
+        $this->assertStringContainsString('href="' . route('teacher.assessments.edit', $item->id) . '"', $record);
+
+        $form = $this->actingAs($adviser)->get(route('teacher.assessments.edit', $item->id))->assertOk()->getContent();
+        $this->assertStringContainsString('action="' . route('teacher.assessments.update', $item->id) . '"', $form);
+        $this->assertStringNotContainsString("'/teacher/assessments/'", $form);
+    }
+
+    public function test_the_edit_assessment_item_url_follows_a_sub_directory_base_url(): void
+    {
+        [$adviser, $subject] = $this->adviserWithAnAssessmentItem();
+        $item = \App\Models\Assessment::where('subject_id', $subject->id)->firstOrFail();
+
+        // The request exactly as Apache hands a sub-directory install to
+        // public/index.php. Laravel derives the base path from the request
+        // (SCRIPT_NAME), as it does under XAMPP; the view supplies none of
+        // it. Any host works — nothing here depends on localhost.
+        $html = $this->actingAs($adviser)
+            ->withServerVariables([
+                'SCRIPT_NAME'     => '/naggasican-dss/public/index.php',
+                'SCRIPT_FILENAME' => public_path('index.php'),
+                'PHP_SELF'        => '/naggasican-dss/public/index.php',
+            ])
+            ->get('http://school.example/naggasican-dss/public/teacher/assessments/' . $item->id . '/edit')
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringContainsString(
+            'action="http://school.example/naggasican-dss/public/teacher/assessments/' . $item->id . '"',
+            $html
+        );
+    }
+
+    /**
+     * Guards every Blade view and every JS source, not only modal.js: no
+     * form action may be set from a root-relative app path in any quote
+     * style ('/…', "/…" or `/…`).
+     */
+    public function test_no_view_or_script_sets_a_form_action_from_a_root_relative_path(): void
+    {
+        $files = array_merge(
+            glob(resource_path('js/*.js')),
+            \Illuminate\Support\Facades\File::allFiles(resource_path('views'))
+        );
+
+        $offenders = [];
+        foreach ($files as $file) {
+            $path = (string) $file;
+            if (preg_match('/\.action\s*=\s*[\'"`]\//', file_get_contents($path))) {
+                $offenders[] = str_replace(base_path() . DIRECTORY_SEPARATOR, '', $path);
+            }
+        }
+
+        $this->assertSame([], $offenders, 'Set form actions with window.updateUrlFor() and a route()-rendered data-update-url.');
+    }
+
+    /** @return array{0: User, 1: \App\Models\Subject} */
+    private function adviserWithAnAssessmentItem(): array
+    {
+        \App\Models\AcademicYear::create(['school_year' => '2026-2027', 'is_active' => true]);
+        \App\Models\AcademicTerm::ensureExistFor('2026-2027');
+        \App\Models\AcademicTerm::where('school_year', '2026-2027')->where('term', 1)->update(['is_open' => true]);
+
+        $adviser = User::factory()->create(['role' => 'adviser']);
+        $section = \App\Models\Section::factory()->create([
+            'grade_level' => 11, 'school_year' => '2026-2027', 'curriculum' => 'sshs', 'adviser_id' => $adviser->id,
+        ]);
+        $subject = \App\Models\Subject::factory()->create(['type' => 'core', 'grade_level' => 11, 'subject_group' => 'core_academic']);
+        \App\Models\Assessment::factory()->create([
+            'subject_id' => $subject->id, 'section_id' => $section->id, 'grading_period' => 1,
+            'school_year' => '2026-2027', 'uploaded_by' => $adviser->id,
+        ]);
+
+        return [$adviser, $subject];
     }
 }

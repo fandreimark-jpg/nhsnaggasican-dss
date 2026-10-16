@@ -83,13 +83,19 @@ class CrossSectionAccessTest extends TestCase
         $service = new \App\Services\AssessmentUploadService();
         $upload  = \App\Models\AssessmentUpload::factory()->create();
 
-        $result = $service->import(
-            $path, ['Quiz 1' => ['component' => 'written_work', 'max_score' => 20]],
-            $sectionA, $subject, 1, '2026-2027', $adviserA->id, $upload
-        );
+        // Another section's learner never matches; since the row carries a
+        // score, the whole file is refused before anything is written.
+        try {
+            $service->import(
+                $path, ['Quiz 1' => ['component' => 'written_work', 'max_score' => 20]],
+                $sectionA, $subject, 1, '2026-2027', $adviserA->id, $upload
+            );
+            $this->fail('The file should have been refused.');
+        } catch (\App\Exceptions\AssessmentImportBlockedException $e) {
+            $this->assertCount(1, $e->problems());
+            $this->assertStringContainsString('100000000099 is not enrolled in this section', $e->problems()[0]);
+        }
 
-        $this->assertSame(0, $result['imported']);
-        $this->assertCount(1, $result['errors']);
         $this->assertDatabaseMissing('assessment_scores', ['student_id' => $otherStudent->id]);
 
         @unlink($path);

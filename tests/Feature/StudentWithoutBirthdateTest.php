@@ -61,7 +61,7 @@ class StudentWithoutBirthdateTest extends TestCase
         $this->assertDatabaseHas('students', ['lrn' => '100000000302']);
     }
 
-    public function test_admin_and_adviser_can_edit_a_student_without_birthdate(): void
+    public function test_admin_can_edit_a_student_without_birthdate_and_the_adviser_cannot_edit_at_all(): void
     {
         $admin   = User::factory()->admin()->create();
         $adviser = User::factory()->create();
@@ -74,10 +74,11 @@ class StudentWithoutBirthdateTest extends TestCase
         ])->assertSessionHasNoErrors();
         $this->assertSame('AdminEdited', $student->fresh()->first_name);
 
+        // Learner master data is Admin-only since 2026-09-27.
         $this->actingAs($adviser)->put('/adviser/students/' . $student->id, [
             'last_name' => $student->last_name, 'first_name' => 'AdviserEdited', 'middle_name' => '', 'gender' => 'male',
-        ])->assertSessionHasNoErrors();
-        $this->assertSame('AdviserEdited', $student->fresh()->first_name);
+        ])->assertNotFound();
+        $this->assertSame('AdminEdited', $student->fresh()->first_name);
     }
 
     public function test_csv_learner_import_works_with_the_five_column_format(): void

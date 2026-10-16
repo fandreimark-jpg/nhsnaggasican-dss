@@ -74,22 +74,10 @@ class AssessmentItemConflictDetector
             return [];
         }
 
-        // Every item under this exact identity scope, keyed by the same
-        // name comparison import()'s match resolves to on the live
-        // database. Another subject, section, term or year is a different
-        // item by definition and is never loaded here.
-        $existingByName = Assessment::query()
-            ->where('subject_id', $subject->id)
-            ->where('section_id', $section->id)
-            ->where('grading_period', $gradingPeriod)
-            ->where('school_year', $schoolYear)
-            ->get()
-            ->keyBy(fn(Assessment $a) => self::normalizeName($a->name));
-
-        $conflicts = [];
+        ['targets' => $targets, 'conflicts' => $conflicts] = $this->resolve($section, $subject, $gradingPeriod, $schoolYear, $columnMapping);
 
         foreach ($columnMapping as $name => $col) {
-            $existing = $existingByName->get(self::normalizeName((string) $name));
+            $existing = $targets[(string) $name] ?? null;
             if (!$existing) {
                 continue; // a new item — nothing to protect yet
             }
@@ -130,6 +118,91 @@ class AssessmentItemConflictDetector
         }
 
         return $conflicts;
+    }
+
+    /**
+     * Which stored item each upload column lands on (null = a new item) —
+     * the SAME answer import() writes to, so what Preview compared is what
+     * gets written.
+     *
+     * 1. An item with the same name (case-insensitive) — as before.
+     * 2. Otherwise, for a REGULAR Examination column with a role, the one
+     *    regular item already holding that role: the role is the identity,
+     *    not the name. A manual "Summative Test 1" and a Grade 12 ECR "ST1"
+     *    column are the same ST1, never two (ExaminationRoles).
+     *
+     * @return array<string, ?Assessment> keyed by column name
+     */
+    public function targets(Section $section, Subject $subject, int $gradingPeriod, string $schoolYear, array $columnMapping): array
+    {
+        return $this->resolve($section, $subject, $gradingPeriod, $schoolYear, $columnMapping)['targets'];
+    }
+
+    /**
+     * @return array{targets: array<string, ?Assessment>, conflicts: list<array>}
+     */
+    private function resolve(Section $section, Subject $subject, int $gradingPeriod, string $schoolYear, array $columnMapping): array
+    {
+        // Every item under this exact identity scope. Another subject,
+        // section, term or year is a different item by definition and is
+        // never loaded here.
+        $items = Assessment::query()
+            ->where('subject_id', $subject->id)
+            ->where('section_id', $section->id)
+            ->where('grading_period', $gradingPeriod)
+            ->where('school_year', $schoolYear)
+            ->orderBy('id')
+            ->get();
+        $byName = $items->keyBy(fn(Assessment $a) => self::normalizeName($a->name));
+        $regularByRole = $items
+            ->filter(fn(Assessment $a) => $a->component === 'examination' && $a->exam_role !== null && !$a->is_additional_support)
+            ->groupBy('exam_role');
+
+        $targets = [];
+        $conflicts = [];
+        $claimedRoles = [];
+
+        foreach ($columnMapping as $name => $col) {
+            $name = (string) $name;
+            $incoming = self::normalize($col);
+            $role = !$incoming['is_additional_support'] ? $incoming['exam_role'] : null;
+
+            $target = $byName->get(self::normalizeName($name));
+            if (!$target && $role !== null) {
+                $holders = $regularByRole->get($role, collect());
+                if ($holders->count() > 1) {
+                    $conflicts[] = $this->slotConflict($name, $role, 'Existing items ' . $holders->pluck('name')->map(fn($n) => "'{$n}'")->implode(' and ')
+                        . ' both hold ' . self::label('exam_role', $role) . ", so column '{$name}' cannot be matched to one of them. Correct the existing items first.");
+                }
+                $target = $holders->count() === 1 ? $holders->first() : null;
+            }
+            $targets[$name] = $target;
+
+            if ($role !== null) {
+                if (isset($claimedRoles[$role])) {
+                    $conflicts[] = $this->slotConflict($name, $role, "Columns '{$claimedRoles[$role]}' and '{$name}' are both classified as "
+                        . self::label('exam_role', $role) . '. Each Examination Type appears once per term — classify one of them differently.');
+                }
+                $claimedRoles[$role] ??= $name;
+            }
+        }
+
+        return ['targets' => $targets, 'conflicts' => $conflicts];
+    }
+
+    private function slotConflict(string $item, string $role, string $message): array
+    {
+        return [
+            'item'           => $item,
+            'field'          => 'exam_role',
+            'field_label'    => self::FIELD_LABELS['exam_role'],
+            'stored'         => $role,
+            'incoming'       => $role,
+            'stored_label'   => self::label('exam_role', $role),
+            'incoming_label' => self::label('exam_role', $role),
+            'message'        => $message,
+            'slot'           => true,
+        ];
     }
 
     /**

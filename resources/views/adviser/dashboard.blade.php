@@ -62,16 +62,14 @@
 </div>
 
 @include('partials.transmutation-fallback-banner')
-@include('partials.stale-risk-warning')
 
 @php
     $inTermStatusColors = ['On Track' => 'bg-status-ontrack/10 text-status-ontrack', 'Needs Attention' => 'bg-status-attention/10 text-status-attention', 'At Risk' => 'bg-status-risk/10 text-status-risk'];
-    $riskLevelColors = ['low' => 'bg-status-ontrack/10 text-status-ontrack', 'moderate' => 'bg-status-attention/10 text-status-attention', 'high' => 'bg-status-risk/10 text-status-risk'];
     $componentLabels = ['written_work' => 'Written Work', 'performance_task' => 'Performance Task', 'examination' => 'Examination'];
     // TASK 1 of "terminology, transmutation, and interface cleanup" —
     // see the same map on the Interventions pages: 'remediation' is a
     // within-term action here, not DepEd's formal post-term remediation.
-    $ivTypeLabels = ['remediation' => 'Additional Practice and Re-teaching'];
+    $ivTypeLabels = \App\Models\Intervention::TYPE_LABELS;
 @endphp
 
 {{-- "Decision flow, report scoping, and dashboard pass" TASK 5b — a
@@ -98,14 +96,14 @@
             'count' => $subjectsWithIncompleteEvidence->count(),
             'label' => 'subject' . ($subjectsWithIncompleteEvidence->count() === 1 ? '' : 's') . ' with incomplete assessment evidence in Term ' . $openTerm,
             'description' => 'A component still has no scored items, so grades cannot be computed yet.',
-            'link'  => route('adviser.assessments'),
-            'icon'  => 'bi-clipboard-data', 'tone' => 'warning', 'cta' => 'Upload assessments',
+            'link'  => route('adviser.advisory-overview', ['period' => $openTerm]),
+            'icon'  => 'bi-clipboard-data', 'tone' => 'warning', 'cta' => 'Review in Advisory Overview',
         ],
         [
             'count' => $gradesComputedNotVerified,
             'label' => 'grade' . ($gradesComputedNotVerified === 1 ? '' : 's') . ' computed but not yet verified',
             'description' => 'Computed from evidence — review and verify before submission.',
-            'link'  => route('adviser.assessments'),
+            'link'  => route('adviser.verify-grades', ['period' => $openTerm]),
             'icon'  => 'bi-patch-check', 'tone' => 'info', 'cta' => 'Verify grades',
         ],
     ])->filter(fn($item) => $item['count'] > 0)->values();
@@ -138,9 +136,9 @@
 </div>
 
 <details class="mb-6 text-xs text-gray-500">
-    <summary class="cursor-pointer select-none font-medium text-gray-600 px-1">What's the difference between In-Term Status and Risk Level?</summary>
+    <summary class="cursor-pointer select-none font-medium text-gray-600 px-1">What's the difference between In-Term Status and an Academic Concern?</summary>
     <div class="mt-2">
-        @include('partials.in-term-vs-risk-help')
+        @include('partials.in-term-status-help')
     </div>
 </details>
 
@@ -281,15 +279,18 @@
      of "No data — Submit report to generate" on every row. --}}
 <x-panel title="My Students">
     <x-slot:subtitle>
-        Overall In-Term Status — Term {{ $openTerm }}, combining every subject this section takes into one worst-case status per student
+        Term {{ $openTerm }} — <strong>Academic Performance</strong> (worst in-term status, combining every subject this section takes) and
+        <strong>Monitoring</strong> (open Academic Concerns, evaluated subject by subject) are shown separately: a learner can be
+        On Track academically and still For Review.
         {{-- TASK 5c of "clarity, progress, and visual design pass" — the
              whole picture without scrolling, since the table below now
              shows only the top 10 highest-priority rows. --}}
         @if($students->isNotEmpty())
         <span class="block text-xs text-gray-500 mt-1">
-            <span class="text-status-risk font-medium">{{ $inTermStatusCounts['At Risk'] }} At Risk</span>,
-            <span class="text-status-attention font-medium">{{ $inTermStatusCounts['Needs Attention'] }} Needs Attention</span>,
+            <span class="text-status-risk font-medium">{{ $inTermStatusCounts['At Risk'] }} Below Target: 2+ Components</span>,
+            <span class="text-status-attention font-medium">{{ $inTermStatusCounts['Needs Attention'] }} Below Target: 1 Component</span>,
             <span class="text-status-ontrack font-medium">{{ $inTermStatusCounts['On Track'] }} On Track</span>
+            · <span class="font-medium text-amber-700" data-learners-for-review>{{ $learnersForReview }} For Review</span> (monitoring)
         </span>
         @endif
     </x-slot:subtitle>
@@ -302,10 +303,10 @@
     <p class="text-xs text-gray-500">
         <strong>Overall In-Term Status</strong> is the WORST status among every subject with evidence so far this
         term — one weak subject is enough to flag a student here, even if their other subjects are fine. Click a
-        student's name for the subject-by-subject breakdown, or see the
-        <a href="{{ route('adviser.assessments') }}" class="text-brand-700 underline hover:text-brand-800">Assessments</a>
-        page for one subject at a time. <strong>Risk Level</strong> appears once the adviser submits the term report;
-        until then it shows "Not yet available."
+        student's name for the subject-by-subject breakdown, see the
+        <a href="{{ route('adviser.advisory-overview') }}" class="text-brand-700 underline hover:text-brand-800">Advisory Overview</a>
+        for every subject at once, or open a subject's
+        <a href="{{ route('teacher.class-record') }}" class="text-brand-700 underline hover:text-brand-800">Class Record</a>.
     </p>
     {{-- TASK 1 of "status clarity and progress consistency" — the status
          badge below is based on the WORST subject's Computed grade, not
@@ -334,10 +335,11 @@
         <thead>
             <tr>
                 <th scope="col">Student</th>
-                <th scope="col">Overall In-Term Status</th>
+                <th scope="col">Academic Performance
+                    <span class="block normal-case font-normal text-gray-400 text-[10px] tracking-normal">all subjects, in-term evidence</span></th>
+                <th scope="col">Monitoring
+                    <span class="block normal-case font-normal text-gray-400 text-[10px] tracking-normal">open concerns</span></th>
                 <th scope="col">Focus Area</th>
-                <th scope="col" class="text-center">Risk Level</th>
-                <th scope="col" class="text-center">Trend</th>
             </tr>
         </thead>
         <tbody>
@@ -349,6 +351,7 @@
                     'by_subject'   => collect($row['by_subject'])->map(fn($bs) => [
                         'subject_name' => $bs['subject']->name,
                         'status'       => $bs['status']['status'],
+                        'status_label' => \App\Services\InTermStatusService::label($bs['status']['status']),
                         'item_count'   => $bs['status']['item_count'],
                     ])->values(),
                 ];
@@ -367,6 +370,9 @@
                         <span class="text-xs text-gray-300">No evidence yet</span>
                     @endif
                 </td>
+                <td data-monitoring-cell>
+                    <x-ui.monitoring-status :status="$monitoringByStudentId->get($row['student']->id)" />
+                </td>
                 <td>
                     @if($row['focus_subject'] && $row['in_term_status']['weakest_component'] ?? null)
                         <span class="badge bg-status-risk/10 text-status-risk">
@@ -377,31 +383,10 @@
                         <span class="text-xs text-gray-300">—</span>
                     @endif
                 </td>
-                <td class="text-center">
-                    @if($row['risk_level'])
-                        <span class="badge {{ $riskLevelColors[$row['risk_level']] ?? 'bg-gray-100 text-gray-600' }}">
-                            {{ ucfirst($row['risk_level']) }}
-                        </span>
-                    @else
-                        <span class="text-xs text-gray-300">Not yet available</span>
-                    @endif
-                </td>
-                <td class="text-center">
-                    @php $trend = $trends[$row['student']->id] ?? null; @endphp
-                    @if($trend === 'improving')
-                        <span class="text-xs text-green-600 font-medium">&uarr; Improving</span>
-                    @elseif($trend === 'declining')
-                        <span class="text-xs text-red-600 font-medium">&darr; Declining</span>
-                    @elseif($trend === 'stable')
-                        <span class="text-xs text-gray-500 font-medium">&rarr; Stable</span>
-                    @else
-                        <span class="text-xs text-gray-300">—</span>
-                    @endif
-                </td>
             </tr>
             @empty
             <tr>
-                <td colspan="5">
+                <td colspan="4">
                     <x-empty-state message="No students in this section yet." hint="An Admin adds students and assigns them to your section." />
                 </td>
             </tr>
@@ -472,7 +457,7 @@
 
                 const badge = document.createElement('span');
                 badge.className = 'badge ' + (SSM_STATUS_COLORS[bs.status] || 'bg-gray-100 text-gray-600');
-                badge.textContent = bs.status;
+                badge.textContent = bs.status_label || bs.status;
                 wrap.appendChild(badge);
 
                 const count = document.createElement('span');

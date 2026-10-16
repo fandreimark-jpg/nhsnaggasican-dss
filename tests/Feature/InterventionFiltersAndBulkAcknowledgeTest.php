@@ -146,37 +146,6 @@ class InterventionFiltersAndBulkAcknowledgeTest extends TestCase
         $response->assertDontSee('Santos');
     }
 
-    /** SYSTEM_FIXES_AND_ML_AUDIT.md, "Interventions" -- Risk Level filter, reading the linked risk_result. */
-    public function test_principal_interventions_filtering_by_risk_level_narrows_correctly(): void
-    {
-        $principal = User::factory()->principal()->create();
-        ['section' => $section, 'subjectA' => $subjectA] = $this->makeAdviserSection();
-        $highRiskStudent = Student::factory()->create(['section_id' => $section->id, 'last_name' => 'HighRiskStudent']);
-        $lowRiskStudent = Student::factory()->create(['section_id' => $section->id, 'last_name' => 'LowRiskStudent']);
-        $noRiskResultStudent = Student::factory()->create(['section_id' => $section->id, 'last_name' => 'NoRiskResultStudent']);
-
-        $highRisk = \App\Models\RiskResult::create([
-            'student_id' => $highRiskStudent->id, 'grading_period' => 1, 'average_grade' => 60,
-            'risk_level' => 'high', 'school_year' => '2026-2027', 'generated_at' => now(),
-        ]);
-        $lowRisk = \App\Models\RiskResult::create([
-            'student_id' => $lowRiskStudent->id, 'grading_period' => 1, 'average_grade' => 95,
-            'risk_level' => 'low', 'school_year' => '2026-2027', 'generated_at' => now(),
-        ]);
-
-        Intervention::factory()->create(['student_id' => $highRiskStudent->id, 'subject_id' => $subjectA->id, 'risk_result_id' => $highRisk->id]);
-        Intervention::factory()->create(['student_id' => $lowRiskStudent->id, 'subject_id' => $subjectA->id, 'risk_result_id' => $lowRisk->id]);
-        // No risk result at all -- must be excluded when the filter is active, not guessed into a bucket.
-        Intervention::factory()->create(['student_id' => $noRiskResultStudent->id, 'subject_id' => $subjectA->id, 'risk_result_id' => null]);
-
-        $response = $this->actingAs($principal)->get('/principal/interventions?risk_level=high');
-
-        $response->assertOk();
-        $response->assertSee('HighRiskStudent');
-        $response->assertDontSee('LowRiskStudent');
-        $response->assertDontSee('NoRiskResultStudent');
-    }
-
     /**
      * TASK 4 — bulk acknowledge respects whatever filter is active: only
      * the filtered-in rows are stamped, everything else stays untouched.

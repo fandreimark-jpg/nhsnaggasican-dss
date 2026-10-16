@@ -59,7 +59,7 @@ class LoginRequest extends FormRequest
         // AFTER the password is verified, not before, so a disabled
         // account's existence/status is never revealed to someone who
         // doesn't actually know its password.
-        if (! Auth::user()->isActive() || !in_array(Auth::user()->role, ['admin', 'adviser', 'principal'], true)) {
+        if (! Auth::user()->isActive() || !in_array(Auth::user()->role, \App\Models\User::ROLES, true)) {
             Auth::guard('web')->logout();
             $this->session()->invalidate();
             $this->session()->regenerateToken();

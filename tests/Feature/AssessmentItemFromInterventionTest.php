@@ -22,6 +22,7 @@ use Tests\TestCase;
 class AssessmentItemFromInterventionTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
 
     private function setUp2(): array
     {
@@ -55,39 +56,42 @@ class AssessmentItemFromInterventionTest extends TestCase
 
         $listResponse = $this->actingAs($adviser)->get('/adviser/interventions');
         $listResponse->assertOk();
-        $listResponse->assertSee('Add Assessment Item');
-        $listResponse->assertSee('component=examination', false);
-        $listResponse->assertSee('subject_id=' . $subject->id, false);
-        $listResponse->assertSee('period=1', false);
+        // The assigned teacher's link goes straight to the details-only Add
+        // Assessment page, Examination pre-selected (no retired page in between).
+        $link = route('teacher.assessments.create', ['section_id' => $intervention->contextSection()->id, 'subject_id' => $subject->id, 'period' => 1, 'component' => 'examination']);
+        $listResponse->assertSee('data-support-assessment-link', false);
+        $listResponse->assertSee('href="' . e($link) . '"', false);
+        $listResponse->assertSee('Add Assessment');
+        $listResponse->assertDontSee('/adviser/assessments', false);
 
-        // Following the link auto-opens the modal with Examination pre-selected.
-        $followResponse = $this->actingAs($adviser)->get('/adviser/assessments?period=1&subject_id=' . $subject->id . '&add_item=1&component=examination&from_intervention=1');
-        $followResponse->assertOk();
-        $followResponse->assertViewHas('autoOpenAddItem', true);
-        $followResponse->assertViewHas('prefillComponent', 'examination');
-        $followResponse->assertSee('value="examination" selected', false);
+        // An old bookmark of the previous link still lands in the same place.
+        $this->actingAs($adviser)->get('/adviser/assessments?period=1&subject_id=' . $subject->id . '&add_item=1&component=examination&from_intervention=1')
+            ->assertRedirect($link);
+
+        $form = $this->actingAs($adviser)->get($link);
+        $form->assertOk();
+        $form->assertViewHas('prefillComponent', 'examination');
+        $this->assertMatchesRegularExpression('/<option value="examination"\s+selected/', $form->getContent());
     }
 
-    public function test_the_roster_is_narrowed_to_only_students_with_an_intervention_for_that_subject_and_term(): void
+    public function test_the_add_assessment_page_reached_from_an_intervention_is_details_only(): void
     {
         ['adviser' => $adviser, 'section' => $section, 'subject' => $subject, 'student' => $namedStudent] = $this->setUp2();
-        $otherStudent = Student::factory()->create(['section_id' => $section->id]);
 
         Intervention::factory()->create([
             'student_id' => $namedStudent->id, 'subject_id' => $subject->id, 'grading_period' => 1,
             'status' => 'approved', 'delivered_at' => now(), 'delivered_by' => $adviser->id,
         ]);
 
-        $response = $this->actingAs($adviser)->get('/adviser/assessments?period=1&subject_id=' . $subject->id . '&add_item=1&from_intervention=1');
+        // The Add page defines the assessment only; the learner's score is
+        // entered afterwards in the Class Record, where every learner is listed.
+        $html = $this->actingAs($adviser)->get(route('teacher.assessments.create', ['section_id' => $section->id, 'subject_id' => $subject->id, 'period' => 1]))
+            ->assertOk()->getContent();
+        $this->assertStringNotContainsString('name="scores[', $html);
+        $this->assertStringNotContainsString($namedStudent->last_name . ', ' . $namedStudent->first_name, $html);
 
-        $response->assertOk();
-        $response->assertViewHas('modalStudents', function ($students) use ($namedStudent, $otherStudent) {
-            return $students->pluck('id')->contains($namedStudent->id)
-                && !$students->pluck('id')->contains($otherStudent->id);
-        });
-        $response->assertViewHas('sectionStudents', function ($students) use ($otherStudent) {
-            return $students->pluck('id')->contains($otherStudent->id);
-        });
+        $this->actingAs($adviser)->get(route('teacher.class-record', ['section_id' => $section->id, 'subject_id' => $subject->id, 'period' => 1]))
+            ->assertOk()->assertSee($namedStudent->last_name . ', ' . $namedStudent->first_name);
     }
 
     public function test_no_link_when_the_intervention_has_no_subject_or_term(): void

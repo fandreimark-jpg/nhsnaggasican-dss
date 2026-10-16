@@ -30,14 +30,19 @@ class TruncateCommand extends Command
      * behind, which is the exact gap hand-written SQL exploited.
      */
     private const LEVELS = [
-        'assessments' => ['assessment_scores', 'assessments'],
+        // assessment_learner_statuses goes with the items it belongs to —
+        // truncating with FK checks off would otherwise orphan it.
+        'assessments' => ['assessment_learner_statuses', 'assessment_scores', 'assessments'],
         'academic' => [
+            'assessment_learner_statuses',
             'assessment_scores',
             'assessments',
             'grades',
             'risk_results',
             'report_submissions',
             'interventions',
+            'academic_concerns',
+            'attendance_records',
             'academic_terms',
             'activity_logs',
         ],

@@ -1,8 +1,20 @@
 // Principal dashboard charts. Every dataset is a value the backend
-// already computed and injected (RISK_DATA, TERM_TRENDS, SECTION_RISK_DATA,
-// COMPONENT_PERFORMANCE) — nothing is derived or re-calculated here.
+// already computed and injected (TERM_TRENDS, COMPONENT_PERFORMANCE) — nothing is derived or re-calculated here.
 // Colours are the design system's semantic tokens (tailwind.config.js):
 // success #16A34A, warning #F59E0B, danger #DC2626, brand #1F6B2A.
+// Fragment on Refresh / Back / Forward: the browser restores the ROOT scroll
+// position there instead of scrolling to the #fragment, but this layout scrolls
+// inside <main>, so the page would reopen at the top. One scroll to the target,
+// only for those navigation types (ordinary links/form submits use the native
+// anchor jump). Chart canvases sit in fixed-height boxes, so nothing shifts after.
+document.addEventListener('DOMContentLoaded', function () {
+    const nav = performance.getEntriesByType('navigation')[0];
+    const target = location.hash.length > 1 ? document.getElementById(decodeURIComponent(location.hash.slice(1))) : null;
+    if (target && nav && (nav.type === 'reload' || nav.type === 'back_forward')) {
+        target.scrollIntoView({ block: 'start' });
+    }
+});
+
 document.addEventListener('DOMContentLoaded', function () {
     if (typeof Chart === 'undefined') return;
 
@@ -11,32 +23,6 @@ document.addEventListener('DOMContentLoaded', function () {
     Chart.defaults.color = COLOR.muted;
 
     // Chart 1 — Risk distribution (doughnut)
-    const donutEl = document.getElementById('riskDonutChart');
-    if (donutEl && typeof RISK_DATA !== 'undefined') {
-        new Chart(donutEl, {
-            type: 'doughnut',
-            data: {
-                labels: ['Low Risk', 'Moderate Risk', 'High Risk'],
-                datasets: [{
-                    data: [RISK_DATA.low, RISK_DATA.moderate, RISK_DATA.high],
-                    backgroundColor: [COLOR.success, COLOR.warning, COLOR.danger],
-                    borderWidth: 3,
-                    borderColor: '#ffffff',
-                    hoverOffset: 6,
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                cutout: '68%',
-                plugins: {
-                    legend: { position: 'bottom', labels: { font: { size: 12 }, padding: 14, usePointStyle: true, pointStyle: 'circle' } }
-                }
-            }
-        });
-    }
-
-    // Chart 2 — Performance trend (line)
     const lineEl = document.getElementById('termTrendChart');
     if (lineEl && typeof TERM_TRENDS !== 'undefined') {
         new Chart(lineEl, {
@@ -80,35 +66,8 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // Chart 3 — Risk by section (horizontal bar)
-    const barEl = document.getElementById('sectionRiskChart');
-    if (barEl && typeof SECTION_RISK_DATA !== 'undefined') {
-        new Chart(barEl, {
-            type: 'bar',
-            data: {
-                labels: SECTION_RISK_DATA.map(s => s.section),
-                datasets: [
-                    { label: 'Moderate', data: SECTION_RISK_DATA.map(s => s.moderate), backgroundColor: COLOR.warning, borderRadius: 4, maxBarThickness: 18 },
-                    { label: 'High',     data: SECTION_RISK_DATA.map(s => s.high),     backgroundColor: COLOR.danger,  borderRadius: 4, maxBarThickness: 18 }
-                ]
-            },
-            options: {
-                indexAxis: 'y',
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { position: 'bottom', labels: { font: { size: 12 }, padding: 14, usePointStyle: true, pointStyle: 'circle' } }
-                },
-                scales: {
-                    x: { beginAtZero: true, ticks: { stepSize: 1, font: { size: 11 }, precision: 0 }, grid: { color: COLOR.grid } },
-                    y: { ticks: { font: { size: 12 } }, grid: { display: false } }
-                }
-            }
-        });
-    }
-
-    // Chart 4 — Component performance (bar), one bar per assessment component
     const compEl = document.getElementById('componentPerformanceChart');
-    if (compEl && typeof COMPONENT_PERFORMANCE !== 'undefined' && COMPONENT_PERFORMANCE.length) {
+    if (compEl && typeof COMPONENT_PERFORMANCE !== 'undefined' && COMPONENT_PERFORMANCE.some(c => c.average !== null)) {
         new Chart(compEl, {
             type: 'bar',
             data: {
@@ -116,7 +75,9 @@ document.addEventListener('DOMContentLoaded', function () {
                 datasets: [{
                     label: 'Average %',
                     data: COMPONENT_PERFORMANCE.map(c => c.average),
-                    backgroundColor: COMPONENT_PERFORMANCE.map(c => c.average >= 75 ? COLOR.success : (c.average >= 70 ? COLOR.warning : COLOR.danger)),
+                    // null = no data: no bar (never drawn as 0). Two states only, against
+                    // the system's 75% in-term reference — not a pass/fail mark.
+                    backgroundColor: COMPONENT_PERFORMANCE.map(c => c.average === null ? COLOR.grid : (c.average >= 75 ? COLOR.success : COLOR.warning)),
                     borderRadius: 6,
                     maxBarThickness: 44,
                 }]
@@ -126,7 +87,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 maintainAspectRatio: false,
                 plugins: {
                     legend: { display: false },
-                    tooltip: { callbacks: { label: ctx => `${ctx.parsed.y.toFixed(1)}% (target 75%)` } }
+                    tooltip: { callbacks: { label: ctx => `${ctx.parsed.y.toFixed(1)}% average raw score (reference 75%)` } }
                 },
                 scales: {
                     y: { min: 0, max: 100, ticks: { stepSize: 25, font: { size: 11 }, callback: v => v + '%' }, grid: { color: COLOR.grid } },

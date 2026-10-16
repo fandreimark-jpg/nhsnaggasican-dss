@@ -22,6 +22,7 @@ use Tests\TestCase;
 class InTermStatusTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\SharesClassAssessments;
 
     private InTermStatusService $service;
 
@@ -33,11 +34,7 @@ class InTermStatusTest extends TestCase
 
     private function score(Section $section, Subject $subject, Student $student, string $component, float $earned, float $max = 100, int $term = 1): void
     {
-        $assessment = Assessment::factory()->create([
-            'subject_id' => $subject->id, 'section_id' => $section->id,
-            'grading_period' => $term, 'school_year' => $section->school_year,
-            'name' => $component . '-' . uniqid(), 'component' => $component, 'max_score' => $max,
-        ]);
+        $assessment = $this->sharedAssessment($section, $subject, $student, $component, $max, $term);
         AssessmentScore::factory()->create(['assessment_id' => $assessment->id, 'student_id' => $student->id, 'score' => $earned]);
     }
 
@@ -134,7 +131,7 @@ class InTermStatusTest extends TestCase
         $this->assertSame(0, RiskResult::count(), 'In-Term Status must never write to risk_results.');
     }
 
-    public function test_status_with_zero_evidence_is_on_track_with_zero_items(): void
+    public function test_status_with_zero_evidence_is_no_evidence_yet_never_on_track(): void
     {
         $section = Section::factory()->create();
         $student = Student::factory()->create(['section_id' => $section->id]);
@@ -142,7 +139,9 @@ class InTermStatusTest extends TestCase
 
         $result = $this->service->statusFor($student, $subject, $section, 1, $section->school_year);
 
-        $this->assertSame('On Track', $result['status']);
+        // Absence of evidence is not good performance (design decision 1).
+        $this->assertSame(InTermStatusService::NO_EVIDENCE, $result['status']);
+        $this->assertNotSame('On Track', $result['status']);
         $this->assertSame(0, $result['item_count']);
     }
 
@@ -218,49 +217,5 @@ class InTermStatusTest extends TestCase
         $this->assertNotFalse($posTwoWeak);
         $this->assertNotFalse($posBorderline);
         $this->assertLessThan($posBorderline, $posTwoWeak, 'At Risk (TwoWeak) must sort before Needs Attention (Borderline) by default, even though Borderline has the higher computed grade.');
-    }
-
-    /**
-     * Task 3's explicit final check: submitting a term report (running
-     * the real classifier through the real /adviser/submit-report route,
-     * completely untouched by this task) must still produce a Risk Level,
-     * and it must appear ALONGSIDE — not replacing — In-Term Status.
-     */
-    public function test_submitting_a_term_report_shows_risk_level_alongside_in_term_status(): void
-    {
-        $adviser = User::factory()->create();
-        $section = Section::factory()->create(['adviser_id' => $adviser->id, 'grade_level' => 11, 'school_year' => '2026-2027']);
-        $subject = Subject::factory()->create(['grade_level' => 11, 'type' => 'core']);
-        $student = Student::factory()->create(['section_id' => $section->id]);
-
-        \App\Models\AcademicTerm::ensureExistFor('2026-2027');
-
-        $this->score($section, $subject, $student, 'written_work', 60);
-        $this->score($section, $subject, $student, 'performance_task', 60);
-        $this->score($section, $subject, $student, 'examination', 90);
-
-        \App\Models\Grade::create([
-            'student_id' => $student->id, 'subject_id' => $subject->id, 'section_id' => $section->id,
-            'encoded_by' => $adviser->id, 'grading_period' => 1, 'grade' => 70, 'school_year' => '2026-2027',
-        ]);
-
-        $this->assertSame(0, RiskResult::count());
-
-        $submit = $this->actingAs($adviser)->post('/adviser/submit-report', ['grading_period' => 1]);
-        $submit->assertSessionDoesntHaveErrors();
-
-        $this->assertGreaterThan(0, RiskResult::count(), 'The classifier must still write risk_results exactly as before.');
-
-        $principal = User::factory()->principal()->create();
-        $response = $this->actingAs($principal)->get('/principal/students?subject_id=' . $subject->id . '&period=1');
-
-        $response->assertOk();
-        // In-Term Status: computed from assessment evidence, present with zero dependency on the classifier.
-        $response->assertSee('In-Term Status');
-        $response->assertSee('scored so far', false);
-        // Risk Level: the untouched classifier output, now shown side by side.
-        $response->assertSee('Risk Level');
-        $riskResult = RiskResult::where('student_id', $student->id)->first();
-        $response->assertSee(ucfirst($riskResult->risk_level), false);
     }
 }

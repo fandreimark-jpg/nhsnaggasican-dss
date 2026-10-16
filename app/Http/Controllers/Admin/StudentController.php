@@ -155,7 +155,9 @@ class StudentController extends Controller
         ]);
 
         $import = new StudentsImport((int) $request->section_id);
-        Excel::import($import, $request->file('file'));
+        if ($unreadable = $this->importSpreadsheetOrRefuse($import, $request->file('file'))) {
+            return redirect()->route('admin.students')->with('error', $unreadable);
+        }
 
         // Batch inserts bypass Student::saved, so the enrollment rows for
         // this section's school year are written here instead (PART 5).
@@ -359,7 +361,8 @@ class StudentController extends Controller
         $csv = "lrn,last_name,first_name,middle_name,gender\n";
         foreach ($rows as $row) {
             $csv .= implode(',', array_map(function ($value) {
-                $value = (string) $value;
+                // Uploaded/typed text: never a live formula when opened in Excel.
+                $value = \App\Services\ClassRecordService::safeText((string) $value);
                 return str_contains($value, ',') || str_contains($value, '"')
                     ? '"' . str_replace('"', '""', $value) . '"'
                     : $value;

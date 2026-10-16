@@ -11,6 +11,7 @@ use App\Models\Grade;
 use App\Models\Section;
 use App\Models\ReportSubmission;
 use App\Services\InTermStatusService;
+use App\Services\MonitoringClassificationService;
 use App\Services\SectionElectiveStatus;
 use App\Services\TransmutationService;
 use Illuminate\Support\Collection;
@@ -79,7 +80,7 @@ class DashboardController extends Controller
         $totalGradesEncoded = $term1Count + $term2Count + $term3Count;
 
         // Load submissions keyed by grading_period for easy lookup in the view
-        $submissions = $section ? ReportSubmission::where('section_id', $section->id)
+        $submissions = $section ? ReportSubmission::submitted()->where('section_id', $section->id)
             ->where('school_year', $section->school_year)
             ->get()
             ->keyBy('grading_period') : collect();
@@ -99,26 +100,9 @@ class DashboardController extends Controller
             }
         }
 
-        // Load students with their latest risk results for the overview table
         $students = $section
-            ? Student::enrolledIn($section)
-                ->with(['riskResults' => function ($q) use ($section) {
-                    $q->where('school_year', $section->school_year)
-                      ->orderBy('grading_period', 'desc'); // latest term first
-                }])
-                ->orderBy('last_name')
-                ->get()
+            ? Student::enrolledIn($section)->orderBy('last_name')->get()
             : collect();
-
-        // Trend per student — compares the two most recent terms so the
-        // adviser can see whether a student is improving or declining,
-        // not just their current snapshot.
-        $trends = $students->mapWithKeys(function ($student) {
-            $history = $student->riskResults->sortBy('grading_period')->values();
-            return [$student->id => $this->computeTrend($history)];
-        });
-
-        $staleRiskTerms = $section ? AcademicTerm::staleRiskTerms($section->school_year) : [];
 
         // TASK 2 of "close the intervention loop": the risk-level overview
         // used to show "No data — Submit report to generate" on every row
@@ -142,6 +126,19 @@ class DashboardController extends Controller
         // Track -> no evidence yet), so the top 10 are exactly the 10
         // highest-priority learners; "View all ->" still links to the
         // full, unfiltered My Students page.
+        // Overall Monitoring (open Academic Concerns this term) — separate
+        // from academic performance. A learner who is For Review (e.g. one
+        // failing subject while every other subject is high) is listed
+        // first so high grades never push them out of the top 10; the
+        // stable sort keeps the academic priority order within each group.
+        $monitoringByStudentId = $section
+            ? app(MonitoringClassificationService::class)->forStudents($students->pluck('id'), $section->school_year, $openTerm)
+            : collect();
+        $allInTermRows = $allInTermRows
+            ->sortBy(fn($row) => $monitoringByStudentId->get($row['student']->id)?->isForReview() ? 0 : 1)
+            ->values();
+        $learnersForReview = $monitoringByStudentId->filter(fn($m) => $m->isForReview())->count();
+
         $inTermRows = $allInTermRows->take(10);
         $inTermStatusCounts = [
             'At Risk'         => $allInTermRows->filter(fn($row) => ($row['in_term_status']['status'] ?? null) === 'At Risk')->count(),
@@ -230,12 +227,12 @@ class DashboardController extends Controller
 
         return view('adviser.dashboard', compact(
             'section', 'totalStudents', 'totalGradesEncoded',
-            'pendingCount', 'submissions', 'students', 'trends',
+            'pendingCount', 'submissions', 'students',
             'expectedPerTerm', 'totalExpectedAcrossTerms', 'isConfigured',
             'term1Count', 'term2Count', 'term3Count',
-            'staleRiskTerms', 'openTerm', 'inTermRows', 'allInTermRows', 'inTermStatusCounts', 'unacknowledgedInterventions',
+            'openTerm', 'inTermRows', 'allInTermRows', 'inTermStatusCounts', 'unacknowledgedInterventions',
             'acknowledgedNotDelivered', 'subjectsWithIncompleteEvidence', 'gradesComputedNotVerified',
-            'transmutationBanner'
+            'transmutationBanner', 'monitoringByStudentId', 'learnersForReview'
         ));
     }
 
@@ -281,16 +278,11 @@ class DashboardController extends Controller
      * source, RiskResult, not part of the In-Term Status computation
      * itself) and this page's own sort order on top.
      *
-     * @return Collection<int, array{student: Student, in_term_status: array, focus_subject: ?Subject, risk_level: ?string, by_subject: array}>
+     * @return Collection<int, array{student: Student, in_term_status: array, focus_subject: ?Subject, by_subject: array}>
      */
     private function buildInTermRows(Section $section, Collection $students, Collection $subjects, int $openTerm): Collection
     {
-        $rows = $this->inTermStatus->overallStatusForSection($section, $students, $subjects, $openTerm)
-            ->map(function (array $row) use ($openTerm) {
-                $riskResult = $row['student']->riskResults->firstWhere('grading_period', $openTerm);
-                $row['risk_level'] = $riskResult?->risk_level;
-                return $row;
-            });
+        $rows = $this->inTermStatus->overallStatusForSection($section, $students, $subjects, $openTerm);
 
         // At Risk first; rows with no evidence at all sort last regardless
         // of direction — same "missing is unknown, not worse" rule as
@@ -300,29 +292,6 @@ class DashboardController extends Controller
         $sorted = $withStatus->sortBy(fn($row) => InTermStatusService::SEVERITY[$row['in_term_status']['status']]);
 
         return $sorted->concat($withoutStatus->sortBy(fn($row) => $row['student']->last_name))->values();
-    }
-
-    /**
-     * Same trend logic as the Admin dashboard — 'improving', 'declining',
-     * 'stable', or null when there's fewer than 2 terms to compare.
-     */
-    private function computeTrend($history): ?string
-    {
-        if ($history->count() < 2) {
-            return null;
-        }
-
-        $previous = $history[$history->count() - 2]->average_grade;
-        $current  = $history[$history->count() - 1]->average_grade;
-        $diff     = $current - $previous;
-
-        if ($diff > 1) {
-            return 'improving';
-        }
-        if ($diff < -1) {
-            return 'declining';
-        }
-        return 'stable';
     }
 
 }

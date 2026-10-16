@@ -26,6 +26,7 @@ use Tests\TestCase;
 class VerifyAllRemainingTest extends TestCase
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
 
     protected function setUp(): void
     {

@@ -22,6 +22,7 @@ use Tests\TestCase;
 class MimesFixSixMoreRoutesTest extends TestCase // two live routes remain (students, grades); the other four were removed, see below
 {
     use RefreshDatabase;
+    use \Tests\Concerns\AdvisersTeachTheirOwnSections;
 
     /**
      * The full real ECR fixture (434KB, 7 richly-formatted sheets) is the

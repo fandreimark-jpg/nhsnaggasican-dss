@@ -4,6 +4,7 @@
 @section('subtitle', $section ? 'Section ' . $section->name . ' — decisions recorded by the Principal' : 'No section assigned')
 
 @section('content')
+@php $teachingAccess = new \App\Services\TeachingAccess(); @endphp
 
 @include('partials.section-school-year-context')
 
@@ -28,26 +29,21 @@
     // Formal DepEd remediation (DO 8, s. 2015 / DO 015, s. 2026) is a
     // distinct POST-term programme this system does not implement — see
     // CLAUDE.md's "Known limitations".
-    $typeLabels = [
-        'remediation' => 'Additional Practice and Re-teaching',
-        'additional_learning_activity' => 'Additional Learning Activity',
-        'additional_performance_task' => 'Additional Performance Task',
-        'teacher_monitoring' => 'Teacher Monitoring',
-        'attendance_monitoring' => 'Attendance Monitoring',
-        'parent_conference' => 'Parent/Guardian Conference',
-        'other' => 'Other',
-    ];
+    $typeLabels = \App\Models\Intervention::TYPE_LABELS;
     $statusLabels = [
         'recommended' => 'Recommended', 'in_review' => 'In Review', 'approved' => 'Approved',
         'in_progress' => 'In Progress', 'completed' => 'Completed', 'monitoring' => 'Monitoring',
+        'expired' => 'Expired — Not completed', 'cancelled' => 'Cancelled',
     ];
     $statusColors = [
         'recommended' => 'bg-gray-100 text-gray-600', 'in_review' => 'bg-yellow-100 text-yellow-700',
         'approved' => 'bg-blue-100 text-blue-700', 'in_progress' => 'bg-purple-100 text-purple-700',
         'completed' => 'bg-green-100 text-green-700', 'monitoring' => 'bg-orange-100 text-orange-700',
+        'expired' => 'bg-red-100 text-red-700', 'cancelled' => 'bg-gray-100 text-gray-600',
     ];
     $componentLabels = ['written_work' => 'Written Work', 'performance_task' => 'Performance Task', 'examination' => 'Examination'];
-    $ivFilterKeys = ['subject_id', 'grading_period'];
+    $ivFilterKeys = ['subject_id', 'grading_period', 'schedule'];
+    $schedOn = \App\Models\Intervention::schedulingAvailable();
     $ivFiltersActive = collect($ivFilterKeys)->contains(fn($k) => request($k));
     $unacknowledgedCount = $interventions->whereNull('acknowledged_at')->count();
 
@@ -175,8 +171,10 @@
     <div class="px-5 py-4 border-b border-line">
         <h3 class="card-title">Interventions for {{ $section->name }}</h3>
         <p class="text-xs text-gray-500 mt-1">
-            These are decisions the Principal already made for your students. You can read them and mark that you've
-            seen one — only the Principal moves an intervention's status forward.
+            These are decisions the Principal already made for your students. The Principal makes the decision (status); as
+            section adviser you are responsible: open an intervention to set, extend or reopen its schedule (no approval needed)
+            and record completion. Legacy interventions without a schedule are delivered here. Nothing here changes any score,
+            grade or academic concern.
         </p>
 
         {{-- TASK 3 of "terminology, transmutation, and interface cleanup"
@@ -203,6 +201,18 @@
                         @endforeach
                     </select>
                 </div>
+                @if($schedOn)
+                <div>
+                    <label class="form-label" for="ivSchedule">Schedule status</label>
+                    <select id="ivSchedule" name="schedule" class="form-select-sm min-w-[150px]">
+                        <option value="">Any</option>
+                        <option value="mine" @selected(request('schedule') === 'mine')>I am responsible</option>
+                        @foreach(['unscheduled', 'scheduled', 'ongoing', 'completed', 'expired', 'cancelled'] as $k)
+                            <option value="{{ $k }}" @selected(request('schedule') === $k)>{{ \App\Models\Intervention::LIFECYCLE_LABELS[$k] }}</option>
+                        @endforeach
+                    </select>
+                </div>
+                @endif
                 @if($ivFiltersActive)
                     <a href="{{ route('adviser.interventions') }}" class="text-sm text-muted hover:underline pb-1.5">Clear</a>
                 @endif
@@ -259,9 +269,9 @@
                 <th scope="col">Student</th>
                 <th scope="col">Subject</th>
                 <th scope="col">Type &amp; Reason</th>
-                <th scope="col">Status</th>
+                <th scope="col">Decision / Schedule</th>
                 <th scope="col">Decided By</th>
-                <th scope="col">Delivery</th>
+                <th scope="col">Acknowledgement / Delivery</th>
                 <th scope="col">Within-Term Progress</th>
             </tr>
         </thead>
@@ -281,10 +291,20 @@
                         <p class="text-xs text-muted mt-1 italic">"{{ $iv->principal_notes }}"</p>
                     @endif
                 </td>
-                <td>
+                <td class="text-xs">
+                    <span class="block text-[10px] uppercase tracking-wide text-muted">Decision</span>
                     <span class="badge {{ $statusColors[$iv->status] ?? 'bg-gray-100 text-gray-600' }}">
                         {{ $statusLabels[$iv->status] ?? $iv->status }}
                     </span>
+                    @if($schedOn)
+                        <span class="block text-[10px] uppercase tracking-wide text-muted mt-2">Schedule</span>
+                        @include('partials.intervention-lifecycle-badge', ['iv' => $iv, 'now' => $now])
+                        @if($iv->deadline_at)
+                            <span class="block text-gray-500 mt-0.5 whitespace-nowrap">{{ \App\Services\InterventionScheduleService::fmt($iv->starts_at) }} –<br>{{ \App\Services\InterventionScheduleService::fmt($iv->deadline_at) }}</span>
+                            <span class="block text-gray-500">{{ $iv->responsibleUser?->name ?? 'No responsible staff' }}@if((int) $iv->responsible_user_id === (int) auth()->id()) (you)@endif</span>
+                        @endif
+                        <a class="inline-block mt-1 text-brand-700 hover:underline font-medium" href="{{ route('adviser.interventions.show', $iv) }}" data-open-intervention>Open<span class="sr-only"> intervention for {{ $iv->student->last_name }}</span></a>
+                    @endif
                 </td>
                 <td class="text-xs text-gray-500 whitespace-nowrap">
                     @if($iv->decidedBy)
@@ -321,16 +341,14 @@
                              to fix.
                              Subject/term are nullable on older interventions
                              (see the migration notes) — no link without both. --}}
-                        @if($iv->subject_id && $iv->grading_period)
-                        <a href="{{ route('adviser.assessments', array_filter([
-                                'period'            => $iv->grading_period,
-                                'subject_id'        => $iv->subject_id,
-                                'add_item'          => 1,
-                                'component'         => $iv->focusComponent(),
-                                'from_intervention' => 1,
-                            ])) }}"
+                        {{-- "Class Record consolidation": Add Assessment (details
+                             only) for the subject's assigned teacher, else the
+                             read-only Class Record — TeachingAccess decides. --}}
+                        @php $supportLink = $teachingAccess->supportAssessmentLink(auth()->user(), $iv); @endphp
+                        @if($supportLink)
+                        <a href="{{ $supportLink['url'] }}" data-support-assessment-link
                            class="inline-flex items-center gap-1 text-brand-700 border border-brand-200 rounded px-2 py-1 hover:bg-brand-50 mt-1">
-                            <i class="bi bi-plus-circle"></i> Add Assessment Item
+                            <i class="bi bi-plus-circle"></i> {{ $supportLink['label'] }}
                         </a>
                         @endif
                     @elseif($iv->acknowledged_at)
@@ -338,6 +356,13 @@
                             <i class="bi bi-eye-fill"></i> Acknowledged
                         </span>
                         <span class="block text-gray-400 mt-0.5 mb-1">{{ $iv->acknowledged_at->format('M d, Y h:i A') }}</span>
+                        {{-- A SCHEDULED intervention (2026-10-06) is completed by its
+                             responsible staff on its own page, within the
+                             schedule — never by adviser delivery here. --}}
+                        @if($iv->isScheduled() || in_array($iv->status, ['expired', 'cancelled'], true))
+                            <span class="block text-gray-500 whitespace-normal max-w-[180px]">Scheduled: completion is recorded by the responsible staff on the intervention's page.</span>
+                            <a class="text-brand-700 hover:underline" href="{{ route('adviser.interventions.show', $iv) }}">Open<span class="sr-only"> intervention for {{ $iv->student->last_name }}</span></a>
+                        @else
 
                         {{-- TASK 3a of "clarity, progress, and visual
                              design pass" — opts this row into the group-
@@ -367,17 +392,18 @@
                             <summary class="cursor-pointer select-none list-none inline-flex items-center gap-1 text-brand-700 border border-brand-200 rounded px-2 py-1 hover:bg-brand-50">
                                 <i class="bi bi-check2-square"></i> Mark as Delivered
                             </summary>
+                            <span class="block text-[11px] text-gray-400 mt-0.5" data-deliver-hint>Opens a note field. Nothing is saved until you click Confirm Delivered.</span>
                             <form method="POST" action="{{ route('adviser.interventions.deliver', $iv->id) }}"
                                   data-deliver-form data-no-loading class="mt-2 w-64 whitespace-normal"
-                                  data-add-item-url="{{ ($iv->subject_id && $iv->grading_period) ? route('adviser.assessments', array_filter([
-                                        'period'            => $iv->grading_period,
-                                        'subject_id'        => $iv->subject_id,
-                                        'add_item'          => 1,
-                                        'component'         => $iv->focusComponent(),
-                                        'from_intervention' => 1,
-                                    ])) : '' }}">
+>
                                 @csrf
-                                <textarea name="delivery_notes" data-deliver-textarea rows="2" required
+                                <ol class="list-decimal list-inside text-[11px] text-gray-600 space-y-0.5 mb-1.5" data-deliver-steps>
+                                    <li>Describe what was actually provided (or pick a suggestion below).</li>
+                                    <li>Check the note — a suggestion is only a starting point.</li>
+                                    <li>Click <strong>Confirm Delivered</strong> to save it.</li>
+                                </ol>
+                                <p class="text-[11px] text-gray-500 mb-1.5" data-deliver-explainer>Record what was actually provided to the learner. This does not resolve the academic concern. The concern remains open until its underlying assessment evidence changes.</p>
+                                <textarea name="delivery_notes" data-deliver-textarea rows="2" required maxlength="2000"
                                           class="w-full border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-brand-400"
                                           placeholder="What was done? (required)"></textarea>
                                 <div class="flex flex-wrap gap-1 mt-1">
@@ -386,14 +412,16 @@
                                                 class="text-[10px] leading-tight px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200">{{ $chip }}</button>
                                     @endforeach
                                 </div>
+                                <p class="hidden text-[11px] text-red-600 mt-1" role="alert" data-deliver-error></p>
                                 <div class="flex justify-end gap-2 mt-2">
                                     <button type="button" data-deliver-cancel class="text-xs text-gray-500 hover:text-gray-700">Cancel</button>
-                                    <button type="submit" data-deliver-submit class="btn btn-primary btn-xs">
+                                    <button type="submit" data-deliver-submit data-loading-label="Saving delivery…" class="btn btn-primary btn-xs">
                                         Confirm Delivered
                                     </button>
                                 </div>
                             </form>
                         </details>
+                        @endif
                     @else
                         <span class="block text-gray-300 mb-1">Not yet acknowledged</span>
                         <form method="POST" action="{{ route('adviser.interventions.acknowledge', $iv->id) }}">
@@ -511,6 +539,33 @@
     </div>
 </div>
 
+@endif
+
+@if(isset($otherScope) && $otherScope->isNotEmpty())
+@php $statusLabels = $statusLabels ?? []; $statusColors = $statusColors ?? []; @endphp
+{{-- Same page, other scope: an intervention this adviser is responsible
+     for outside the advisory section shown above. --}}
+<section class="card mt-6" aria-labelledby="ivOtherTitle" data-other-scope>
+    <div class="card-header"><h2 id="ivOtherTitle" class="card-title">Other interventions you are responsible for</h2>
+        <p class="card-subtitle">Outside your current advisory section (e.g. from a former advisory). You can view them; only the section's current adviser manages them.</p></div>
+    <div class="tbl-scroll">
+        <table class="tbl">
+            <thead><tr><th>Learner</th><th>Subject / Term</th><th>Decision / Schedule</th><th class="text-right"><span class="sr-only">Open</span></th></tr></thead>
+            <tbody>
+            @foreach($otherScope as $iv)
+                <tr data-other-row="{{ $iv->id }}">
+                    <td class="font-medium text-ink">{{ $iv->student?->last_name }}, {{ $iv->student?->first_name }}<span class="block text-xs text-muted">{{ $iv->section?->name }}</span></td>
+                    <td>{{ $iv->subject?->name ?? '—' }}<span class="block text-xs text-muted">Term {{ $iv->grading_period ?? '—' }}</span></td>
+                    <td class="text-xs"><span class="badge {{ $statusColors[$iv->status] ?? 'bg-gray-100 text-gray-600' }}">{{ $statusLabels[$iv->status] ?? $iv->status }}</span>
+                        @include('partials.intervention-lifecycle-badge', ['iv' => $iv, 'now' => $now])
+                        @if($iv->deadline_at)<span class="block text-gray-500 mt-0.5">Due {{ \App\Services\InterventionScheduleService::fmt($iv->deadline_at) }} · {{ $iv->responsibleUser?->name ?? 'No responsible staff' }}</span>@endif</td>
+                    <td class="text-right"><a class="btn btn-outline btn-xs" href="{{ route('adviser.interventions.show', $iv) }}">Open<span class="sr-only"> intervention for {{ $iv->student?->last_name }}</span></a></td>
+                </tr>
+            @endforeach
+            </tbody>
+        </table>
+    </div>
+</section>
 @endif
 
 @endsection

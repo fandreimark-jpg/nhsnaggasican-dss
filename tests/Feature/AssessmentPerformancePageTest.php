@@ -31,11 +31,13 @@ class AssessmentPerformancePageTest extends TestCase
         $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
         Student::factory()->create(['section_id' => $section->id]);
 
-        $response = $this->actingAs($adviser)->get('/adviser/assessments?period=1&subject_id=' . $subject->id);
+        $response = $this->actingAs($adviser)->get('/adviser/verify-grades?period=1&subject_id=' . $subject->id);
 
         $response->assertOk();
         $response->assertViewHas('performance', fn($performance) => $performance->isEmpty());
-        $response->assertDontSee('Student Performance —');
+        // Verify Grades always titles its workspace; with no items there is no table and no Verify action.
+        $response->assertDontSee('data-performance-row', false)->assertDontSee('data-grade-verify-form', false)
+            ->assertSee('No assessment evidence yet');
     }
 
     public function test_performance_section_shows_weakest_component_once_items_and_scores_exist(): void
@@ -58,7 +60,7 @@ class AssessmentPerformancePageTest extends TestCase
             AssessmentScore::factory()->create(['assessment_id' => $assessment->id, 'student_id' => $student->id, 'score' => $earned]);
         }
 
-        $response = $this->actingAs($adviser)->get('/adviser/assessments?period=1&subject_id=' . $subject->id);
+        $response = $this->actingAs($adviser)->get('/adviser/verify-grades?period=1&subject_id=' . $subject->id);
 
         $response->assertOk();
         $response->assertSee('Student Performance —');
@@ -90,13 +92,16 @@ class AssessmentPerformancePageTest extends TestCase
         AssessmentScore::factory()->create(['assessment_id' => $te->id, 'student_id' => $student->id, 'score' => 50]);
         AssessmentScore::factory()->create(['assessment_id' => $extra->id, 'student_id' => $student->id, 'score' => 100]);
 
-        $response = $this->actingAs($adviser)->get('/adviser/assessments?period=1&subject_id=' . $subject->id);
+        // The warning is shown where the assessments are: the Class Record.
+        $this->actingAs($adviser)->get(route('teacher.class-record', ['section_id' => $section->id, 'subject_id' => $subject->id, 'period' => 1]))
+            ->assertOk()
+            ->assertSee('data-unroled-exam-warning', false)
+            ->assertSee('One Examination item has no Examination Type and is not counted')
+            ->assertSee('Additional Practice EX 1');
 
+        // And the verification figure agrees with the warning: 50% from the Term Exam only, the 100 ignored.
+        $response = $this->actingAs($adviser)->get('/adviser/verify-grades?period=1&subject_id=' . $subject->id);
         $response->assertOk();
-        $response->assertSee('data-unroled-exam-warning', false);
-        $response->assertSee('One Examination item has no role and is not counted in the Examination component');
-        $response->assertSee('Additional Practice EX 1');
-        // And the figure agrees with the warning: 50% from the Term Exam only, the 100 ignored.
         $response->assertViewHas('performance', fn($performance) => abs($performance->first()['components']['examination']['percentage'] - 50.0) < 0.01);
     }
 
@@ -107,7 +112,7 @@ class AssessmentPerformancePageTest extends TestCase
         $subject = Subject::factory()->create(['grade_level' => $section->grade_level, 'type' => 'core']);
         Assessment::factory()->create(['subject_id' => $subject->id, 'section_id' => $section->id, 'grading_period' => 1, 'school_year' => '2026-2027', 'max_score' => 100, 'name' => 'Exam', 'component' => 'examination', 'exam_role' => null]);
 
-        $this->actingAs($adviser)->get('/adviser/assessments?period=1&subject_id=' . $subject->id)
+        $this->actingAs($adviser)->get(route('teacher.class-record', ['section_id' => $section->id, 'subject_id' => $subject->id, 'period' => 1]))
             ->assertOk()
             ->assertDontSee('data-unroled-exam-warning', false);
     }

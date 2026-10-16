@@ -16,7 +16,6 @@ use App\Services\GradingEngine;
 use App\Services\InTermStatusService;
 use App\Services\PerformanceAnalysisService;
 use App\Services\ProgressMonitoringService;
-use App\Services\RiskFeatureExtractor;
 use App\Services\TransmutationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -130,10 +129,12 @@ class PerformanceBatchEquivalenceTest extends TestCase
         $ids = Assessment::where('subject_id', $subject->id)->where('section_id', $this->section->id)
             ->where('grading_period', $term)->where('school_year', '2026-2027')->where('component', $component)->pluck('id');
         if ($ids->isEmpty()) return null;
-        $scores = AssessmentScore::where('student_id', $student->id)->whereIn('assessment_id', $ids)->with('assessment')->get();
+        $scores = AssessmentScore::where('student_id', $student->id)->whereIn('assessment_id', $ids)->get();
+        // Workbook Term 1!N17 = IF(COUNT(..)=0,"",SUM(..)): no numeric score, no PS.
         if ($scores->isEmpty()) return null;
         $earned = $scores->sum(fn($s) => (float) $s->score);
-        $max = $scores->sum(fn($s) => (float) $s->assessment->max_score);
+        // Workbook N14 = SUM(HPS row): EVERY item's HPS, scored or not (D1, 2026-10-04).
+        $max = (float) Assessment::whereIn('id', $ids)->sum('max_score');
         return $max <= 0 ? null : round(($earned / $max) * 100, 2);
     }
 
@@ -148,42 +149,6 @@ class PerformanceBatchEquivalenceTest extends TestCase
     {
         $range = TransmutationRange::where('scheme', $scheme)->where('min_initial', '<=', $g)->where('max_initial', '>=', $g)->first();
         return $range ? (float) $range->transmuted : null;
-    }
-
-    private function oracleFeatures(Student $student, int $term, float $average): array
-    {
-        $expected = Assessment::where('section_id', $this->section->id)->where('grading_period', $term)->where('school_year', '2026-2027')->count();
-        $missing = null;
-        if ($expected > 0) {
-            $recorded = AssessmentScore::query()->join('assessments', 'assessments.id', '=', 'assessment_scores.assessment_id')
-                ->where('assessments.section_id', $this->section->id)->where('assessments.grading_period', $term)->where('assessments.school_year', '2026-2027')
-                ->where('assessment_scores.student_id', $student->id)->count();
-            $missing = max(0, $expected - $recorded);
-        }
-
-        $prev = $term <= 1 ? null : RiskResult::where('student_id', $student->id)->where('school_year', '2026-2027')->where('grading_period', $term - 1)->value('average_grade');
-        $prev = $prev !== null ? (float) $prev : null;
-
-        $sameDelta = null; $composition = null;
-        if ($term > 1) {
-            $previous = Grade::where('student_id', $student->id)->where('school_year', '2026-2027')->where('grading_period', $term - 1)->pluck('grade', 'subject_id');
-            if ($previous->isNotEmpty()) {
-                $current = Grade::where('student_id', $student->id)->where('school_year', '2026-2027')->where('grading_period', $term)->pluck('grade', 'subject_id');
-                $shared = $current->keys()->intersect($previous->keys());
-                $composition = $current->keys()->diff($previous->keys())->isNotEmpty() || $previous->keys()->diff($current->keys())->isNotEmpty();
-                if ($shared->isNotEmpty()) {
-                    $sameDelta = round($shared->map(fn($id) => (float) $current[$id] - (float) $previous[$id])->avg(), 2);
-                }
-            }
-        }
-
-        return [
-            'prev_period_average' => $prev,
-            'trend_delta' => $prev === null ? null : round($average - $prev, 2),
-            'missing_assessment_count' => $missing,
-            'same_subject_trend_delta' => $sameDelta,
-            'subject_composition_changed' => $composition,
-        ];
     }
 
     // ------------------------------------------------------------------
@@ -262,30 +227,6 @@ class PerformanceBatchEquivalenceTest extends TestCase
                 $this->assertSame($this->oracleItemCount($student, $subject, 2), $withCarried['item_count']);
             }
         }
-    }
-
-    public function test_risk_features_match_per_learner_queries(): void
-    {
-        $extractor = new RiskFeatureExtractor();
-
-        foreach ([1, 2] as $term) {
-            foreach ($this->students as $k => $student) {
-                $average = 70.0 + $k * 3;
-                $features = $extractor->extract($student, $this->section, $term, '2026-2027', $average);
-                foreach ($this->oracleFeatures($student, $term, $average) as $key => $expected) {
-                    $this->assertSame($expected, $features[$key], "{$key} for learner index {$k}, term {$term}");
-                }
-            }
-        }
-
-        // The learner with no scores at all is "missing everything", the
-        // one with a recorded zero is not missing that item.
-        $everything = Assessment::where('section_id', $this->section->id)->where('grading_period', 1)->count();
-        $this->assertSame($everything, $extractor->extract($this->students[4], $this->section, 1, '2026-2027', 0.0)['missing_assessment_count']);
-        $this->assertSame(0, $extractor->extract($this->students[5], $this->section, 1, '2026-2027', 0.0)['missing_assessment_count']);
-        // Learner 1's Term 2 mix dropped Research 1 — composition changed; learner 0's did not.
-        $this->assertTrue($extractor->extract($this->students[1], $this->section, 2, '2026-2027', 80.0)['subject_composition_changed']);
-        $this->assertFalse($extractor->extract($this->students[0], $this->section, 2, '2026-2027', 80.0)['subject_composition_changed']);
     }
 
     public function test_within_term_progress_as_of_cutoff_matches_the_created_at_query(): void
